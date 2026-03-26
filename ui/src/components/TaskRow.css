@@ -1,0 +1,118 @@
+.task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: default;
+  transition: border-color .12s;
+}
+.task-row:hover { border-color: var(--border); background: var(--surface); }
+.task-row.done { opacity: .5; }
+.task-row.dragging { opacity: .4; }
+.task-row.drop-before { border-top: 2px solid var(--accent); }
+.task-row.drop-after  { border-bottom: 2px solid var(--accent); }
+.task-row.selected { background: var(--surface); border-color: var(--accent) !important; }
+
+.drag-handle {
+  color: var(--border);
+  cursor: grab;
+  font-size: 13px;
+  padding-top: 1px;
+  flex-shrink: 0;
+  user-select: none;
+}
+.drag-handle:active { cursor: grabbing; }
+
+.checkbox {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--accent);
+  margin-top: 1px;
+  flex-shrink: 0;
+  padding: 0;
+}
+.checkbox:hover { border-color: var(--accent); }
+.checkbox.checked { background: color-mix(in srgb, var(--accent) 20%, transparent); border-color: var(--accent); }
+.checkbox.blocked { border-color: #f97316; }
+.checkbox.blocked:hover { border-color: #f97316; }
+
+.task-body {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.task-title { font-size: 14px; color: var(--text); word-break: break-word; }
+.task-title.strikethrough { text-decoration: line-through; color: var(--muted); }
+
+.task-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; align-items: center; }
+.badge { font-size: 11px; padding: 1px 6px; border-radius: 10px; font-weight: 500; }
+.project { font-size: 11px; color: var(--muted); }
+.priority { font-size: 11px; font-weight: 700; }
+.energy { font-size: 11px; color: var(--muted); }
+.due-date { font-size: 11px; color: var(--muted); }
+.due-date--overdue  { color: #ef4444; font-weight: 600; }
+.due-date--imminent { color: #f97316; font-weight: 600; }
+.due-date--soon     { color: #f59e0b; }
+.due-date--normal   { color: var(--muted); }
+.has-notes { font-size: 8px; color: var(--accent); vertical-align: middle; }
+.recurrence-indicator { font-size: 11px; color: var(--muted); }
+.agent-running { font-size: 13px; color: #f59e0b; vertical-align: middle; display: inline-block; animation: agent-spin 1.2s linear infinite; }
+.agent-queued  { font-size: 11px; color: var(--muted); vertical-align: middle; }
+.agent-done    { font-size: 11px; color: #22c55e; vertical-align: middle; }
+.agent-failed  { font-size: 10px; color: #ef4444; vertical-align: middle; }
+@keyframes agent-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.subtask-progress-wrap { margin-top: 5px; }
+.subtask-progress { height: 2px; background: var(--surface2); border-radius: 1px; overflow: hidden; margin-bottom: 4px; }
+.subtask-progress-bar { height: 100%; background: var(--accent); border-radius: 1px; transition: width .3s; }
+.subtask-row { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+.subtask-row.done .subtask-title { text-decoration: line-through; opacity: .5; }
+.subtask-title { font-size: 12px; color: var(--muted); }
+
+.task-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  align-items: center;
+  opacity: 0;
+  flex-shrink: 0;
+}
+.task-row:hover .task-actions { opacity: 1; }
+.task-actions-buttons { display: flex; gap: 4px; align-items: center; }
+
+.action-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+.action-btn:hover { background: var(--surface2); color: var(--text); }
+
+.task-links { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.platform-icon-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
+  background: transparent;
+  color: var(--muted);
+}
+.platform-icon-link:hover { background: var(--surface2); color: var(--text); }

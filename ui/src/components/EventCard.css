@@ -1,0 +1,25 @@
+.event-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.event-card-top { display: flex; align-items: flex-start; gap: 12px; }
+.event-time { font-size: 12px; font-weight: 700; color: var(--muted); min-width: 58px; padding-top: 2px; }
+.event-body { flex: 1; min-width: 0; }
+.event-title { font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer; }
+.event-title:hover { text-decoration: underline; }
+.event-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; align-items: center; }
+.event-agenda-count { font-size: 11px; color: var(--muted); }
+.meeting-btn {
+  background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+  padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  display: flex; align-items: center; gap: 4px;
+}
+.meeting-btn:hover { color: var(--text); border-color: var(--accent); }
+.event-progress { height: 3px; background: var(--surface2); border-radius: 2px; overflow: hidden; }
+.event-progress-fill { height: 100%; border-radius: 2px; transition: width .3s; }

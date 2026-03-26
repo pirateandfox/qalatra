@@ -1,0 +1,57 @@
+appId: com.justinhandley.taskos
+productName: Task OS
+copyright: Copyright © 2026 Justin Handley
+
+directories:
+  output: dist
+  buildResources: assets
+
+files:
+  - electron-main.js
+  - api-entry.cjs
+  - api.js
+  - s3.js
+  - mcp/**/*
+  - ui/dist/**/*
+  - "!ui/src/**/*"
+  - "!ui/node_modules/**/*"
+  - "!db/**/*"
+  - "!node_modules/.cache/**/*"
+  - "!**/*.map"
+  - "!**/*.md"
+  - "!assets/build-icon.mjs"
+
+# These must be outside the asar archive so they can be spawned / loaded as native modules
+asarUnpack:
+  - api-entry.cjs
+  - mcp/http-server-entry.cjs
+  - node_modules/better-sqlite3/**/*
+  - node_modules/node-pty/**/*
+
+mac:
+  category: public.app-category.productivity
+  icon: assets/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlementsFile: entitlements.mac.plist
+  entitlementsInheritFile: entitlements.mac.plist
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+
+dmg:
+  title: Task OS
+  sign: false
+
+publish:
+  provider: github
+  owner: justinhandley
+  repo: task-os
+
+afterSign: scripts/notarize.mjs

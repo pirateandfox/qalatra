@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Row 1: checkmark + line -->
+  <polyline points="176,288 272,384 432,192" fill="none" stroke="#4f9cf9" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="544" y1="288" x2="864" y2="288" stroke="#4f9cf9" stroke-width="80" stroke-linecap="round"/>
+  <!-- Row 2: circle + line -->
+  <circle cx="304" cy="512" r="96" fill="none" stroke="#ffffff" stroke-width="64"/>
+  <line x1="544" y1="512" x2="800" y2="512" stroke="#ffffff" stroke-width="80" stroke-linecap="round"/>
+  <!-- Row 3: circle + short line -->
+  <circle cx="304" cy="736" r="96" fill="none" stroke="#ffffff" stroke-width="64"/>
+  <line x1="544" y1="736" x2="736" y2="736" stroke="#ffffff" stroke-width="80" stroke-linecap="round"/>
+</svg>

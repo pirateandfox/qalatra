@@ -1,0 +1,21 @@
+node_modules/
+ui/node_modules/
+ui/dist/
+dist/
+
+# Database and settings — stay local, never commit
+db/tasks.db
+db/tasks.db-wal
+db/tasks.db-shm
+db/settings.json
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Build artifacts
+*.map
+assets/ElectronIcon.icon/
+
+# Secrets
+.env

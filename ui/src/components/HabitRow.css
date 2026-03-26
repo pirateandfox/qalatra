@@ -1,0 +1,136 @@
+.habit-row {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+.habit-row.done { opacity: 0.7; }
+.habit-row.skipped { opacity: 0.45; }
+
+.habit-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.habit-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.habit-bottom-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.habit-streak {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.streak-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.streak-dot.dot-done    { background: var(--accent, #22c55e); }
+.streak-dot.dot-skipped { background: var(--muted); opacity: 0.4; }
+.streak-dot.dot-empty   { background: transparent; border: 1px solid var(--border); }
+.streak-dot.not-due     { visibility: hidden; }
+
+.habit-title {
+  font-size: 14px;
+  color: var(--text);
+}
+.habit-row.done .habit-title    { text-decoration: line-through; color: var(--muted); }
+.habit-row.skipped .habit-title { color: var(--muted); }
+
+.habit-desc {
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.habit-notes-preview {
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.habit-notes-preview:hover { color: var(--text); }
+
+.habit-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.habit-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s;
+}
+.habit-btn:hover { background: var(--surface2); color: var(--text); }
+.habit-done-btn.active  { background: var(--accent, #22c55e); border-color: var(--accent, #22c55e); color: #fff; }
+.habit-skip-btn.active  { background: var(--muted); border-color: var(--muted); color: #fff; }
+
+.habit-notes-row {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.habit-notes-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 10px;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.habit-notes-input:focus { outline: none; border-color: var(--accent, #22c55e); }
+
+.habit-notes-footer {
+  display: flex;
+  gap: 6px;
+}
+.habit-notes-save {
+  background: var(--accent, #22c55e);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.habit-notes-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.habit-notes-cancel:hover { color: var(--text); }

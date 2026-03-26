@@ -1,0 +1,103 @@
+.habits-view {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.habits-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.habits-summary {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+}
+.habits-done    { color: var(--accent, #22c55e); font-weight: 500; }
+.habits-pending { color: var(--muted); }
+
+.habits-add-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.habits-add-btn:hover { color: var(--text); background: var(--surface2); }
+
+.habit-create-form {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.habit-create-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 7px 10px;
+  font-family: inherit;
+}
+.habit-create-input:focus { outline: none; border-color: var(--accent, #22c55e); }
+
+.habit-create-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.habit-recurrence-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.habit-create-submit {
+  background: var(--accent, #22c55e);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.habit-create-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.habit-create-cancel:hover { color: var(--text); }
+
+.habits-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.habits-empty {
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  padding: 48px 16px;
+}

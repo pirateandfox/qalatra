@@ -1,0 +1,105 @@
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px 0 92px;
+  height: 53px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  -webkit-app-region: drag;
+}
+
+/* Interactive elements inside the header must opt out of drag */
+.header button,
+.header input,
+.header a {
+  -webkit-app-region: no-drag;
+}
+
+.header-title {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text);
+  margin-right: 4px;
+}
+
+.view-label {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.view-label.view-priority { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.view-label.view-project  { background: color-mix(in srgb, #a78bfa 15%, transparent); color: #a78bfa; }
+.view-label.view-backlog  { background: color-mix(in srgb, #f59e0b 15%, transparent); color: #f59e0b; }
+.view-toggle a.backlog-active { background: #f59e0b; }
+
+.nav-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.nav-btn:hover { color: var(--text); background: var(--surface2); }
+
+.new-task-btn { font-size: 18px; font-weight: 300; line-height: 1; padding: 2px 10px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.new-task-btn:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.terminal-btn { font-family: monospace; font-size: 12px; letter-spacing: 0; }
+.note-btn { font-size: 15px; }
+.note-btn-active { color: var(--accent); border-color: var(--accent); }
+
+.view-toggle {
+  display: flex;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-left: auto;
+}
+.view-toggle a {
+  padding: 4px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: 5px;
+}
+.view-toggle a:hover { color: var(--text); }
+.view-toggle a.active { background: var(--accent); color: #fff; }
+
+.date-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.date-input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.date-input:focus { outline: none; border-color: var(--accent); }
+
+.today-link {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.today-link:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); }

@@ -1,0 +1,40 @@
+.note-panel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  background: #0d1117;
+  border-top: 1px solid var(--border);
+  transition: height .2s ease;
+  z-index: 99;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.note-panel.open { height: 300px; }
+
+.note-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px;
+}
+
+.note-textarea {
+  flex: 1;
+  background: transparent;
+  color: #e2e8f0;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  line-height: 1.6;
+  resize: none;
+  padding: 4px;
+}
+
+.note-textarea::placeholder {
+  color: #4a5568;
+}

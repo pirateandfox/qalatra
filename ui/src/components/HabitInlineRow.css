@@ -1,0 +1,102 @@
+.habit-inline-row {
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.habit-inline-row:last-child { border-bottom: none; }
+
+.habit-inline-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.habit-inline-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.1s;
+  padding: 0;
+}
+.habit-inline-check:hover { border-color: var(--accent, #22c55e); color: var(--accent, #22c55e); }
+.habit-inline-check.checked {
+  background: var(--accent, #22c55e);
+  border-color: var(--accent, #22c55e);
+  color: #fff;
+}
+
+.habit-inline-title {
+  font-size: 13px;
+  color: var(--text);
+  flex: 1;
+}
+.habit-inline-row.done .habit-inline-title {
+  text-decoration: line-through;
+  color: var(--muted);
+  cursor: pointer;
+}
+.habit-inline-row.skipped .habit-inline-title { color: var(--muted); }
+
+.habit-inline-notes-preview {
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+}
+.habit-inline-notes-preview:hover { color: var(--text); }
+
+.habit-inline-notes {
+  margin: 6px 0 4px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.habit-inline-textarea {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 8px;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.habit-inline-textarea:focus { outline: none; border-color: var(--accent, #22c55e); }
+
+.habit-inline-notes-actions { display: flex; gap: 6px; }
+
+.habit-inline-save {
+  background: var(--accent, #22c55e);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.habit-inline-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.habit-inline-cancel:hover { color: var(--text); }

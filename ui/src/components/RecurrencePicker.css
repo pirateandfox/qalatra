@@ -1,0 +1,21 @@
+.recurrence-picker { margin-top: 18px; }
+.recurrence-freq-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.recurrence-select {
+  font-size: 12px; color: var(--text); background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; cursor: pointer;
+}
+.recurrence-select:focus { outline: none; border-color: var(--accent); }
+.recurrence-days { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
+.recur-day-btn {
+  font-size: 11px; font-weight: 500; padding: 3px 7px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--surface2); color: var(--muted); cursor: pointer; transition: all .15s;
+}
+.recur-day-btn.active { background: color-mix(in srgb, var(--accent) 20%, transparent); border-color: var(--accent); color: var(--accent); }
+.recur-day-btn:hover:not(.active) { border-color: var(--muted); color: var(--text); }
+.recurrence-monthday-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.recurrence-monthday-input {
+  width: 52px; font-size: 12px; color: var(--text); background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; text-align: center;
+}
+.recurrence-monthday-input:focus { outline: none; border-color: var(--accent); }
+.recurrence-preview { font-size: 11px; color: var(--accent); margin-top: 8px; min-height: 16px; }

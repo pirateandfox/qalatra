@@ -1,0 +1,51 @@
+.task-list-container {
+  flex: 1;
+  min-width: 0;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px 16px;
+  transition: max-width .25s;
+}
+.panel-open .task-list-container {
+  max-width: none;
+  margin: 0;
+}
+.context-section { margin-bottom: 32px; }
+.project-group { margin-bottom: 12px; }
+.project-subheader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.project-name { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.ctx-count { font-size: 11px; color: var(--muted); }
+.reminder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.reminder-row:hover { background: var(--surface); border-color: var(--border); }
+.reminder-row.done { opacity: .45; }
+.reminder-icon { font-size: 14px; }
+.reminder-title { font-size: 14px; color: var(--text); cursor: pointer; flex: 1; }
+.reminder-title:hover { text-decoration: underline; }
+.reminder-title.strikethrough { text-decoration: line-through; color: var(--muted); }
+.dismiss-btn {
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  padding: 3px 10px; border-radius: 6px; cursor: pointer; font-size: 12px;
+}
+.dismiss-btn:hover { color: var(--text); background: var(--surface2); }
+
+.time-snoozed-toggle {
+  background: transparent; border: none; color: var(--muted);
+  padding: 4px 8px; cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; gap: 4px;
+  margin: 4px 0;
+}
+.time-snoozed-toggle:hover { color: var(--text); }

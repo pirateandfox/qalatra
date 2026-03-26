@@ -1,0 +1,32 @@
+.snooze-popover {
+  position: fixed;
+  z-index: 200;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 4px 20px #0006;
+  min-width: 220px;
+}
+.snooze-presets { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+.snooze-preset-btn {
+  font-size: 12px; padding: 3px 8px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
+}
+.snooze-preset-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.snooze-row { display: flex; align-items: center; gap: 6px; }
+.snooze-date-input {
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+  padding: 4px 8px; border-radius: 6px; font-size: 13px; flex: 1;
+}
+.snooze-date-input:focus { outline: none; border-color: var(--accent); }
+.snooze-confirm {
+  background: var(--accent); border: none; color: #fff;
+  padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.snooze-confirm:hover { opacity: .85; }
+.snooze-cancel {
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 12px;
+}
+.snooze-cancel:hover { color: var(--text); }

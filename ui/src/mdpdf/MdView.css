@@ -1,0 +1,488 @@
+/* MdView overlay — full-screen markdown editor/previewer */
+
+.mdview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: #18181b;
+  color: #e4e4e7;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Toolbar ---- */
+.mdview-toolbar {
+  height: 44px;
+  background: #1a1a1d;
+  border-bottom: 1px solid #27272a;
+  display: flex;
+  align-items: center;
+  padding: 0 12px 0 92px;
+  gap: 6px;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+}
+
+.mdview-toolbar > * {
+  -webkit-app-region: no-drag;
+}
+
+.mdview-toolbar-logo {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e4e4e7;
+  margin-right: 8px;
+  letter-spacing: -0.02em;
+}
+
+.mdview-toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.mdview-toolbar-btn:hover {
+  background: #27272a;
+  color: #e4e4e7;
+}
+
+.mdview-toolbar-btn-primary {
+  background: #2563eb !important;
+  color: white !important;
+}
+
+.mdview-toolbar-btn-primary:hover {
+  background: #3b82f6 !important;
+}
+
+.mdview-close-btn {
+  color: #71717a;
+}
+
+.mdview-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: #27272a;
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.mdview-toolbar-spacer {
+  flex: 1;
+}
+
+.mdview-file-path {
+  font-size: 11px;
+  color: #71717a;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Panels layout ---- */
+.mdview-panels {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ---- Resize Handle ---- */
+.mdview-resize-handle {
+  width: 4px;
+  background: #27272a;
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  position: relative;
+  z-index: 10;
+}
+
+.mdview-resize-handle:hover {
+  background: #3b82f6;
+}
+
+/* ============================================================
+   All styles below are scoped to .mdview-overlay so they don't
+   bleed into the rest of Task OS
+   ============================================================ */
+
+/* ---- Scrollbars ---- */
+.mdview-overlay ::-webkit-scrollbar { width: 8px; height: 8px; }
+.mdview-overlay ::-webkit-scrollbar-track { background: transparent; }
+.mdview-overlay ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+.mdview-overlay ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+
+/* ---- Style Sidebar ---- */
+.mdview-overlay .sidebar {
+  background: #1c1c1f;
+  border-right: 1px solid #27272a;
+  overflow-y: auto;
+  overflow-x: hidden;
+  height: 100%;
+}
+
+.mdview-overlay .sidebar-section {
+  border-bottom: 1px solid #27272a;
+  padding: 14px 16px;
+}
+
+.mdview-overlay .sidebar-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #71717a;
+  margin-bottom: 10px;
+}
+
+/* ---- Sliders ---- */
+.mdview-overlay .slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.mdview-overlay .slider-label {
+  font-size: 12px;
+  color: #a1a1aa;
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.mdview-overlay .slider-value {
+  font-size: 11px;
+  color: #e4e4e7;
+  width: 46px;
+  text-align: right;
+  flex-shrink: 0;
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  border-radius: 4px;
+  padding: 2px 4px;
+  outline: none;
+  font-family: monospace;
+  cursor: text;
+}
+
+.mdview-overlay .slider-value:focus {
+  border-color: #3b82f6;
+}
+
+.mdview-overlay input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: #3f3f46;
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+}
+
+.mdview-overlay input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+}
+
+.mdview-overlay input[type="range"]:hover {
+  background: #52525b;
+}
+
+/* ---- Color inputs ---- */
+.mdview-overlay .color-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.mdview-overlay .color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid #3f3f46;
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.mdview-overlay input[type="color"] {
+  width: 100%;
+  height: 100%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+}
+
+/* ---- Preset grid ---- */
+.mdview-overlay .preset-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.mdview-overlay .preset-btn {
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #3f3f46;
+  background: #27272a;
+  color: #a1a1aa;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.mdview-overlay .preset-btn:hover {
+  background: #3f3f46;
+  color: #e4e4e7;
+}
+
+.mdview-overlay .preset-btn.active {
+  border-color: #3b82f6;
+  color: #3b82f6;
+  background: #1e3a5f;
+}
+
+/* ---- Font select ---- */
+.mdview-overlay select {
+  width: 100%;
+  background: #27272a;
+  color: #e4e4e7;
+  border: 1px solid #3f3f46;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.mdview-overlay select:focus {
+  border-color: #3b82f6;
+}
+
+/* ---- Page size toggle ---- */
+.mdview-overlay .toggle-group {
+  display: flex;
+  border: 1px solid #3f3f46;
+  border-radius: 5px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.mdview-overlay .toggle-btn {
+  flex: 1;
+  font-size: 12px;
+  padding: 5px;
+  background: #27272a;
+  color: #a1a1aa;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.mdview-overlay .toggle-btn.active {
+  background: #3b82f6;
+  color: white;
+}
+
+/* ---- Editor panel ---- */
+.mdview-overlay .editor-panel {
+  display: flex;
+  flex-direction: column;
+  background: #1e1e21;
+  height: 100%;
+  min-width: 0;
+}
+
+.mdview-overlay .editor-header {
+  height: 32px;
+  background: #1a1a1d;
+  border-bottom: 1px solid #27272a;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 11px;
+  color: #71717a;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.mdview-overlay .cm-editor {
+  flex: 1;
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.mdview-overlay .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* ---- Preview panel ---- */
+.mdview-overlay .preview-panel {
+  background: #121214;
+  overflow-y: auto;
+  overflow-x: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  min-width: 0;
+}
+
+.mdview-overlay .preview-header {
+  width: 100%;
+  height: 32px;
+  background: #1a1a1d;
+  border-bottom: 1px solid #27272a;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 11px;
+  color: #71717a;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.mdview-overlay .preview-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+/* ---- Page ---- */
+.mdview-overlay .page-wrapper {
+  margin-bottom: 24px;
+  position: relative;
+}
+
+.mdview-overlay .page {
+  background: white;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+  transform-origin: top center;
+}
+
+.mdview-overlay .page-content {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  overflow: hidden;
+}
+
+/* ---- Page break zones ---- */
+.mdview-overlay .page-break-zone {
+  position: relative;
+  height: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  margin: 2px 0;
+}
+
+.mdview-overlay .page-break-zone::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.mdview-overlay .page-break-zone:hover::before {
+  background: #3b82f650;
+}
+
+.mdview-overlay .page-break-zone .zone-indicator {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #3b82f6;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.mdview-overlay .page-break-zone:hover .zone-indicator { opacity: 1; }
+
+.mdview-overlay .page-break-zone.has-break::before {
+  background: #3b82f6;
+  height: 2px;
+}
+
+.mdview-overlay .page-break-zone.has-break .zone-indicator {
+  opacity: 1;
+  background: #1e40af;
+}
+
+.mdview-overlay .page-break-zone.has-break .zone-indicator::after { content: ' ×'; }
+
+.mdview-overlay .page-gap-indicator {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e40af;
+  color: #93c5fd;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px 3px 0 0;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mdview-overlay .page-gap-indicator:hover { background: #1d4ed8; }
+
+/* ---- Measurement div ---- */
+.mdview-overlay .measure-container {
+  position: fixed;
+  top: -9999px; left: -9999px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ---- Print ---- */
+@media print {
+  .mdview-overlay {
+    display: none !important;
+  }
+}
