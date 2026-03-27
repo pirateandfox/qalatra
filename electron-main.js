@@ -151,8 +151,20 @@ async function startBackends(dbDir) {
     })
   }
 
-  // Give backends a moment to bind their ports
-  await new Promise(resolve => setTimeout(resolve, isDev ? 600 : 1000))
+  // Wait for API to be ready
+  if (!isDev) {
+    for (let i = 0; i < 20; i++) {
+      const ready = await new Promise(resolve => {
+        const req = http.request({ hostname: '127.0.0.1', port: API_PORT, path: '/', method: 'GET' }, () => resolve(true))
+        req.on('error', () => resolve(false))
+        req.end()
+      })
+      if (ready) break
+      await new Promise(r => setTimeout(r, 200))
+    }
+  } else {
+    await new Promise(resolve => setTimeout(resolve, 600))
+  }
 }
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
@@ -239,7 +251,7 @@ function createWindow() {
     win.loadURL(`http://localhost:${DEV_PORT}`)
     win.webContents.openDevTools()
   } else {
-    win.loadFile(path.join(__dirname, 'ui/dist/index.html'))
+    win.loadURL(`http://localhost:${API_PORT}`)
   }
 }
 

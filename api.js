@@ -12,6 +12,13 @@ import { getS3Client, uploadToS3, deleteFromS3, getPresignedUrl } from './s3.js'
 
 const PORT = 3456;
 const CLAUDE_JSON_PATH = path.join(os.homedir(), '.claude.json');
+const IS_DEV = process.env.NODE_ENV === 'development';
+const UI_DIST = path.join(path.dirname(new URL(import.meta.url).pathname), 'ui', 'dist');
+const MIME = {
+  '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2', '.woff': 'font/woff', '.ico': 'image/x-icon',
+};
 
 // ── Attachment sync ───────────────────────────────────────────────────────────
 
@@ -1553,6 +1560,18 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(query));
     return;
+  }
+
+  // Serve built UI static files in production (window loads via http://localhost:3456)
+  if (!IS_DEV && req.method === 'GET') {
+    let filePath = path.join(UI_DIST, pathname === '/' ? 'index.html' : pathname);
+    if (!fs.existsSync(filePath)) filePath = path.join(UI_DIST, 'index.html'); // SPA fallback
+    if (fs.existsSync(filePath)) {
+      const ext = path.extname(filePath);
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+      res.end(fs.readFileSync(filePath));
+      return;
+    }
   }
 
   res.writeHead(404);
