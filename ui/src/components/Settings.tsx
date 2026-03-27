@@ -76,6 +76,18 @@ export default function Settings({ open, onClose }: Props) {
           />
           <span className="settings-hint">Runs automatically when terminal opens. Takes effect on next terminal open.</span>
         </div>
+        <div className="settings-row">
+          <label className="settings-label">Default agent command</label>
+          <input
+            className="settings-input"
+            type="text"
+            value={settings.defaultAgentCommand ?? ''}
+            onChange={e => set('defaultAgentCommand', e.target.value)}
+            placeholder="claude --dangerously-skip-permissions"
+            spellCheck={false}
+          />
+          <span className="settings-hint">Used when launching agents from task queue and the "Chat" button in file previewers. Per-agent agent.config overrides this.</span>
+        </div>
         <div className="settings-section-header">Attachments &amp; Storage</div>
 
         <div className="settings-row">

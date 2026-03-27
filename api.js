@@ -66,7 +66,8 @@ function processAgentJobs() {
     runningJobs++;
     db.prepare(`UPDATE agent_jobs SET status = 'running', started_at = datetime('now') WHERE id = ?`).run(job.id);
 
-    let agentCommand = 'claude --dangerously-skip-permissions';
+    const globalSettings = loadSettings();
+    let agentCommand = globalSettings.defaultAgentCommand || 'claude --dangerously-skip-permissions';
     try {
       const cfg = JSON.parse(fs.readFileSync(path.join(job.agent_path, 'agent.config'), 'utf8'));
       if (cfg.command) agentCommand = cfg.command;

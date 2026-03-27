@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchTasks, type TaskData } from './api'
+import { fetchTasks, fetchSettings, type TaskData } from './api'
 import { today as todayStr } from './lib/constants'
 import { ContextsProvider } from './lib/ContextsProvider'
 import Header from './components/Header'
@@ -177,7 +177,14 @@ export default function App() {
           onClose={() => setPreviewPath(null)}
           terminalOpen={terminalOpen}
           onTerminalToggle={() => setTerminalOpen(o => !o)}
-          onChatWithDoc={cmd => { setTerminalCommand(cmd); setTerminalOpen(true) }}
+          onChatWithDoc={async (fp) => {
+            const settings = await fetchSettings().catch(() => ({} as Record<string, string>))
+            const agentCmd = settings.defaultAgentCommand || 'claude'
+            const dir = fp.substring(0, fp.lastIndexOf('/'))
+            const name = fp.split('/').pop() ?? fp
+            setTerminalCommand(`cd "${dir}" && ${agentCmd} "I want to work on ${name}"\r`)
+            setTerminalOpen(true)
+          }}
         />
       )}
       {mdPath && (
@@ -186,7 +193,14 @@ export default function App() {
           onClose={() => setMdPath(null)}
           terminalOpen={terminalOpen}
           onTerminalToggle={() => setTerminalOpen(o => !o)}
-          onChatWithDoc={cmd => { setTerminalCommand(cmd); setTerminalOpen(true) }}
+          onChatWithDoc={async (fp) => {
+            const settings = await fetchSettings().catch(() => ({} as Record<string, string>))
+            const agentCmd = settings.defaultAgentCommand || 'claude'
+            const dir = fp.substring(0, fp.lastIndexOf('/'))
+            const name = fp.split('/').pop() ?? fp
+            setTerminalCommand(`cd "${dir}" && ${agentCmd} "I want to work on ${name}"\r`)
+            setTerminalOpen(true)
+          }}
         />
       )}
     </div>

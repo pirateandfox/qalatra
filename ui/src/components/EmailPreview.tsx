@@ -7,7 +7,7 @@ interface Props {
   onClose: () => void
   terminalOpen: boolean
   onTerminalToggle: () => void
-  onChatWithDoc: (command: string) => void
+  onChatWithDoc: (filePath: string) => void | Promise<void>
 }
 
 function injectPlaceholders(html: string): string {
@@ -96,9 +96,7 @@ export default function EmailPreview({ filePath, onClose, terminalOpen, onTermin
   }, [html])
 
   function handleChatWithDoc() {
-    const dir = filePath.substring(0, filePath.lastIndexOf('/'))
-    const filename = filePath.split('/').pop() ?? filePath
-    onChatWithDoc(`cd "${dir}" && claude "I want to work on ${filename}"\r`)
+    onChatWithDoc(filePath)
   }
 
   const filename = filePath.split('/').pop() ?? filePath

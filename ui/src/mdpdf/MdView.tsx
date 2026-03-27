@@ -11,7 +11,7 @@ interface Props {
   onClose: () => void
   terminalOpen: boolean
   onTerminalToggle: () => void
-  onChatWithDoc: (command: string) => void
+  onChatWithDoc: (filePath: string) => void | Promise<void>
 }
 
 function getConfigPath(filePath: string): string {
@@ -291,11 +291,7 @@ export default function MdView({ filePath, onClose, terminalOpen, onTerminalTogg
 
         <button
           className="mdview-toolbar-btn"
-          onClick={() => {
-            const dir = filePath.substring(0, filePath.lastIndexOf('/'))
-            const name = filePath.split('/').pop() ?? filePath
-            onChatWithDoc(`cd "${dir}" && claude "I want to work on ${name}"\r`)
-          }}
+          onClick={() => onChatWithDoc(filePath)}
           title="Open claude in this file's folder"
           style={{ color: '#60a5fa' }}
         >
