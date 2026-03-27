@@ -161,7 +161,8 @@ let _autoUpdater = null
 
 async function getAutoUpdater() {
   if (_autoUpdater) return _autoUpdater
-  const { autoUpdater } = await import('electron-updater')
+  const mod = await import('electron-updater')
+  const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater ?? mod.default
   autoUpdater.logger = { info: m => console.log('[updater]', m), warn: m => console.warn('[updater]', m), error: m => console.error('[updater]', m) }
   autoUpdater.on('checking-for-update', () => console.log('[updater] Checking for update...'))
   autoUpdater.on('update-available', info => console.log('[updater] Update available:', info.version))
