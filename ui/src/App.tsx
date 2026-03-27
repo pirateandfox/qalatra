@@ -33,23 +33,24 @@ export default function App() {
   const [meetingId, setMeetingId]   = useState<string | null>(null)
   const [loading, setLoading]       = useState(false)
 
-  const load = useCallback(async (d: string) => {
-    setLoading(true)
+  const load = useCallback(async (d: string, silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const data = await fetchTasks(d)
       setTaskData(data)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [])
 
   useEffect(() => { load(date) }, [date, load])
 
   // Background poll — 30s normally, 5s while agent jobs are running
+  // Uses silent=true so TaskList stays mounted and scroll position is preserved
   useEffect(() => {
     const allTasks = Object.values(taskData ?? {}).flat().filter(t => t && typeof t === 'object' && 'id' in t) as { agent_job_status?: string }[]
     const hasActive = allTasks.some(t => t.agent_job_status === 'queued' || t.agent_job_status === 'running')
-    const interval = setInterval(() => load(date), hasActive ? 5000 : 30_000)
+    const interval = setInterval(() => load(date, true), hasActive ? 5000 : 30_000)
     return () => clearInterval(interval)
   }, [taskData, date, load])
 

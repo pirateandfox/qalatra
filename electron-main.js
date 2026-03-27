@@ -268,7 +268,7 @@ app.whenReady().then(async () => {
     ? path.join(__dirname, 'db')
     : await ensureUserData()
 
-  await startBackends(dbDir)
+  if (!isDev) await startBackends(dbDir)
   setupMenu()
   createWindow()
   setupAutoUpdater()
