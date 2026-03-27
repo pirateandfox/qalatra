@@ -1,6 +1,8 @@
 {
   "name": "task-os",
   "version": "1.0.0",
+  "description": "Personal task management system with Claude AI integration",
+  "author": "Justin Handley",
   "type": "module",
   "main": "electron-main.js",
   "scripts": {
@@ -12,7 +14,7 @@
     "start": "npm run kill && sleep 1 && NODE_ENV=production ./node_modules/.bin/electron electron-main.js",
     "dist": "npm run build && electron-builder --mac --publish never",
     "dist:publish": "npm run build && electron-builder --mac --publish always",
-    "postinstall": "electron-rebuild -f -w better-sqlite3,node-pty || true"
+    "postinstall": "electron-builder install-app-deps || true"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1009.0",
