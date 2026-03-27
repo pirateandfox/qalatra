@@ -18,6 +18,9 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Install setuptools (for node-gyp / Python 3.12+)
+        run: pip3 install setuptools
+
       - name: Install root dependencies
         run: npm ci
 
@@ -52,6 +55,9 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Install setuptools (for node-gyp / Python 3.12+)
+        run: pip install setuptools
+
       - name: Install root dependencies
         run: npm ci
 
@@ -77,6 +83,9 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+
+      - name: Install setuptools (for node-gyp / Python 3.12+)
+        run: pip3 install setuptools
 
       - name: Install root dependencies
         run: npm ci
