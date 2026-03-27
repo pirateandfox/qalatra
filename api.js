@@ -2,6 +2,7 @@ import http from 'http';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { WebSocketServer } from 'ws';
 import pty from 'node-pty';
@@ -13,7 +14,7 @@ import { getS3Client, uploadToS3, deleteFromS3, getPresignedUrl } from './s3.js'
 const PORT = 3456;
 const CLAUDE_JSON_PATH = path.join(os.homedir(), '.claude.json');
 const IS_DEV = process.env.NODE_ENV === 'development';
-const UI_DIST = path.join(path.dirname(new URL(import.meta.url).pathname), 'ui', 'dist');
+const UI_DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ui', 'dist');
 const MIME = {
   '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
