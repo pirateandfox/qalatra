@@ -62,6 +62,24 @@ async function ensureUserData() {
   return dbDir
 }
 
+// ── Logging ───────────────────────────────────────────────────────────────────
+
+let logStream = null
+
+function setupLogging() {
+  if (isDev) return
+  const logDir = app.getPath('logs')
+  fs.mkdirSync(logDir, { recursive: true })
+  const logFile = path.join(logDir, 'main.log')
+  logStream = fs.createWriteStream(logFile, { flags: 'a' })
+  const tag = () => `[${new Date().toISOString()}]`
+  const orig = { log: console.log, error: console.error, warn: console.warn }
+  console.log   = (...a) => { orig.log(...a);   logStream.write(`${tag()} INFO  ${a.join(' ')}\n`) }
+  console.error = (...a) => { orig.error(...a); logStream.write(`${tag()} ERROR ${a.join(' ')}\n`) }
+  console.warn  = (...a) => { orig.warn(...a);  logStream.write(`${tag()} WARN  ${a.join(' ')}\n`) }
+  console.log(`Task OS starting — version ${app.getVersion()} pid=${process.pid}`)
+}
+
 // ── Backend processes ─────────────────────────────────────────────────────────
 
 function getEntryPath(filename) {
@@ -72,7 +90,14 @@ function getEntryPath(filename) {
   return path.join(__dirname, filename)
 }
 
+function pipeToLog(proc, label) {
+  if (!proc.stdout || !proc.stderr) return
+  proc.stdout.on('data', d => console.log(`[${label}]`, d.toString().trim()))
+  proc.stderr.on('data', d => console.error(`[${label}]`, d.toString().trim()))
+}
+
 async function startBackends(dbDir) {
+  console.log(`startBackends: dbDir=${dbDir}`)
   const env = {
     ...process.env,
     TASKOS_DB_DIR: dbDir,
@@ -84,25 +109,25 @@ async function startBackends(dbDir) {
   if (apiTaken) {
     console.log(`api already running on :${API_PORT}`)
   } else {
+    console.log(`starting api: ${getEntryPath('api-entry.cjs')}`)
     apiProcess = utilityProcess.fork(getEntryPath('api-entry.cjs'), [], {
-      stdio: isDev ? 'inherit' : 'pipe',
+      stdio: 'pipe',
       env,
     })
+    pipeToLog(apiProcess, 'api')
     apiProcess.on('exit', (code, signal) => {
       if (signal !== 'SIGTERM' && code !== 0) {
         console.error(`api exited: code=${code} signal=${signal}`)
-        if (!isDev) {
-          dialog.showMessageBox({
-            type: 'error',
-            title: 'Task OS — Backend Crashed',
-            message: 'The API process exited unexpectedly.',
-            detail: `Exit code: ${code}. Tasks cannot be loaded until the app is restarted.\n\nIf this keeps happening, please report it.`,
-            buttons: ['Restart Now', 'Dismiss'],
-            defaultId: 0,
-          }).then(({ response }) => {
-            if (response === 0) { app.relaunch(); app.quit() }
-          })
-        }
+        dialog.showMessageBox({
+          type: 'error',
+          title: 'Task OS — Backend Crashed',
+          message: 'The API process exited unexpectedly.',
+          detail: `Exit code: ${code}. Tasks cannot be loaded until the app is restarted.\n\nLog: ${app.getPath('logs')}/main.log`,
+          buttons: ['Restart Now', 'Dismiss'],
+          defaultId: 0,
+        }).then(({ response }) => {
+          if (response === 0) { app.relaunch(); app.quit() }
+        })
       }
       apiProcess = null
     })
@@ -120,9 +145,10 @@ async function startBackends(dbDir) {
     console.log(`mcp already running on :${mcpPort}`)
   } else {
     mcpProcess = utilityProcess.fork(getEntryPath('mcp/http-server-entry.cjs'), [], {
-      stdio: isDev ? 'inherit' : 'pipe',
+      stdio: 'pipe',
       env,
     })
+    pipeToLog(mcpProcess, 'mcp')
     mcpProcess.on('exit', (code, signal) => {
       if (signal !== 'SIGTERM' && code !== 0) console.error(`mcp exited: code=${code} signal=${signal}`)
       mcpProcess = null
@@ -305,6 +331,8 @@ function setupMenu() {
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  setupLogging()
+
   const icon = nativeImage.createFromPath(path.join(__dirname, 'assets/icon.png'))
   app.dock?.setIcon(icon)
 
