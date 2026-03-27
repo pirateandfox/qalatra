@@ -1580,13 +1580,21 @@ wss.on('connection', (ws) => {
   const shell = process.env.SHELL || '/bin/zsh';
   const settings = loadSettings();
   const cwd = settings.terminalCwd || process.env.HOME;
-  const ptyProcess = pty.spawn(shell, [], {
-    name: 'xterm-256color',
-    cols: 80,
-    rows: 24,
-    cwd,
-    env: process.env,
-  });
+
+  let ptyProcess;
+  try {
+    ptyProcess = pty.spawn(shell, [], {
+      name: 'xterm-256color',
+      cols: 80,
+      rows: 24,
+      cwd,
+      env: process.env,
+    });
+  } catch (err) {
+    ws.send(JSON.stringify({ type: 'output', data: `\r\n\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n` }));
+    console.error('[terminal] pty.spawn failed:', err);
+    return;
+  }
 
   ptyProcess.onData(data => {
     if (ws.readyState === ws.OPEN) {
