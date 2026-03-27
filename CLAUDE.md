@@ -82,8 +82,16 @@ The MCP tools are the primary interface for Claude to interact with Task OS duri
 
 **Cutting a release:**
 ```bash
-git tag v1.0.1 && git push origin v1.0.1
+# 1. Bump version in package.json to match the tag you're about to create
+#    (version in package.json = what shows in the app and on the release)
+# 2. Commit and push
+git add package.json && git commit -m "Bump version to 1.0.x"
+git push origin main
+# 3. Tag and push — this triggers the CI build
+git tag v1.0.x && git push origin v1.0.x
 ```
+
+The tag must match `package.json` version or the release will show the wrong version number.
 
 Tagging triggers the GitHub Actions workflow (`.github/workflows/release.yml`) which:
 - Builds the macOS DMG + ZIP (arm64 + x64)
