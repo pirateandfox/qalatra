@@ -83,10 +83,6 @@ function setupLogging() {
 // ── Backend processes ─────────────────────────────────────────────────────────
 
 function getEntryPath(filename) {
-  if (app.isPackaged) {
-    // In packaged app, asarUnpack files live in app.asar.unpacked
-    return path.join(process.resourcesPath, 'app.asar.unpacked', filename)
-  }
   return path.join(__dirname, filename)
 }
 

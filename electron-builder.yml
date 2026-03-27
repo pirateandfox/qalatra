@@ -2,6 +2,8 @@ appId: com.justinhandley.taskos
 productName: Task OS
 copyright: Copyright © 2026 Justin Handley
 
+asar: false
+
 directories:
   output: dist
   buildResources: assets
@@ -22,15 +24,6 @@ files:
   - "!**/*.md"
   - "!assets/build-icon.mjs"
 
-# Backend JS files must be outside the asar so ESM dynamic imports resolve correctly
-# (Electron patches require() for asar but NOT ESM import())
-asarUnpack:
-  - api-entry.cjs
-  - api.js
-  - s3.js
-  - mcp/**/*
-  - node_modules/better-sqlite3/**/*
-  - node_modules/node-pty/**/*
 
 mac:
   category: public.app-category.productivity
