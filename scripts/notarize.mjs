@@ -4,6 +4,7 @@ import path from 'path';
 export default async function notarizing(context) {
   const { electronPlatformName, appOutDir } = context;
   if (electronPlatformName !== 'darwin') return;
+  if (!process.env.APPLE_ID) return; // skip when credentials aren't available (local builds)
 
   const appName = context.packager.appInfo.productFilename;
   const appPath = path.join(appOutDir, `${appName}.app`);

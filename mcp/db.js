@@ -126,6 +126,10 @@ export function openDb() {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const db = new Database(DB_PATH);
+  // Set busy_timeout BEFORE journal_mode and initSchema so both the API and MCP
+  // processes can wait on each other's write locks during simultaneous startup
+  // instead of failing immediately with SQLITE_BUSY.
+  db.pragma('busy_timeout = 5000');
   db.pragma('journal_mode = WAL');
   initSchema(db);
   return db;
