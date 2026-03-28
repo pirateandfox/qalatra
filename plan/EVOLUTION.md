@@ -1,5 +1,12 @@
 # Task OS — Evolution Notes
 
+## 1.0.20 — SQLite singleton fix (2026-03-28)
+
+- **Root cause**: `api.js` called `openDb()` on every request, which ran `initSchema()` + `migrate()` (15+ SQL writes) on every `/api/tasks` hit. Multiple simultaneous open DB connections in WAL mode caused write-lock contention that could stall the event loop indefinitely, manifesting as "loading..." forever on the remote x64 machine.
+- **Fix**: Replaced all per-request `openDb()` calls with a singleton `getDb()` — one connection opened once, migrations run once at startup. Added `busy_timeout = 5000` pragma.
+- **Also fixed**: Hardcoded logos path (`/Users/justinhandley/IdeaProjects/project-manager/logos`) now falls back to `settings.logosDir` or that default path (configurable).
+- **Added**: Request logging for `/api/tasks` to help diagnose future hangs.
+
 A running list of ideas, rough edges, and improvements to iterate on as we use the system.
 
 ---
