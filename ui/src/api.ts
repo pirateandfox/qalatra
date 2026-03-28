@@ -31,6 +31,10 @@ export interface TaskData {
 
 export async function fetchTasks(date: string): Promise<TaskData> {
   const res = await fetch(`${API_BASE}/api/tasks?date=${date}`)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`API ${res.status}: ${body || res.statusText}`)
+  }
   return res.json()
 }
 

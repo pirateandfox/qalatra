@@ -76,7 +76,9 @@ export default function Terminal({ open, onClose, pendingCommand, onCommandConsu
       wsRef.current?.send(JSON.stringify({ type: 'input', data }))
     })
     term.onResize(({ cols, rows }) => {
-      wsRef.current?.send(JSON.stringify({ type: 'resize', cols, rows }))
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
+      }
     })
 
     connect()
