@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { API_BASE } from '../api'
 import { today as todayStr } from '../lib/constants'
 import HabitRow from './HabitRow'
 import './HabitsView.css'
@@ -37,7 +38,7 @@ export default function HabitsView({ onMutate }: Props) {
   const [newRecurrence, setNewRecurrence] = useState<'daily' | 'weekdays' | 'weekly' | 'monthly'>('daily')
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/habits?date=${today}`)
+    const res = await fetch(`${API_BASE}/api/habits?date=${today}`)
     const data = await res.json()
     setHabits(data)
     setLoading(false)
@@ -48,7 +49,7 @@ export default function HabitsView({ onMutate }: Props) {
   async function createHabit(e: React.FormEvent) {
     e.preventDefault()
     if (!newTitle.trim()) return
-    await fetch('/api/habits/create', {
+    await fetch(`${API_BASE}/api/habits/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: newTitle.trim(), description: newDesc.trim() || null, recurrence: newRecurrence }),

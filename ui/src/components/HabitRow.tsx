@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { API_BASE } from '../api'
 import './HabitRow.css'
 
 interface HabitLog {
@@ -28,7 +29,7 @@ interface Props {
 }
 
 async function apiLog(habit_id: string, date: string, status: 'done' | 'skipped', notes: string | null) {
-  await fetch('/api/habits/log', {
+  await fetch(`${API_BASE}/api/habits/log`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ habit_id, date, status, notes }),
@@ -36,7 +37,7 @@ async function apiLog(habit_id: string, date: string, status: 'done' | 'skipped'
 }
 
 async function apiUnlog(habit_id: string, date: string) {
-  await fetch('/api/habits/unlog', {
+  await fetch(`${API_BASE}/api/habits/unlog`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ habit_id, date }),

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { today as todayStr } from '../lib/constants'
-import type { HabitSummary } from '../api'
+import { API_BASE, type HabitSummary } from '../api'
 import './HabitInlineRow.css'
 
 interface Props {
@@ -18,7 +18,7 @@ export default function HabitInlineRow({ habit, onMutate }: Props) {
 
   async function toggle() {
     if (isDone) {
-      await fetch('/api/habits/unlog', {
+      await fetch(`${API_BASE}/api/habits/unlog`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ habit_id: habit.id, date: today }),
@@ -26,7 +26,7 @@ export default function HabitInlineRow({ habit, onMutate }: Props) {
       setNotesOpen(false)
       onMutate()
     } else {
-      await fetch('/api/habits/log', {
+      await fetch(`${API_BASE}/api/habits/log`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ habit_id: habit.id, date: today, status: 'done', notes: null }),
@@ -38,7 +38,7 @@ export default function HabitInlineRow({ habit, onMutate }: Props) {
   }
 
   async function saveNotes() {
-    await fetch('/api/habits/log', {
+    await fetch(`${API_BASE}/api/habits/log`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ habit_id: habit.id, date: today, status: 'done', notes: notes || null }),

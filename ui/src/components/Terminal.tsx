@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { API_BASE } from '../api'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -19,7 +20,8 @@ export default function Terminal({ open, onClose, pendingCommand, onCommandConsu
   const initializedRef = useRef(false)
 
   const connect = useCallback(async () => {
-    const ws = new WebSocket(`ws://localhost:3456`)
+    const wsBase = API_BASE ? API_BASE.replace(/^http/, 'ws') : `ws://localhost:3456`
+    const ws = new WebSocket(wsBase)
     wsRef.current = ws
 
     ws.onmessage = (e) => {
@@ -36,7 +38,7 @@ export default function Terminal({ open, onClose, pendingCommand, onCommandConsu
     ws.onclose = () => { wsRef.current = null }
 
     // Send auto-run command if configured
-    const settings: Record<string, string> = await fetch('/api/settings').then(r => r.json()).catch(() => ({}))
+    const settings: Record<string, string> = await fetch(`${API_BASE}/api/settings`).then(r => r.json()).catch(() => ({}))
     const autoRun = settings.terminalAutoRun?.trim()
     if (autoRun) {
       ws.addEventListener('open', () => {

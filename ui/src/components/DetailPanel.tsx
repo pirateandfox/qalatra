@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import type { Task, Subtask } from '../types/task'
 import RecurrencePicker from './RecurrencePicker'
 import PlatformIcon from './PlatformIcon'
-import { updateTask, fetchAgents, deleteAttachment, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, type Agent, type AgentJob, type Note } from '../api'
+import { API_BASE, updateTask, fetchAgents, deleteAttachment, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, type Agent, type AgentJob, type Note } from '../api'
 import type { Attachment } from '../types/task'
 import { PRIORITY_COLORS } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
@@ -101,7 +101,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
   async function handleDelete() {
     if (!task) return
     if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return
-    await fetch(`/api/task/${task.id}`, { method: 'DELETE' })
+    await fetch(`${API_BASE}/api/task/${task.id}`, { method: 'DELETE' })
     onDelete?.()
     onClose()
   }
@@ -112,13 +112,13 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
     setLoading(true)
     try {
       const [taskRes, subsRes] = await Promise.all([
-        fetch(`/api/task/${id}`),
-        fetch(`/api/task/${id}/subtasks`),
+        fetch(`${API_BASE}/api/task/${id}`),
+        fetch(`${API_BASE}/api/task/${id}/subtasks`),
       ])
       const t: Task = await taskRes.json()
       const s: Subtask[] = await subsRes.json()
       const [atts, notesList] = await Promise.all([
-        (await fetch(`/api/task/${id}/attachments`)).json() as Promise<Attachment[]>,
+        (await fetch(`${API_BASE}/api/task/${id}/attachments`)).json() as Promise<Attachment[]>,
         fetchNotes(id),
       ])
       setTask(t)
@@ -174,7 +174,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
     if (!task) return
     const title = titleRef.current?.innerText.trim()
     if (!title || title === task.title) return
-    await fetch('/update-title', {
+    await fetch(`${API_BASE}/update-title`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task_id: task.id, title }),
@@ -218,7 +218,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
 
   async function addLink() {
     if (!task || !linkInput.trim()) return
-    await fetch('/add-link', {
+    await fetch(`${API_BASE}/add-link`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task_id: task.id, url: linkInput.trim() }),
@@ -230,7 +230,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
 
   async function addSubtask() {
     if (!task || !newSubtask.trim()) return
-    await fetch('/create-subtask', {
+    await fetch(`${API_BASE}/create-subtask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ parent_id: task.id, title: newSubtask.trim() }),
@@ -241,7 +241,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
 
   async function toggleSubtask(sub: Subtask) {
     const isDone = sub.status === 'done'
-    await fetch(isDone ? '/uncomplete' : '/complete', {
+    await fetch(isDone ? `${API_BASE}/uncomplete` : `${API_BASE}/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ task_id: sub.id }),
@@ -255,8 +255,8 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
     setUploading(true)
     const form = new FormData()
     form.append('file', file)
-    await fetch(`/api/task/${task.id}/attachments`, { method: 'POST', body: form })
-    const atts: Attachment[] = await (await fetch(`/api/task/${task.id}/attachments`)).json()
+    await fetch(`${API_BASE}/api/task/${task.id}/attachments`, { method: 'POST', body: form })
+    const atts: Attachment[] = await (await fetch(`${API_BASE}/api/task/${task.id}/attachments`)).json()
     setAttachments(atts)
     setUploading(false)
     e.target.value = ''

@@ -253,17 +253,9 @@ function createWindow() {
     win.loadURL(`http://localhost:${DEV_PORT}`)
     win.webContents.openDevTools()
   } else {
-    let retries = 0
-    const loadApp = () => win.loadURL(`http://127.0.0.1:${API_PORT}`)
-    win.webContents.on('did-fail-load', (_event, errorCode) => {
-      // -3 is ERR_ABORTED (navigation cancelled), ignore it
-      if (errorCode === -3) return
-      if (retries < 20) {
-        retries++
-        setTimeout(loadApp, 500)
-      }
-    })
-    loadApp()
+    // Load the UI directly from disk — decouples initial render from API availability.
+    // All API calls use absolute URLs (http://127.0.0.1:3456) via window.electronAPI.apiBase.
+    win.loadFile(path.join(__dirname, 'ui', 'dist', 'index.html'))
   }
 }
 

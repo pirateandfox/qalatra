@@ -1,5 +1,9 @@
 import type { Task, Attachment } from './types/task'
 
+// In production the UI loads from disk (file://) so fetch needs absolute URLs.
+// preload.cjs exposes apiBase = 'http://127.0.0.1:3456' in production, '' in dev.
+export const API_BASE: string = (window as any).electronAPI?.apiBase ?? ''
+
 export interface HabitSummary {
   id: string
   title: string
@@ -26,32 +30,32 @@ export interface TaskData {
 }
 
 export async function fetchTasks(date: string): Promise<TaskData> {
-  const res = await fetch(`/api/tasks?date=${date}`)
+  const res = await fetch(`${API_BASE}/api/tasks?date=${date}`)
   return res.json()
 }
 
 export async function fetchTask(id: string): Promise<Task> {
-  const res = await fetch(`/api/task/${id}`)
+  const res = await fetch(`${API_BASE}/api/task/${id}`)
   return res.json()
 }
 
 export async function fetchSubtasks(id: string): Promise<Task[]> {
-  const res = await fetch(`/api/task/${id}/subtasks`)
+  const res = await fetch(`${API_BASE}/api/task/${id}/subtasks`)
   return res.json()
 }
 
 export async function fetchBacklog(): Promise<Task[]> {
-  const res = await fetch('/api/backlog')
+  const res = await fetch(`${API_BASE}/api/backlog`)
   return res.json()
 }
 
 export async function fetchDailyNote(date: string): Promise<{ date: string; content: string }> {
-  const res = await fetch(`/api/daily-note/${date}`)
+  const res = await fetch(`${API_BASE}/api/daily-note/${date}`)
   return res.json()
 }
 
 export async function saveDailyNote(date: string, content: string): Promise<void> {
-  await fetch('/api/daily-note', {
+  await fetch(`${API_BASE}/api/daily-note`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ date, content }),
@@ -66,12 +70,12 @@ export interface Context {
 }
 
 export async function fetchContexts(): Promise<Context[]> {
-  const res = await fetch('/api/contexts')
+  const res = await fetch(`${API_BASE}/api/contexts`)
   return res.json()
 }
 
 export async function createContext(slug: string, label: string, color: string): Promise<void> {
-  await fetch('/api/contexts', {
+  await fetch(`${API_BASE}/api/contexts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug, label, color }),
@@ -79,7 +83,7 @@ export async function createContext(slug: string, label: string, color: string):
 }
 
 export async function updateContext(slug: string, fields: Partial<Pick<Context, 'label' | 'color' | 'sort_order'>>): Promise<void> {
-  await fetch(`/api/contexts/${slug}`, {
+  await fetch(`${API_BASE}/api/contexts/${slug}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fields),
@@ -87,7 +91,7 @@ export async function updateContext(slug: string, fields: Partial<Pick<Context, 
 }
 
 export async function deleteContext(slug: string): Promise<void> {
-  await fetch(`/api/contexts/${slug}`, { method: 'DELETE' })
+  await fetch(`${API_BASE}/api/contexts/${slug}`, { method: 'DELETE' })
 }
 
 export interface Agent {
@@ -99,7 +103,7 @@ export interface Agent {
 }
 
 export async function fetchAgents(): Promise<Agent[]> {
-  const res = await fetch('/api/agents')
+  const res = await fetch(`${API_BASE}/api/agents`)
   return res.json()
 }
 
@@ -127,7 +131,7 @@ export interface Note {
 }
 
 export async function queueAgentJob(taskId: string, userMessage?: string): Promise<AgentJob> {
-  const res = await fetch('/api/agent-jobs', {
+  const res = await fetch(`${API_BASE}/api/agent-jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ task_id: taskId, user_message: userMessage ?? null }),
@@ -136,12 +140,12 @@ export async function queueAgentJob(taskId: string, userMessage?: string): Promi
 }
 
 export async function fetchNotes(taskId: string): Promise<Note[]> {
-  const res = await fetch(`/api/task/${taskId}/notes`)
+  const res = await fetch(`${API_BASE}/api/task/${taskId}/notes`)
   return res.json()
 }
 
 export async function addNote(taskId: string, body: string): Promise<{ id: string }> {
-  const res = await fetch(`/api/task/${taskId}/notes`, {
+  const res = await fetch(`${API_BASE}/api/task/${taskId}/notes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ body }),
@@ -150,21 +154,21 @@ export async function addNote(taskId: string, body: string): Promise<{ id: strin
 }
 
 export async function fetchAgentJobs(taskId: string): Promise<AgentJob[]> {
-  const res = await fetch(`/api/agent-jobs?task_id=${taskId}`)
+  const res = await fetch(`${API_BASE}/api/agent-jobs?task_id=${taskId}`)
   return res.json()
 }
 
 export async function fetchAttachments(taskId: string): Promise<Attachment[]> {
-  const res = await fetch(`/api/task/${taskId}/attachments`)
+  const res = await fetch(`${API_BASE}/api/task/${taskId}/attachments`)
   return res.json()
 }
 
 export async function deleteAttachment(id: string): Promise<void> {
-  await fetch(`/api/attachment/${id}`, { method: 'DELETE' })
+  await fetch(`${API_BASE}/api/attachment/${id}`, { method: 'DELETE' })
 }
 
 export async function updateTask(id: string, fields: Record<string, unknown>): Promise<void> {
-  await fetch(`/api/task/${id}`, {
+  await fetch(`${API_BASE}/api/task/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fields),
@@ -172,12 +176,12 @@ export async function updateTask(id: string, fields: Record<string, unknown>): P
 }
 
 export async function fetchSettings(): Promise<Record<string, string>> {
-  const res = await fetch('/api/settings')
+  const res = await fetch(`${API_BASE}/api/settings`)
   return res.json()
 }
 
 export async function saveSettings(data: Record<string, string>): Promise<void> {
-  await fetch('/api/settings', {
+  await fetch(`${API_BASE}/api/settings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -185,17 +189,17 @@ export async function saveSettings(data: Record<string, string>): Promise<void> 
 }
 
 export async function syncAttachments(): Promise<{ ok: boolean; synced?: number; failed?: number; total?: number; error?: string }> {
-  const res = await fetch('/api/attachments/sync', { method: 'POST' })
+  const res = await fetch(`${API_BASE}/api/attachments/sync`, { method: 'POST' })
   return res.json()
 }
 
 export async function getMcpStatus(): Promise<{ port: number; isHttpConfigured: boolean; currentEntry: unknown }> {
-  const res = await fetch('/api/mcp/status')
+  const res = await fetch(`${API_BASE}/api/mcp/status`)
   return res.json()
 }
 
 export async function applyMcpPort(port: number): Promise<{ ok: boolean; port: number; url: string; error?: string }> {
-  const res = await fetch('/api/mcp/apply', {
+  const res = await fetch(`${API_BASE}/api/mcp/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ port }),
@@ -203,8 +207,8 @@ export async function applyMcpPort(port: number): Promise<{ ok: boolean; port: n
   return res.json()
 }
 
-async function post(path: string, body: Record<string, unknown>, json = true) {
-  return fetch(path, {
+function post(path: string, body: Record<string, unknown>, json = true) {
+  return fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': json ? 'application/json' : 'application/x-www-form-urlencoded' },
     body: json ? JSON.stringify(body) : new URLSearchParams(body as Record<string, string>).toString(),
@@ -226,6 +230,6 @@ export const api = {
   reorder:         (ids: string[]) => post('/reorder', { ids }),
   createSubtask:   (parentId: string, title: string) => post('/create-subtask', { parent_id: parentId, title }),
   createTask:      (body: Partial<Task> & { title: string }) => post('/create-task-json', body as Record<string, unknown>),
-  deleteTask:      (taskId: string) => fetch(`/api/task/${taskId}`, { method: 'DELETE' }),
+  deleteTask:      (taskId: string) => fetch(`${API_BASE}/api/task/${taskId}`, { method: 'DELETE' }),
   updateNotes:     (taskId: string, notes: string) => post(`/api/task/${taskId}`, { notes }),
 }

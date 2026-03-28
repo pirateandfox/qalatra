@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { API_BASE } from '../api'
 import { StyleSidebar } from './components/StyleSidebar'
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/MarkdownEditor'
 import { PreviewPanel } from './components/PreviewPanel'
@@ -26,13 +27,13 @@ function countWords(text: string): number {
 }
 
 async function readFile(path: string): Promise<string> {
-  const res = await fetch(`/api/preview/file?path=${encodeURIComponent(path)}`)
+  const res = await fetch(`${API_BASE}/api/preview/file?path=${encodeURIComponent(path)}`)
   if (!res.ok) throw new Error(`Failed to read ${path}: ${res.status}`)
   return res.text()
 }
 
 async function writeFile(path: string, contents: string): Promise<void> {
-  const res = await fetch('/api/write-file', {
+  const res = await fetch(`${API_BASE}/api/write-file`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, contents }),
@@ -41,7 +42,7 @@ async function writeFile(path: string, contents: string): Promise<void> {
 }
 
 async function fileExists(path: string): Promise<boolean> {
-  const res = await fetch(`/api/preview/file?path=${encodeURIComponent(path)}`)
+  const res = await fetch(`${API_BASE}/api/preview/file?path=${encodeURIComponent(path)}`)
   return res.ok
 }
 

@@ -853,6 +853,14 @@ process.on('unhandledRejection', err => { console.error('[api] unhandledRejectio
 
 const server = http.createServer(async (req, res) => {
   try {
+  // Allow requests from file:// (production loadFile) and localhost dev server
+  const origin = req.headers['origin'] || '';
+  const allowedOrigin = origin === 'null' || origin === '' ? '*' : origin;
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
   const pathname = url.pathname;
   const contentType = req.headers['content-type'] ?? '';
@@ -1662,10 +1670,14 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Initialize DB singleton at startup — runs migrations once
-getDb();
-try { autoRunAgents(); } catch (_) {}
-
+// Bind the port immediately so Electron's poll succeeds before DB migrations finish.
+// DB init (which can block 5–60s on first run due to WAL lock contention) runs in
+// setImmediate so the event loop is free to accept the health-check request first.
 server.listen(PORT, () => {
   console.log(`Task OS  →  http://localhost:${PORT}`);
+});
+
+setImmediate(() => {
+  try { getDb(); } catch (_) {}
+  try { autoRunAgents(); } catch (_) {}
 });
