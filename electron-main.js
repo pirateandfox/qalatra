@@ -249,13 +249,30 @@ function createWindow() {
     return { action: 'deny' }
   })
 
+  // Forward renderer console messages to main.log so we can diagnose remote issues
+  win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    const tag = ['verbose', 'info', 'warn', 'error'][level] ?? 'info'
+    const src = sourceId ? ` (${path.basename(sourceId)}:${line})` : ''
+    if (tag === 'error' || tag === 'warn') {
+      console.error(`[renderer:${tag}]${src} ${message}`)
+    } else {
+      console.log(`[renderer:${tag}]${src} ${message}`)
+    }
+  })
+
+  win.webContents.on('did-finish-load', () => console.log('[window] did-finish-load'))
+  win.webContents.on('did-fail-load', (_e, code, desc) => console.error(`[window] did-fail-load code=${code} desc=${desc}`))
+  win.webContents.on('render-process-gone', (_e, details) => console.error(`[window] render-process-gone reason=${details.reason} exitCode=${details.exitCode}`))
+  win.webContents.on('unresponsive', () => console.error('[window] renderer unresponsive'))
+
   if (isDev) {
     win.loadURL(`http://localhost:${DEV_PORT}`)
     win.webContents.openDevTools()
   } else {
-    // Load the UI directly from disk — decouples initial render from API availability.
-    // All API calls use absolute URLs (http://127.0.0.1:3456) via window.electronAPI.apiBase.
-    win.loadFile(path.join(__dirname, 'ui', 'dist', 'index.html'))
+    const uiPath = path.join(__dirname, 'ui', 'dist', 'index.html')
+    console.log(`[window] loadFile: ${uiPath}`)
+    console.log(`[window] uiPath exists: ${fs.existsSync(uiPath)}`)
+    win.loadFile(uiPath)
   }
 }
 

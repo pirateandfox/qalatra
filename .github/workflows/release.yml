@@ -9,7 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  release-mac:
+  # arm64 DMG — built natively on Apple Silicon runner
+  release-mac-arm64:
     runs-on: macos-latest
 
     steps:
@@ -35,7 +36,7 @@ jobs:
       - name: Build UI
         run: npm run build --prefix ui
 
-      - name: Build and publish Electron app
+      - name: Build and publish Electron app (arm64)
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -43,7 +44,46 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --mac --publish always
+        run: npx electron-builder --mac --arch arm64 --publish always
+
+  # x64 DMG — built natively on Intel runner to avoid cross-compilation issues
+  # with native modules (better-sqlite3, node-pty) that break when cross-compiled
+  # from arm64 to x64.
+  release-mac-x64:
+    runs-on: macos-13
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install setuptools (for node-gyp / Python 3.12+)
+        run: pip3 install setuptools --break-system-packages
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install UI dependencies
+        run: npm ci --prefix ui
+
+      - name: Build UI
+        run: npm run build --prefix ui
+
+      - name: Build and publish Electron app (x64)
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --mac --arch x64 --publish always
 
   release-windows:
     runs-on: windows-latest
@@ -105,7 +145,7 @@ jobs:
 
   publish-release:
     runs-on: ubuntu-latest
-    needs: [release-mac, release-windows, release-linux]
+    needs: [release-mac-arm64, release-mac-x64, release-windows, release-linux]
 
     steps:
       - uses: actions/checkout@v4

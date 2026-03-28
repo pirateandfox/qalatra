@@ -16,12 +16,23 @@ import { getS3Client, uploadToS3, deleteFromS3, getPresignedUrl } from './s3.js'
 // the startup migration connection and per-request connections.
 
 let _db = null;
+let _dbError = null;
 function getDb() {
   if (!_db) {
-    const db = openDb();
-    db.pragma('busy_timeout = 5000');
-    migrate(db);
-    _db = db;
+    if (_dbError) throw _dbError;
+    try {
+      console.log('[db] openDb start');
+      const db = openDb();
+      console.log('[db] openDb done, running migrate');
+      db.pragma('busy_timeout = 5000');
+      migrate(db);
+      _db = db;
+      console.log('[db] migrate done — db ready');
+    } catch (err) {
+      _dbError = err;
+      console.error('[db] init failed:', err.message, err.stack);
+      throw err;
+    }
   }
   return _db;
 }
@@ -864,6 +875,24 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
   const pathname = url.pathname;
   const contentType = req.headers['content-type'] ?? '';
+
+  // GET /api/debug — diagnostic endpoint for troubleshooting remote machines
+  if (req.method === 'GET' && pathname === '/api/debug') {
+    const info = {
+      version: process.env.npm_package_version ?? 'unknown',
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+      dbReady: !!_db,
+      dbError: _dbError ? _dbError.message : null,
+      pid: process.pid,
+      uptime: process.uptime(),
+      env: { NODE_ENV: process.env.NODE_ENV, TASKOS_DB_DIR: process.env.TASKOS_DB_DIR },
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(info, null, 2));
+    return;
+  }
 
   // GET /logos/*.png
   if (req.method === 'GET' && pathname.startsWith('/logos/')) {
