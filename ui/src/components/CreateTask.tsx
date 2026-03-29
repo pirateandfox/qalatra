@@ -44,18 +44,24 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
     e?.preventDefault()
     if (!title.trim() || saving) return
     setSaving(true)
-    const res = await api.createTask({
-      title: title.trim(),
-      context,
-      my_priority: priority ?? undefined,
-      due_date: dueDate || undefined,
-      project: project.trim() || undefined,
-      agent_path: agentPath || undefined,
-    } as any)
-    const data = await res.json()
-    setSaving(false)
-    onCreated(data.task_id)
-    onClose()
+    try {
+      const res = await api.createTask({
+        title: title.trim(),
+        context,
+        my_priority: priority ?? undefined,
+        due_date: dueDate || undefined,
+        project: project.trim() || undefined,
+        agent_path: agentPath || undefined,
+      } as any)
+      const data = await res.json()
+      onCreated(data.id)  // API returns task object with 'id', not 'task_id'
+      onClose()
+    } catch (err: any) {
+      console.error('[CreateTask] submit failed:', err?.message ?? err)
+      alert(`Failed to create task: ${err?.message ?? 'Unknown error'}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (!open) return null
