@@ -231,7 +231,8 @@ function setupAutoUpdater() {
   if (isDev) return
   getAutoUpdater().then(au => {
     au._silentCheck = true  // suppress error dialogs on background startup check
-    au.checkForUpdates()
+    // checkForUpdates() both emits 'error' AND rejects the promise — catch both
+    au.checkForUpdates().catch(err => console.error('[updater] silent check failed:', err.message))
   }).catch(err => console.error('[updater] init error:', err.message))
 }
 
