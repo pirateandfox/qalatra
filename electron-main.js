@@ -266,6 +266,11 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
+      // Disable Chromium web security so the renderer can POST to localhost.
+      // Chromium's Private Network Access policy silently blocks POST+JSON
+      // preflights to 127.0.0.1 on some systems even when the page is same-origin.
+      // This is a local desktop app — all communication is with its own backend.
+      webSecurity: false,
     },
   })
 
