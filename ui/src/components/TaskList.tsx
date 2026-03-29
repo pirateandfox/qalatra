@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { API_BASE, type TaskData } from '../api'
+import { api, type TaskData } from '../api'
 import type { Task } from '../types/task'
 import { useContexts } from '../lib/ContextsProvider'
 import TaskRow from './TaskRow'
@@ -19,7 +19,7 @@ interface Props {
 
 function ReminderRow({ task, onSelect, onMutate }: { task: Task; onSelect: (id: string) => void; onMutate: () => void }) {
   async function dismiss() {
-    await fetch(`${API_BASE}/api/task/${task.id}`, { method: 'DELETE' })
+    await api.deleteTask(task.id)
     onMutate()
   }
   return (

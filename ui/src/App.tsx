@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { API_BASE, fetchTasks, fetchSettings, type TaskData } from './api'
+import { fetchTasks, fetchSettings, type TaskData } from './api'
 import { today as todayStr } from './lib/constants'
 import { ContextsProvider } from './lib/ContextsProvider'
 import Header from './components/Header'
@@ -42,7 +42,7 @@ export default function App() {
       setApiError(null)
     } catch (err: any) {
       const msg = err?.message ?? String(err)
-      console.error('[App] fetchTasks failed:', msg, 'API_BASE:', API_BASE)
+      console.error('[App] fetchTasks failed:', msg)
       if (!silent) setApiError(msg)
     } finally {
       if (!silent) setLoading(false)
@@ -133,8 +133,7 @@ export default function App() {
               {loading && <div style={{ color: 'var(--muted)', padding: '40px', textAlign: 'center' }}>Loading…</div>}
               {!loading && apiError && (
                 <div style={{ padding: '40px', color: '#e55', fontFamily: 'monospace', fontSize: 13 }}>
-                  <div style={{ marginBottom: 8, fontWeight: 600 }}>Could not connect to API</div>
-                  <div style={{ marginBottom: 4, opacity: 0.8 }}>API_BASE: {API_BASE || '(empty — relative URLs)'}</div>
+                  <div style={{ marginBottom: 8, fontWeight: 600 }}>Could not load tasks</div>
                   <div style={{ marginBottom: 12, opacity: 0.8 }}>Error: {apiError}</div>
                   <button onClick={() => load(date)} style={{ padding: '6px 14px', cursor: 'pointer' }}>Retry</button>
                 </div>

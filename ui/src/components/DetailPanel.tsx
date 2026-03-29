@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import type { Task, Subtask } from '../types/task'
 import RecurrencePicker from './RecurrencePicker'
 import PlatformIcon from './PlatformIcon'
-import { API_BASE, updateTask, fetchAgents, deleteAttachment, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, type Agent, type AgentJob, type Note } from '../api'
+import { api, updateTask, fetchTask, fetchSubtasks, fetchAttachments, fetchAgents, deleteAttachment, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, type Agent, type AgentJob, type Note } from '../api'
 import type { Attachment } from '../types/task'
 import { PRIORITY_COLORS } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
@@ -101,7 +101,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
   async function handleDelete() {
     if (!task) return
     if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return
-    await fetch(`${API_BASE}/api/task/${task.id}`, { method: 'DELETE' })
+    await api.deleteTask(task.id)
     onDelete?.()
     onClose()
   }
@@ -111,18 +111,14 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
   const load = useCallback(async (id: string) => {
     setLoading(true)
     try {
-      const [taskRes, subsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/task/${id}`),
-        fetch(`${API_BASE}/api/task/${id}/subtasks`),
-      ])
-      const t: Task = await taskRes.json()
-      const s: Subtask[] = await subsRes.json()
-      const [atts, notesList] = await Promise.all([
-        (await fetch(`${API_BASE}/api/task/${id}/attachments`)).json() as Promise<Attachment[]>,
+      const [t, s, atts, notesList] = await Promise.all([
+        fetchTask(id),
+        fetchSubtasks(id),
+        fetchAttachments(id),
         fetchNotes(id),
       ])
       setTask(t)
-      setSubtasks(s)
+      setSubtasks(s as any)
       setAttachments(atts)
       setNotes(notesList)
       setDescription(t.description ?? '')
@@ -174,11 +170,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
     if (!task) return
     const title = titleRef.current?.innerText.trim()
     if (!title || title === task.title) return
-    await fetch(`${API_BASE}/update-title`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: task.id, title }),
-    })
+    await api.updateTitle(task.id, title)
     setTask(t => t ? { ...t, title: title } : t)
     onMutate?.()
   }
@@ -218,11 +210,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
 
   async function addLink() {
     if (!task || !linkInput.trim()) return
-    await fetch(`${API_BASE}/add-link`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: task.id, url: linkInput.trim() }),
-    })
+    await api.addLink(task.id, linkInput.trim())
     setLinkInput('')
     setAddingLink(false)
     load(task.id)
@@ -230,22 +218,18 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
 
   async function addSubtask() {
     if (!task || !newSubtask.trim()) return
-    await fetch(`${API_BASE}/create-subtask`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parent_id: task.id, title: newSubtask.trim() }),
-    })
+    await api.createSubtask(task.id, newSubtask.trim())
     setNewSubtask('')
     load(task.id)
   }
 
   async function toggleSubtask(sub: Subtask) {
     const isDone = sub.status === 'done'
-    await fetch(isDone ? `${API_BASE}/uncomplete` : `${API_BASE}/complete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ task_id: sub.id }),
-    })
+    if (isDone) {
+      await api.uncomplete(sub.id)
+    } else {
+      await api.complete(sub.id)
+    }
     setSubtasks(ss => ss.map(s => s.id === sub.id ? { ...s, status: isDone ? 'active' : 'done' } : s))
   }
 
@@ -253,10 +237,9 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
     const file = e.target.files?.[0]
     if (!file || !task) return
     setUploading(true)
-    const form = new FormData()
-    form.append('file', file)
-    await fetch(`${API_BASE}/api/task/${task.id}/attachments`, { method: 'POST', body: form })
-    const atts: Attachment[] = await (await fetch(`${API_BASE}/api/task/${task.id}/attachments`)).json()
+    const buffer = await file.arrayBuffer()
+    await (window as any).electronAPI.invoke('attachments:upload', task.id, file.name, file.type, Array.from(new Uint8Array(buffer)))
+    const atts = await fetchAttachments(task.id)
     setAttachments(atts)
     setUploading(false)
     e.target.value = ''
