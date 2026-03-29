@@ -294,10 +294,12 @@ function createWindow() {
     win.loadURL(`http://localhost:${DEV_PORT}`)
     win.webContents.openDevTools()
   } else {
-    const uiPath = path.join(__dirname, 'ui', 'dist', 'index.html')
-    console.log(`[window] loadFile: ${uiPath}`)
-    console.log(`[window] uiPath exists: ${fs.existsSync(uiPath)}`)
-    win.loadFile(uiPath)
+    // Load UI from the API HTTP server so the page is same-origin as the API.
+    // loadFile() gives a null (file://) origin, which causes Chromium to block
+    // CORS preflights for non-simple requests (POST + application/json), making
+    // task creation and other writes silently hang.
+    console.log(`[window] loadURL: http://127.0.0.1:${API_PORT}`)
+    win.loadURL(`http://127.0.0.1:${API_PORT}`)
   }
 }
 
