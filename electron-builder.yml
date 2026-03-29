@@ -10,9 +10,8 @@ directories:
 
 files:
   - electron-main.js
+  - ipc-handlers.js
   - preload.cjs
-  - api-entry.cjs
-  - api.js
   - s3.js
   - mcp/**/*
   - ui/dist/**/*
