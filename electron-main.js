@@ -179,10 +179,20 @@ async function getAutoUpdater() {
   const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater ?? mod.default
   autoUpdater.logger = { info: m => console.log('[updater]', m), warn: m => console.warn('[updater]', m), error: m => console.error('[updater]', m) }
   autoUpdater.on('checking-for-update', () => console.log('[updater] Checking for update...'))
-  autoUpdater.on('update-available', info => console.log('[updater] Update available:', info.version))
   autoUpdater.on('update-not-available', info => console.log('[updater] Up to date:', info.version))
-  autoUpdater.on('download-progress', p => console.log(`[updater] Downloading: ${Math.round(p.percent)}%`))
+  autoUpdater.on('update-available', info => {
+    console.log('[updater] Update available:', info.version)
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) win.setProgressBar(0.01) // start indeterminate-ish progress in dock
+  })
+  autoUpdater.on('download-progress', p => {
+    console.log(`[updater] Downloading: ${Math.round(p.percent)}%`)
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) win.setProgressBar(p.percent / 100)
+  })
   autoUpdater.on('update-downloaded', () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) win.setProgressBar(-1) // clear dock progress
     dialog.showMessageBox({
       type: 'info',
       title: 'Update ready',
@@ -196,12 +206,22 @@ async function getAutoUpdater() {
   })
   autoUpdater.on('error', err => {
     console.error('[updater] Error:', err.message)
-    dialog.showMessageBox({
-      type: 'error',
-      title: 'Update error',
-      message: 'Could not check for updates.',
-      detail: err.message,
-    })
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) win.setProgressBar(-1) // clear dock progress on error
+    // Only show a dialog for manual checks — suppress the noisy startup check errors
+    // (those just log to the file). The manual check path sets a flag we read here.
+    if (!autoUpdater._silentCheck) {
+      const isAvailability = /404|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|certificate|getaddrinfo|net::/i.test(err.message)
+      dialog.showMessageBox({
+        type: 'warning',
+        title: 'Update check failed',
+        message: isAvailability ? 'Update server not currently available.' : 'Could not check for updates.',
+        detail: isAvailability
+          ? 'The update server may still be building the latest release. Please try again in a few minutes.'
+          : err.message.slice(0, 300),
+        buttons: ['OK'],
+      })
+    }
   })
   _autoUpdater = autoUpdater
   return autoUpdater
@@ -209,7 +229,10 @@ async function getAutoUpdater() {
 
 function setupAutoUpdater() {
   if (isDev) return
-  getAutoUpdater().then(au => au.checkForUpdates()).catch(err => console.error('[updater] init error:', err.message))
+  getAutoUpdater().then(au => {
+    au._silentCheck = true  // suppress error dialogs on background startup check
+    au.checkForUpdates()
+  }).catch(err => console.error('[updater] init error:', err.message))
 }
 
 async function checkForUpdatesManually() {
@@ -219,6 +242,7 @@ async function checkForUpdatesManually() {
   }
   try {
     const au = await getAutoUpdater()
+    au._silentCheck = false  // show error dialogs for manual checks
     await au.checkForUpdates()
   } catch (err) {
     console.error('[updater] manual check error:', err.message)
