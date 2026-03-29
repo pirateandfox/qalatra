@@ -870,11 +870,16 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
   const pathname = url.pathname;
   const contentType = req.headers['content-type'] ?? '';
+
+  // Log every request so we can trace exactly what the renderer is calling
+  if (req.method === 'OPTIONS') {
+    console.log(`[api] OPTIONS ${pathname} origin="${origin}"`);
+    res.writeHead(204); res.end(); return;
+  }
+  console.log(`[api] ${req.method} ${pathname}`);
 
   // GET /api/debug — diagnostic endpoint for troubleshooting remote machines
   if (req.method === 'GET' && pathname === '/api/debug') {
@@ -1299,7 +1304,8 @@ const server = http.createServer(async (req, res) => {
     console.log(`[api] GET /api/tasks date=${date}`);
     try {
       const data = getTasksForDate(date);
-      console.log(`[api] GET /api/tasks done`);
+      const counts = Object.fromEntries(Object.entries(data).filter(([,v]) => Array.isArray(v)).map(([k,v]) => [k, v.length]));
+      console.log(`[api] GET /api/tasks done counts=${JSON.stringify(counts)}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(data));
     } catch (err) {
@@ -1651,10 +1657,12 @@ server.on('error', err => {
 
 const wss = new WebSocketServer({ server });
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  console.log(`[terminal] WebSocket connection from ${req.headers.origin || 'unknown'}`);
   const shell = process.env.SHELL || '/bin/zsh';
   const settings = loadSettings();
   const cwd = settings.terminalCwd || process.env.HOME;
+  console.log(`[terminal] spawning pty: shell=${shell} cwd=${cwd}`);
 
   let ptyProcess;
   try {
@@ -1666,10 +1674,11 @@ wss.on('connection', (ws) => {
       env: process.env,
     });
   } catch (err) {
+    console.error('[terminal] pty.spawn failed:', err.message, err.stack);
     ws.send(JSON.stringify({ type: 'output', data: `\r\n\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n` }));
-    console.error('[terminal] pty.spawn failed:', err);
     return;
   }
+  console.log('[terminal] pty spawned pid=' + ptyProcess.pid);
 
   ptyProcess.onData(data => {
     if (ws.readyState === ws.OPEN) {
