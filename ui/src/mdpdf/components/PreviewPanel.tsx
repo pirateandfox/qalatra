@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import DOMPurify from 'dompurify'
 import { type StyleConfig, PAGE_DIMS, isGoogleFont, googleFontUrl } from '../types'
 import { resolveColors } from '../utils/contentStyles'
 import { parseMarkdownToBlocks, measureBlockHeights, buildPages, type PageData } from '../utils/pagination'
@@ -214,7 +215,7 @@ export function PreviewPanel({ markdown, style, onInsertBreakAfter, onRemoveBrea
                         const showZone = !isLastInDoc && !block.suppressBreakZone
                         return (
                           <div key={blockIdx}>
-                            <div dangerouslySetInnerHTML={{ __html: block.html }} />
+                            <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(block.html) }} />
                             {showZone && (
                               <BreakZone
                                 sourceCharEnd={block.sourceCharEnd}
