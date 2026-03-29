@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { API_BASE } from '../api'
 import './HabitRow.css'
 
 interface HabitLog {
@@ -29,19 +28,11 @@ interface Props {
 }
 
 async function apiLog(habit_id: string, date: string, status: 'done' | 'skipped', notes: string | null) {
-  await fetch(`${API_BASE}/api/habits/log`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ habit_id, date, status, notes }),
-  })
+  await (window as any).electronAPI.invoke('habits:log', habit_id, date, status, notes)
 }
 
 async function apiUnlog(habit_id: string, date: string) {
-  await fetch(`${API_BASE}/api/habits/unlog`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ habit_id, date }),
-  })
+  await (window as any).electronAPI.invoke('habits:unlog', habit_id, date)
 }
 
 export default function HabitRow({ habit, today, onMutate }: Props) {

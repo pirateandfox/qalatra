@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { API_BASE } from '../api'
+import { fetchSettings } from '../api'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -12,41 +12,43 @@ interface Props {
   onCommandConsumed?: () => void
 }
 
+const eAPI = () => (window as any).electronAPI
+
 export default function Terminal({ open, onClose, pendingCommand, onCommandConsumed }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
+  const readyRef = useRef(false)
   const initializedRef = useRef(false)
+  const cleanupRef = useRef<(() => void) | null>(null)
 
   const connect = useCallback(async () => {
-    const wsBase = API_BASE ? API_BASE.replace(/^http/, 'ws') : `ws://localhost:3456`
-    const ws = new WebSocket(wsBase)
-    wsRef.current = ws
+    const { cols, rows } = fitRef.current
+      ? { cols: termRef.current?.cols ?? 80, rows: termRef.current?.rows ?? 24 }
+      : { cols: 80, rows: 24 }
 
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data)
-        if (msg.type === 'output') termRef.current?.write(msg.data)
-        if (msg.type === 'exit') ws.close()
-      } catch { /* ignore */ }
-    }
-    ws.onerror = () => {
-      termRef.current?.write('\r\n\x1b[31mCould not connect to terminal service.\x1b[0m\r\n')
-      termRef.current?.write('\x1b[33mThe backend API may not be running. Try restarting the app.\x1b[0m\r\n')
-    }
-    ws.onclose = () => { wsRef.current = null }
+    // Listen for output from main process
+    const removeListener = eAPI().onTerminalOutput((data: string) => {
+      termRef.current?.write(data)
+    })
+    cleanupRef.current = removeListener
 
-    // Send auto-run command if configured
-    const settings: Record<string, string> = await fetch(`${API_BASE}/api/settings`).then(r => r.json()).catch(() => ({}))
-    const autoRun = settings.terminalAutoRun?.trim()
-    if (autoRun) {
-      ws.addEventListener('open', () => {
-        setTimeout(() => {
-          ws.send(JSON.stringify({ type: 'input', data: autoRun + '\r' }))
-        }, 300)
-      })
+    try {
+      await eAPI().terminalStart(cols, rows)
+      readyRef.current = true
+    } catch (err: any) {
+      termRef.current?.write('\r\n\x1b[31mFailed to start terminal: ' + (err?.message ?? err) + '\x1b[0m\r\n')
+      return
     }
+
+    // Auto-run command if configured
+    try {
+      const settings = await fetchSettings()
+      const autoRun = settings.terminalAutoRun?.trim()
+      if (autoRun) {
+        setTimeout(() => { eAPI().terminalInput(autoRun + '\r') }, 300)
+      }
+    } catch {}
   }, [])
 
   useEffect(() => {
@@ -72,20 +74,17 @@ export default function Terminal({ open, onClose, pendingCommand, onCommandConsu
     termRef.current = term
     fitRef.current = fit
 
-    term.onData(data => {
-      wsRef.current?.send(JSON.stringify({ type: 'input', data }))
-    })
-    term.onResize(({ cols, rows }) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
-      }
-    })
+    term.onData(data => { eAPI().terminalInput(data) })
+    term.onResize(({ cols, rows }) => { eAPI().terminalResize(cols, rows) })
 
     connect()
 
     const resizeObserver = new ResizeObserver(() => fit.fit())
     resizeObserver.observe(containerRef.current)
-    return () => resizeObserver.disconnect()
+    return () => {
+      resizeObserver.disconnect()
+      cleanupRef.current?.()
+    }
   }, [open, connect])
 
   useEffect(() => {
@@ -97,28 +96,19 @@ export default function Terminal({ open, onClose, pendingCommand, onCommandConsu
   // Fire a one-shot command when the terminal opens with a pending command
   useEffect(() => {
     if (!open || !pendingCommand) return
-    const send = () => {
-      wsRef.current?.send(JSON.stringify({ type: 'input', data: pendingCommand }))
-      onCommandConsumed?.()
-    }
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    const send = () => { eAPI().terminalInput(pendingCommand); onCommandConsumed?.() }
+    if (readyRef.current) {
       setTimeout(send, 400)
     } else {
-      // Terminal not connected yet — wait for it
       const interval = setInterval(() => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          clearInterval(interval)
-          setTimeout(send, 200)
-        }
+        if (readyRef.current) { clearInterval(interval); setTimeout(send, 200) }
       }, 100)
       return () => clearInterval(interval)
     }
   }, [open, pendingCommand])
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === '`' && e.ctrlKey) onClose()
-    }
+    const handler = (e: KeyboardEvent) => { if (e.key === '`' && e.ctrlKey) onClose() }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])

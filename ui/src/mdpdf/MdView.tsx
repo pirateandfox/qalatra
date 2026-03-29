@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { API_BASE } from '../api'
 import { StyleSidebar } from './components/StyleSidebar'
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/MarkdownEditor'
 import { PreviewPanel } from './components/PreviewPanel'
@@ -27,23 +26,20 @@ function countWords(text: string): number {
 }
 
 async function readFile(path: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/preview/file?path=${encodeURIComponent(path)}`)
-  if (!res.ok) throw new Error(`Failed to read ${path}: ${res.status}`)
-  return res.text()
+  return (window as any).electronAPI.invoke('file:read', path)
 }
 
 async function writeFile(path: string, contents: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/write-file`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, contents }),
-  })
-  if (!res.ok) throw new Error(`Failed to write ${path}: ${res.status}`)
+  await (window as any).electronAPI.invoke('file:write', path, contents)
 }
 
 async function fileExists(path: string): Promise<boolean> {
-  const res = await fetch(`${API_BASE}/api/preview/file?path=${encodeURIComponent(path)}`)
-  return res.ok
+  try {
+    await (window as any).electronAPI.invoke('file:read', path)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export default function MdView({ filePath, onClose, terminalOpen, onTerminalToggle, onChatWithDoc }: Props) {

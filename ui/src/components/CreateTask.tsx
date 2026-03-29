@@ -45,7 +45,7 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
     if (!title.trim() || saving) return
     setSaving(true)
     try {
-      const res = await api.createTask({
+      const data = await api.createTask({
         title: title.trim(),
         context,
         my_priority: priority ?? undefined,
@@ -53,7 +53,6 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
         project: project.trim() || undefined,
         agent_path: agentPath || undefined,
       } as any)
-      const data = await res.json()
       onCreated(data.id)
       onClose()
     } catch (err: any) {

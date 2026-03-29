@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { today as todayStr } from '../lib/constants'
-import { API_BASE, type HabitSummary } from '../api'
+import { type HabitSummary } from '../api'
 import './HabitInlineRow.css'
 
 interface Props {
@@ -18,19 +18,11 @@ export default function HabitInlineRow({ habit, onMutate }: Props) {
 
   async function toggle() {
     if (isDone) {
-      await fetch(`${API_BASE}/api/habits/unlog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ habit_id: habit.id, date: today }),
-      })
+      await (window as any).electronAPI.invoke('habits:unlog', habit.id, today)
       setNotesOpen(false)
       onMutate()
     } else {
-      await fetch(`${API_BASE}/api/habits/log`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ habit_id: habit.id, date: today, status: 'done', notes: null }),
-      })
+      await (window as any).electronAPI.invoke('habits:log', habit.id, today, 'done', null)
       setNotes(log?.notes ?? '')
       setNotesOpen(true)
       onMutate()
@@ -38,11 +30,7 @@ export default function HabitInlineRow({ habit, onMutate }: Props) {
   }
 
   async function saveNotes() {
-    await fetch(`${API_BASE}/api/habits/log`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ habit_id: habit.id, date: today, status: 'done', notes: notes || null }),
-    })
+    await (window as any).electronAPI.invoke('habits:log', habit.id, today, 'done', notes || null)
     setNotesOpen(false)
     onMutate()
   }

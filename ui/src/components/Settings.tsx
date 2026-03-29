@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { API_BASE, fetchSettings, saveSettings, fetchAgents, syncAttachments, getMcpStatus, applyMcpPort, createContext, updateContext, deleteContext, type Agent } from '../api'
+import { fetchSettings, saveSettings, fetchAgents, syncAttachments, getMcpStatus, applyMcpPort, createContext, updateContext, deleteContext, type Agent } from '../api'
 import { useContexts } from '../lib/ContextsProvider'
 import './Settings.css'
 
@@ -132,9 +132,7 @@ export default function Settings({ open, onClose }: Props) {
             <button className="settings-save" style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
               onClick={async () => {
                 setS3TestResult(null)
-                const res = await fetch(`${API_BASE}/api/s3/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ s3Endpoint: settings.s3Endpoint, s3Bucket: settings.s3Bucket, s3AccessKey: settings.s3AccessKey, s3SecretKey: settings.s3SecretKey }) })
-                const data = await res.json()
+                const data = await (window as any).electronAPI.invoke('s3:test', { s3Endpoint: settings.s3Endpoint, s3Bucket: settings.s3Bucket, s3AccessKey: settings.s3AccessKey, s3SecretKey: settings.s3SecretKey })
                 setS3TestResult(data.ok ? 'ok' : 'fail')
               }}>Test Connection</button>
             {s3TestResult === 'ok' && <span style={{ fontSize: 12, color: '#4ade80' }}>✓ Connected</span>}

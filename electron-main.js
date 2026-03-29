@@ -1,18 +1,18 @@
 import { app, BrowserWindow, shell, nativeImage, dialog, utilityProcess, Menu, ipcMain } from 'electron'
-import http from 'http'
 import { createServer } from 'net'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import pty from 'node-pty'
+import { initDb, initSettings, setupIpcHandlers, startBackgroundWorkers } from './ipc-handlers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isDev = process.env.NODE_ENV === 'development'
-const API_PORT = 3456
 const DEV_PORT = 5173
 
-let apiProcess = null
 let mcpProcess = null
+let ptyProcess = null
 
 // ── Port check ────────────────────────────────────────────────────────────────
 
@@ -93,44 +93,12 @@ function pipeToLog(proc, label) {
   proc.stderr.on('data', d => console.error(`[${label}]`, d.toString().trim()))
 }
 
-async function startBackends(dbDir) {
-  console.log(`startBackends: dbDir=${dbDir}`)
+async function startMcpServer(dbDir) {
   const env = {
     ...process.env,
     TASKOS_DB_DIR: dbDir,
     TASKOS_SETTINGS_FILE: path.join(dbDir, 'settings.json'),
   }
-
-  // API server
-  const apiTaken = await isPortTaken(API_PORT)
-  if (apiTaken) {
-    console.log(`api already running on :${API_PORT}`)
-  } else {
-    console.log(`starting api: ${getEntryPath('api-entry.cjs')}`)
-    apiProcess = utilityProcess.fork(getEntryPath('api-entry.cjs'), [], {
-      stdio: 'pipe',
-      env,
-    })
-    pipeToLog(apiProcess, 'api')
-    apiProcess.on('exit', (code, signal) => {
-      if (signal !== 'SIGTERM' && code !== 0) {
-        console.error(`api exited: code=${code} signal=${signal}`)
-        dialog.showMessageBox({
-          type: 'error',
-          title: 'Task OS — Backend Crashed',
-          message: 'The API process exited unexpectedly.',
-          detail: `Exit code: ${code}. Tasks cannot be loaded until the app is restarted.\n\nLog: ${app.getPath('logs')}/main.log`,
-          buttons: ['Restart Now', 'Dismiss'],
-          defaultId: 0,
-        }).then(({ response }) => {
-          if (response === 0) { app.relaunch(); app.quit() }
-        })
-      }
-      apiProcess = null
-    })
-  }
-
-  // MCP HTTP server — read port from settings if available
   let mcpPort = 3457
   try {
     const s = JSON.parse(fs.readFileSync(path.join(dbDir, 'settings.json'), 'utf8'))
@@ -140,33 +108,20 @@ async function startBackends(dbDir) {
   const mcpTaken = await isPortTaken(mcpPort)
   if (mcpTaken) {
     console.log(`mcp already running on :${mcpPort}`)
-  } else {
-    mcpProcess = utilityProcess.fork(getEntryPath('mcp/http-server-entry.cjs'), [], {
-      stdio: 'pipe',
-      env,
-    })
-    pipeToLog(mcpProcess, 'mcp')
-    mcpProcess.on('exit', (code, signal) => {
-      if (signal !== 'SIGTERM' && code !== 0) console.error(`mcp exited: code=${code} signal=${signal}`)
-      mcpProcess = null
-    })
+    return
   }
+  console.log(`starting mcp on :${mcpPort}`)
+  mcpProcess = utilityProcess.fork(getEntryPath('mcp/http-server-entry.cjs'), [], { stdio: 'pipe', env })
+  pipeToLog(mcpProcess, 'mcp')
+  mcpProcess.on('exit', (code, signal) => {
+    if (signal !== 'SIGTERM' && code !== 0) console.error(`mcp exited: code=${code} signal=${signal}`)
+    mcpProcess = null
+  })
+}
 
-  // Wait for API to be ready (up to 15 seconds — accounts for cold starts on new machines)
-  if (!isDev) {
-    for (let i = 0; i < 75; i++) {
-      const ready = await new Promise(resolve => {
-        const req = http.request({ hostname: '127.0.0.1', port: API_PORT, path: '/', method: 'GET' }, () => resolve(true))
-        req.on('error', () => resolve(false))
-        req.setTimeout(150, () => { req.destroy(); resolve(false) })
-        req.end()
-      })
-      if (ready) break
-      await new Promise(r => setTimeout(r, 200))
-    }
-  } else {
-    await new Promise(resolve => setTimeout(resolve, 600))
-  }
+function restartMcpServer(dbDir, newPort) {
+  if (mcpProcess) { mcpProcess.kill(); mcpProcess = null }
+  startMcpServer(dbDir).catch(err => console.error('[mcp] restart failed:', err.message))
 }
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
@@ -299,13 +254,12 @@ function createWindow() {
     win.loadURL(`http://localhost:${DEV_PORT}`)
     win.webContents.openDevTools()
   } else {
-    // Load UI from the API HTTP server so the page is same-origin as the API.
-    // loadFile() gives a null (file://) origin, which causes Chromium to block
-    // CORS preflights for non-simple requests (POST + application/json), making
-    // task creation and other writes silently hang.
-    console.log(`[window] loadURL: http://127.0.0.1:${API_PORT}`)
-    win.loadURL(`http://127.0.0.1:${API_PORT}`)
+    // All data goes through IPC now — no HTTP server needed. Load UI from disk.
+    const uiPath = path.join(__dirname, 'ui', 'dist', 'index.html')
+    console.log(`[window] loadFile: ${uiPath}`)
+    win.loadFile(uiPath)
   }
+  return win
 }
 
 // ── Menu ──────────────────────────────────────────────────────────────────────
@@ -392,35 +346,31 @@ function setupMenu() {
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
-// ── IPC HTTP bridge ───────────────────────────────────────────────────────────
-// Chromium's network stack on some systems (observed on Intel Mac) silently
-// blocks POST requests to localhost even with webSecurity:false. Route all
-// POST calls through IPC so Node's http module makes the request directly,
-// bypassing Chromium's network stack entirely.
+// ── Terminal IPC ──────────────────────────────────────────────────────────────
+// Replaces the WebSocket terminal in api.js. Spawns node-pty in the main
+// process and streams output to the renderer via webContents.send.
 
-ipcMain.handle('http-post', (_event, path, jsonBody, formBody) => {
-  return new Promise((resolve, reject) => {
-    const isJson = jsonBody !== null
-    const data = isJson ? JSON.stringify(jsonBody) : new URLSearchParams(formBody).toString()
-    const req = http.request({
-      hostname: '127.0.0.1',
-      port: API_PORT,
-      path,
-      method: 'POST',
-      headers: {
-        'Content-Type': isJson ? 'application/json' : 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(data),
-      },
-    }, (res) => {
-      let body = ''
-      res.on('data', chunk => { body += chunk })
-      res.on('end', () => resolve({ status: res.statusCode, body }))
-    })
-    req.on('error', err => reject(err))
-    req.write(data)
-    req.end()
+function setupTerminalIpc(win) {
+  ipcMain.handle('terminal:start', async (_, cols, rows) => {
+    if (ptyProcess) { try { ptyProcess.kill() } catch {} ptyProcess = null }
+    const settings = (await import('./ipc-handlers.js').catch(() => null))
+    const { loadSettingsDirect } = await import('./ipc-handlers.js').catch(() => ({ loadSettingsDirect: () => ({}) }))
+    let cwd = os.homedir()
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(win._dbDir || os.homedir(), 'settings.json'), 'utf8'))
+      if (s.terminalCwd) cwd = s.terminalCwd
+    } catch {}
+    const shell = process.env.SHELL || '/bin/zsh'
+    console.log(`[terminal] spawning pty: shell=${shell} cwd=${cwd}`)
+    ptyProcess = pty.spawn(shell, [], { name: 'xterm-256color', cols: cols || 80, rows: rows || 24, cwd, env: process.env })
+    ptyProcess.onData(data => { if (!win.isDestroyed()) win.webContents.send('terminal:output', data) })
+    ptyProcess.onExit(({ exitCode }) => { console.log(`[terminal] pty exited code=${exitCode}`); ptyProcess = null })
+    console.log(`[terminal] pty spawned pid=${ptyProcess.pid}`)
+    return { ok: true }
   })
-})
+  ipcMain.on('terminal:input', (_, data) => { ptyProcess?.write(data) })
+  ipcMain.on('terminal:resize', (_, cols, rows) => { try { ptyProcess?.resize(cols, rows) } catch {} })
+}
 
 app.whenReady().then(async () => {
   setupLogging()
@@ -433,9 +383,19 @@ app.whenReady().then(async () => {
     ? path.join(__dirname, 'db')
     : await ensureUserData()
 
-  if (!isDev) await startBackends(dbDir)
+  // Initialise IPC handlers (replaces api.js HTTP server)
+  initDb(dbDir)
+  initSettings(dbDir)
+  setupIpcHandlers((newPort) => restartMcpServer(dbDir, newPort))
+  startBackgroundWorkers()
+
+  // MCP server (Claude integration) — still runs as a separate process
+  if (!isDev) await startMcpServer(dbDir)
+
   setupMenu()
-  createWindow()
+  const win = createWindow()
+  win._dbDir = dbDir  // stash for terminal IPC
+  setupTerminalIpc(win)
   setupAutoUpdater()
 
   app.on('activate', () => {
@@ -448,6 +408,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  apiProcess?.kill()
+  try { ptyProcess?.kill() } catch {}
   mcpProcess?.kill()
 })

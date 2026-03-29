@@ -1,8 +1,9 @@
 import type { Task, Attachment } from './types/task'
 
-// In production the UI loads from disk (file://) so fetch needs absolute URLs.
-// preload.cjs exposes apiBase = 'http://127.0.0.1:3456' in production, '' in dev.
-export const API_BASE: string = (window as any).electronAPI?.apiBase ?? ''
+// All data operations go through Electron IPC — no HTTP server needed.
+// window.electronAPI.invoke(channel, ...args) is exposed by preload.cjs.
+const ipc = (channel: string, ...args: unknown[]) =>
+  (window as any).electronAPI.invoke(channel, ...args)
 
 export interface HabitSummary {
   id: string
@@ -30,40 +31,27 @@ export interface TaskData {
 }
 
 export async function fetchTasks(date: string): Promise<TaskData> {
-  const res = await fetch(`${API_BASE}/api/tasks?date=${date}`)
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`API ${res.status}: ${body || res.statusText}`)
-  }
-  return res.json()
+  return ipc('tasks:list', date)
 }
 
 export async function fetchTask(id: string): Promise<Task> {
-  const res = await fetch(`${API_BASE}/api/task/${id}`)
-  return res.json()
+  return ipc('task:get', id)
 }
 
 export async function fetchSubtasks(id: string): Promise<Task[]> {
-  const res = await fetch(`${API_BASE}/api/task/${id}/subtasks`)
-  return res.json()
+  return ipc('task:subtasks', id)
 }
 
 export async function fetchBacklog(): Promise<Task[]> {
-  const res = await fetch(`${API_BASE}/api/backlog`)
-  return res.json()
+  return ipc('task:backlog')
 }
 
 export async function fetchDailyNote(date: string): Promise<{ date: string; content: string }> {
-  const res = await fetch(`${API_BASE}/api/daily-note/${date}`)
-  return res.json()
+  return ipc('daily-note:get', date)
 }
 
 export async function saveDailyNote(date: string, content: string): Promise<void> {
-  await fetch(`${API_BASE}/api/daily-note`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ date, content }),
-  })
+  await ipc('daily-note:save', date, content)
 }
 
 export interface Context {
@@ -74,28 +62,19 @@ export interface Context {
 }
 
 export async function fetchContexts(): Promise<Context[]> {
-  const res = await fetch(`${API_BASE}/api/contexts`)
-  return res.json()
+  return ipc('contexts:list')
 }
 
 export async function createContext(slug: string, label: string, color: string): Promise<void> {
-  await fetch(`${API_BASE}/api/contexts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slug, label, color }),
-  })
+  await ipc('contexts:create', slug, label, color)
 }
 
 export async function updateContext(slug: string, fields: Partial<Pick<Context, 'label' | 'color' | 'sort_order'>>): Promise<void> {
-  await fetch(`${API_BASE}/api/contexts/${slug}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(fields),
-  })
+  await ipc('contexts:update', slug, fields)
 }
 
 export async function deleteContext(slug: string): Promise<void> {
-  await fetch(`${API_BASE}/api/contexts/${slug}`, { method: 'DELETE' })
+  await ipc('contexts:delete', slug)
 }
 
 export interface Agent {
@@ -107,8 +86,7 @@ export interface Agent {
 }
 
 export async function fetchAgents(): Promise<Agent[]> {
-  const res = await fetch(`${API_BASE}/api/agents`)
-  return res.json()
+  return ipc('agents:list')
 }
 
 export interface AgentJob {
@@ -135,115 +113,68 @@ export interface Note {
 }
 
 export async function queueAgentJob(taskId: string, userMessage?: string): Promise<AgentJob> {
-  const res = await fetch(`${API_BASE}/api/agent-jobs`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ task_id: taskId, user_message: userMessage ?? null }),
-  })
-  return res.json()
+  return ipc('agent-jobs:create', taskId, userMessage ?? null)
 }
 
 export async function fetchNotes(taskId: string): Promise<Note[]> {
-  const res = await fetch(`${API_BASE}/api/task/${taskId}/notes`)
-  return res.json()
+  return ipc('notes:list', taskId)
 }
 
 export async function addNote(taskId: string, body: string): Promise<{ id: string }> {
-  const res = await fetch(`${API_BASE}/api/task/${taskId}/notes`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body }),
-  })
-  return res.json()
+  return ipc('notes:add', taskId, body)
 }
 
 export async function fetchAgentJobs(taskId: string): Promise<AgentJob[]> {
-  const res = await fetch(`${API_BASE}/api/agent-jobs?task_id=${taskId}`)
-  return res.json()
+  return ipc('agent-jobs:list', taskId)
 }
 
 export async function fetchAttachments(taskId: string): Promise<Attachment[]> {
-  const res = await fetch(`${API_BASE}/api/task/${taskId}/attachments`)
-  return res.json()
+  return ipc('attachments:list', taskId)
 }
 
 export async function deleteAttachment(id: string): Promise<void> {
-  await fetch(`${API_BASE}/api/attachment/${id}`, { method: 'DELETE' })
+  await ipc('attachments:delete', id)
 }
 
 export async function updateTask(id: string, fields: Record<string, unknown>): Promise<void> {
-  await fetch(`${API_BASE}/api/task/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(fields),
-  })
+  await ipc('task:update', id, fields)
 }
 
 export async function fetchSettings(): Promise<Record<string, string>> {
-  const res = await fetch(`${API_BASE}/api/settings`)
-  return res.json()
+  return ipc('settings:get')
 }
 
 export async function saveSettings(data: Record<string, string>): Promise<void> {
-  await fetch(`${API_BASE}/api/settings`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
+  await ipc('settings:save', data)
 }
 
 export async function syncAttachments(): Promise<{ ok: boolean; synced?: number; failed?: number; total?: number; error?: string }> {
-  const res = await fetch(`${API_BASE}/api/attachments/sync`, { method: 'POST' })
-  return res.json()
+  return ipc('attachments:sync')
 }
 
 export async function getMcpStatus(): Promise<{ port: number; isHttpConfigured: boolean; currentEntry: unknown }> {
-  const res = await fetch(`${API_BASE}/api/mcp/status`)
-  return res.json()
+  return ipc('mcp:status')
 }
 
 export async function applyMcpPort(port: number): Promise<{ ok: boolean; port: number; url: string; error?: string }> {
-  const res = await fetch(`${API_BASE}/api/mcp/apply`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ port }),
-  })
-  return res.json()
-}
-
-function post(path: string, body: Record<string, unknown>, json = true) {
-  // In Electron, use IPC so Node's http module makes the request from the main
-  // process. Chromium's network stack silently blocks POST to localhost on some
-  // systems (observed on Intel Mac) even with webSecurity:false.
-  const httpPost = (window as any).electronAPI?.httpPost
-  if (httpPost) {
-    return httpPost(path, json ? body : null, json ? null : body)
-      .then((r: { status: number; body: string }) =>
-        new Response(r.body, { status: r.status, headers: { 'Content-Type': 'application/json' } })
-      )
-  }
-  return fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': json ? 'application/json' : 'application/x-www-form-urlencoded' },
-    body: json ? JSON.stringify(body) : new URLSearchParams(body as Record<string, string>).toString(),
-  })
+  return ipc('mcp:apply', port)
 }
 
 export const api = {
-  complete:             (taskId: string) => post('/complete', { task_id: taskId }, false),
-  completeWithSubtasks: (taskId: string) => post('/complete-with-subtasks', { task_id: taskId }, false),
-  uncomplete:      (taskId: string) => post('/uncomplete', { task_id: taskId }, false),
-  skip:            (taskId: string) => post('/skip', { task_id: taskId }, false),
-  activate:        (taskId: string) => post('/activate', { task_id: taskId }, false),
-  snooze:          (taskId: string, until: string) => post('/snooze', { task_id: taskId, until }, false),
-  updateTitle:     (taskId: string, title: string) => post('/update-title', { task_id: taskId, title }),
-  updateDescription: (taskId: string, description: string) => post('/update-description', { task_id: taskId, description }),
-  updateDueDate:   (taskId: string, due_date: string | null) => post('/update-due-date', { task_id: taskId, due_date: due_date ?? '' }),
-  updateRecurrence:(taskId: string, recurrence: string | null) => post('/update-recurrence', { task_id: taskId, recurrence: recurrence ?? '' }),
-  addLink:         (taskId: string, url: string) => post('/add-link', { task_id: taskId, url }),
-  reorder:         (ids: string[]) => post('/reorder', { ids }),
-  createSubtask:   (parentId: string, title: string) => post('/create-subtask', { parent_id: parentId, title }),
-  createTask:      (body: Partial<Task> & { title: string }) => post('/create-task-json', body as Record<string, unknown>),
-  deleteTask:      (taskId: string) => fetch(`${API_BASE}/api/task/${taskId}`, { method: 'DELETE' }),
-  updateNotes:     (taskId: string, notes: string) => post(`/api/task/${taskId}`, { notes }),
+  complete:             (taskId: string) => ipc('task:complete', taskId),
+  completeWithSubtasks: (taskId: string) => ipc('task:complete-with-subtasks', taskId),
+  uncomplete:           (taskId: string) => ipc('task:uncomplete', taskId),
+  skip:                 (taskId: string) => ipc('task:skip', taskId),
+  activate:             (taskId: string) => ipc('task:activate', taskId),
+  snooze:               (taskId: string, until: string) => ipc('task:snooze', taskId, until),
+  updateTitle:          (taskId: string, title: string) => ipc('task:update-title', taskId, title),
+  updateDescription:    (taskId: string, description: string) => ipc('task:update-description', taskId, description),
+  updateDueDate:        (taskId: string, due_date: string | null) => ipc('task:update-due-date', taskId, due_date),
+  updateRecurrence:     (taskId: string, recurrence: string | null) => ipc('task:update-recurrence', taskId, recurrence),
+  addLink:              (taskId: string, url: string) => ipc('task:add-link', taskId, url),
+  reorder:              (ids: string[]) => ipc('task:reorder', ids),
+  createSubtask:        (parentId: string, title: string) => ipc('task:create-subtask', parentId, title),
+  createTask:           (body: Partial<Task> & { title: string }) => ipc('task:create', body),
+  deleteTask:           (taskId: string) => ipc('task:delete', taskId),
+  updateNotes:          (taskId: string, notes: string) => ipc('task:update', taskId, { notes }),
 }

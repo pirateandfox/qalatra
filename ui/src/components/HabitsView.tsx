@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import { API_BASE } from '../api'
 import { today as todayStr } from '../lib/constants'
 import HabitRow from './HabitRow'
 import './HabitsView.css'
@@ -38,8 +37,7 @@ export default function HabitsView({ onMutate }: Props) {
   const [newRecurrence, setNewRecurrence] = useState<'daily' | 'weekdays' | 'weekly' | 'monthly'>('daily')
 
   const load = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/habits?date=${today}`)
-    const data = await res.json()
+    const data = await (window as any).electronAPI.invoke('habits:list', today)
     setHabits(data)
     setLoading(false)
   }, [today])
@@ -49,11 +47,7 @@ export default function HabitsView({ onMutate }: Props) {
   async function createHabit(e: React.FormEvent) {
     e.preventDefault()
     if (!newTitle.trim()) return
-    await fetch(`${API_BASE}/api/habits/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: newTitle.trim(), description: newDesc.trim() || null, recurrence: newRecurrence }),
-    })
+    await (window as any).electronAPI.invoke('habits:create', { title: newTitle.trim(), description: newDesc.trim() || null, recurrence: newRecurrence })
     setNewTitle('')
     setNewDesc('')
     setNewRecurrence('daily')
