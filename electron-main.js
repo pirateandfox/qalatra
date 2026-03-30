@@ -5,7 +5,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import pty from 'node-pty'
-import { initDb, initSettings, setupIpcHandlers, startBackgroundWorkers } from './ipc-handlers.js'
+import { initDbWorker, initSettings, setupIpcHandlers, startBackgroundWorkers } from './ipc-handlers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isDev = process.env.NODE_ENV === 'development'
@@ -386,7 +386,7 @@ app.whenReady().then(async () => {
     : await ensureUserData()
 
   // Initialise IPC handlers (replaces api.js HTTP server)
-  initDb(dbDir)
+  await initDbWorker(dbDir)
   initSettings(dbDir)
   setupIpcHandlers((newPort) => restartMcpServer(dbDir, newPort))
   startBackgroundWorkers()
