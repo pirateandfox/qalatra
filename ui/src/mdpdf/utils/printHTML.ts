@@ -74,7 +74,8 @@ function buildPageAtRule(style: StyleConfig): string {
   const pageDims = PAGE_DIMS[style.pageSize]
   const pageWIn = (pageDims.width / 96).toFixed(4)
   const pageHIn = (pageDims.height / 96).toFixed(4)
-  return `@page { margin: 0; size: ${pageWIn}in ${pageHIn}in; }`
+  const m = style.margins
+  return `@page { margin: ${m.top}in ${m.right}in ${m.bottom}in ${m.left}in; size: ${pageWIn}in ${pageHIn}in; }`
 }
 
 /** Full standalone HTML document for silent PDF export (no print dialog trigger) */

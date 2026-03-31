@@ -121,9 +121,11 @@ export default function EmailPreview({ filePath, onClose, terminalOpen, onTermin
           onClick={onTerminalToggle}
           title="Toggle terminal (Ctrl+`)"
         >Terminal</button>
-        <button className="ep-btn ep-chat-btn" onClick={handleChatWithDoc} title="Open claude in this file's folder">
-          Chat
-        </button>
+        <button
+          className={`ep-btn ${terminalOpen ? 'active' : ''}`}
+          onClick={handleChatWithDoc}
+          title="Open claude in this file's folder"
+        >Chat</button>
         <button className="ep-close-btn" onClick={onClose}>✕ Close</button>
       </div>
 

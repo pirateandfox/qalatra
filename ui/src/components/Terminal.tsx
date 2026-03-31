@@ -106,13 +106,23 @@ export default function Terminal({ open, onClose, pendingCommand, onCommandConsu
     }
   }, [open])
 
-  // Fire a one-shot command when the terminal opens with a pending command
+  // Fire a one-shot command when the terminal opens with a pending command.
+  // If the terminal is already running (readyRef = true), kill it and reconnect first
+  // so we don't inject the command into an active session (e.g. a running Claude).
+  // If the terminal just opened, connect() was already called by the open effect — just wait.
   useEffect(() => {
     if (!open || !pendingCommand) return
     const send = () => { eAPI().terminalInput(pendingCommand); onCommandConsumed?.() }
     if (readyRef.current) {
-      setTimeout(send, 400)
+      // Terminal already has an active session — restart it
+      readyRef.current = false
+      connect().then(() => {
+        const interval = setInterval(() => {
+          if (readyRef.current) { clearInterval(interval); setTimeout(send, 200) }
+        }, 100)
+      })
     } else {
+      // Terminal is freshly opening — connect() from the open effect handles the pty
       const interval = setInterval(() => {
         if (readyRef.current) { clearInterval(interval); setTimeout(send, 200) }
       }, 100)

@@ -82,6 +82,7 @@ export const toolDefs = [
         end_time:        { type: 'string', description: 'HH:MM end time for events. If omitted, defaults to 1hr after event_time.' },
         parent_id:       { type: 'string', description: 'ID of parent task (for subtasks)' },
         recurrence:      { type: 'string', description: 'daily | weekdays | weekly | monthly — auto-respawns on completion' },
+        agent_path:      { type: 'string', description: 'Absolute path to the agent folder to dispatch this task to (e.g. /Users/you/IdeaProjects/myrepo/agents/planning)' },
       },
       required: ['title'],
     },
@@ -112,6 +113,7 @@ export const toolDefs = [
         recurrence:      { type: 'string', description: 'daily | weekdays | weekly | monthly | null to clear' },
         parent_id:       { type: 'string', description: 'ID of parent task (for subtasks). Pass empty string to clear.' },
         links:           { type: 'array', items: { type: 'object' }, description: 'Array of link objects e.g. [{"url": "/path/to/file.md"}]. Replaces existing links.' },
+        agent_path:      { type: 'string', description: 'Absolute path to the agent folder for this task. Pass empty string to clear.' },
       },
       required: ['task_id'],
     },
@@ -247,11 +249,13 @@ export const handlers = {
       INSERT INTO tasks (
         id, title, description, status, my_priority, energy_required, context, project, tags,
         source, source_id, source_url, source_priority, due_date, start_date, surface_after,
-        created_at, updated_at, ai_context, task_type, event_time, end_time, parent_id, recurrence
+        created_at, updated_at, ai_context, task_type, event_time, end_time, parent_id, recurrence,
+        agent_path
       ) VALUES (
         @id, @title, @description, @status, @my_priority, @energy_required, @context, @project, @tags,
         @source, @source_id, @source_url, @source_priority, @due_date, @start_date, @surface_after,
-        @created_at, @updated_at, @ai_context, @task_type, @event_time, @end_time, @parent_id, @recurrence
+        @created_at, @updated_at, @ai_context, @task_type, @event_time, @end_time, @parent_id, @recurrence,
+        @agent_path
       )
     `).run({
       id,
@@ -278,6 +282,7 @@ export const handlers = {
       end_time:        args.end_time        ?? null,
       parent_id:       args.parent_id       ?? null,
       recurrence:      args.recurrence      ?? null,
+      agent_path:      args.agent_path      ?? null,
     });
     const status = args.status ?? 'active';
     return { task_id: id, title: args.title, status, created_at: now };
@@ -291,7 +296,7 @@ export const handlers = {
     const mutableFields = [
       'title', 'description', 'status', 'my_priority', 'energy_required',
       'context', 'project', 'tags', 'source_url', 'due_date', 'start_date', 'surface_after',
-      'task_type', 'event_time', 'end_time', 'recurrence', 'parent_id',
+      'task_type', 'event_time', 'end_time', 'recurrence', 'parent_id', 'agent_path',
     ];
 
     const updates = {};

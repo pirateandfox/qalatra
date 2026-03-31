@@ -159,11 +159,12 @@ async function processAgentJobs() {
       ? [...baseArgs, '--resume', job.prevSessionId, '-p', job.user_message || job.prompt, '--output-format', 'json']
       : [...baseArgs, '-p', job.prompt, '--output-format', 'json']
     let stdout = '', stderr = '', timedOut = false, settled = false
-    const userShell = process.env.SHELL || '/bin/zsh'
-    // Use "$@" pattern so the prompt content is passed as a proper argument
-    // rather than being interpolated into the shell command string (which would
-    // cause newlines in the prompt to be interpreted as separate shell commands).
-    const proc = spawn(userShell, ['-l', '-c', `${bin} "$@"`, '--', ...args], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'] })
+    // On Windows, spawn the binary directly with shell:true (uses cmd.exe, resolves PATH).
+    // On Unix, use a login shell with the "$@" pattern so the prompt is passed as a proper
+    // argument rather than interpolated into the shell command (safe for multi-line prompts).
+    const proc = process.platform === 'win32'
+      ? spawn(bin, args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+      : spawn(process.env.SHELL || '/bin/zsh', ['-l', '-c', `${bin} "$@"`, '--', ...args], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'] })
     proc.stdout.on('data', d => { stdout += d })
     proc.stderr.on('data', d => { stderr += d })
     const timeout = setTimeout(() => { timedOut = true; proc.kill('SIGKILL') }, 15 * 60 * 1000)
@@ -359,6 +360,11 @@ export function setupIpcHandlers(onMcpPortChange) {
   })
 
   // File system
+  ipcMain.handle('file:exists', (_, filePath) => {
+    const allowed = path.join(os.homedir(), 'IdeaProjects')
+    if (!filePath.startsWith(allowed)) return false
+    return fs.existsSync(filePath)
+  })
   ipcMain.handle('file:read', (_, filePath) => {
     const allowed = path.join(os.homedir(), 'IdeaProjects')
     if (!filePath.startsWith(allowed)) throw new Error('Forbidden')

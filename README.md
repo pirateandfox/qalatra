@@ -12,6 +12,7 @@ Download the latest release for your platform from the [Releases page](https://g
 
 - **Mac** — `.dmg` (arm64 for Apple Silicon, x64 for Intel)
 - **Windows** — `.exe` installer (unsigned — Windows will show a SmartScreen warning, click "More info" → "Run anyway")
+  - Claude Code on Windows: use `npm install -g @anthropic-ai/claude-code` if the native installer fails (required on CPUs without AVX support)
 - **Linux** — `.AppImage` (make executable with `chmod +x`, then run)
 
 ---
@@ -60,7 +61,8 @@ Open Settings from the top-right gear icon.
 Sets the working directory for the built-in terminal. This is also the root directory Task OS scans for agents (see below).
 
 ```
-/Users/you/IdeaProjects
+/Users/you/IdeaProjects        # Mac/Linux
+C:\Users\you\IdeaProjects      # Windows
 ```
 
 ### MCP Server Port

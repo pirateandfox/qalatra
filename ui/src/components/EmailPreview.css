@@ -62,11 +62,6 @@
 .ep-btn.active { background: #0a0a0a; color: #fff; border-color: #555; }
 .ep-btn-w { opacity: 0.5; margin-left: 4px; }
 
-.ep-chat-btn {
-  color: #60a5fa;
-  border-color: #1d4ed8;
-}
-.ep-chat-btn:hover { color: #93c5fd; border-color: #3b82f6; }
 
 .ep-width-label {
   font-size: 12px;

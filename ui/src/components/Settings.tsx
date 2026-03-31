@@ -59,7 +59,7 @@ export default function Settings({ open, onClose }: Props) {
             type="text"
             value={settings.terminalCwd ?? ''}
             onChange={e => set('terminalCwd', e.target.value)}
-            placeholder={`/Users/you (default: $HOME)`}
+            placeholder="e.g. /Users/you/Projects or C:\Users\you\Projects"
             spellCheck={false}
           />
           <span className="settings-hint">Takes effect on next terminal open</span>
@@ -135,7 +135,7 @@ export default function Settings({ open, onClose }: Props) {
         <div className="settings-row">
           <label className="settings-label">Local Attachment Cache</label>
           <input className="settings-input" type="text" value={settings.attachmentCacheDir ?? ''} onChange={e => set('attachmentCacheDir', e.target.value)}
-            placeholder="~/Library/Application Support/task-os/attachments" spellCheck={false} />
+            placeholder="e.g. ~/Library/Application Support/task-os/attachments or C:\Users\you\AppData\Roaming\task-os" spellCheck={false} />
           <span className="settings-hint">Files are always cached here locally regardless of cloud storage.</span>
         </div>
 
