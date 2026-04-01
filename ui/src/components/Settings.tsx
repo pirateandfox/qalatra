@@ -32,6 +32,7 @@ export default function Settings({ open, onClose }: Props) {
       fetchSettings().then(setSettings)
       fetchAgents().then(setAgents)
       getMcpStatus().then(s => { setMcpPort(String(s.port)); setMcpStatus(s) })
+      refreshContexts()
     }
   }, [open])
 
