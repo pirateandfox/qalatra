@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import type { Task, Subtask } from '../types/task'
 import RecurrencePicker from './RecurrencePicker'
 import PlatformIcon from './PlatformIcon'
-import { api, updateTask, fetchTask, fetchSubtasks, fetchAttachments, fetchAgents, deleteAttachment, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, type Agent, type AgentJob, type Note } from '../api'
+import { api, updateTask, fetchTask, fetchSubtasks, fetchAttachments, fetchAgents, deleteAttachment, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, fetchProjects, type Agent, type AgentJob, type Note } from '../api'
 import type { Attachment } from '../types/task'
 import { PRIORITY_COLORS } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
@@ -82,6 +82,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
   const [linkInput, setLinkInput]   = useState('')
   const [newSubtask, setNewSubtask] = useState('')
   const [agents, setAgents] = useState<Agent[]>([])
+  const [projects, setProjects] = useState<string[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploading, setUploading] = useState(false)
   const [editingProject, setEditingProject] = useState(false)
@@ -106,7 +107,12 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
     onClose()
   }
 
-  useEffect(() => { if (taskId) fetchAgents().then(setAgents) }, [taskId])
+  useEffect(() => {
+    if (taskId) {
+      fetchAgents().then(setAgents)
+      fetchProjects().then(ps => setProjects(ps.map(p => p.name)))
+    }
+  }, [taskId])
 
   const load = useCallback(async (id: string) => {
     setLoading(true)
@@ -354,15 +360,21 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
             <div className="detail-field-row">
               <span className="detail-field-label">Project</span>
               {editingProject ? (
-                <input
-                  ref={projectInputRef}
-                  className="detail-inline-input"
-                  value={projectInput}
-                  onChange={e => setProjectInput(e.target.value)}
-                  onBlur={() => { patch({ project: projectInput || null }); setEditingProject(false) }}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') { patch({ project: projectInput || null }); setEditingProject(false) } }}
-                  placeholder="Project name…"
-                />
+                <>
+                  <input
+                    ref={projectInputRef}
+                    className="detail-inline-input"
+                    list="detail-project-list"
+                    value={projectInput}
+                    onChange={e => setProjectInput(e.target.value)}
+                    onBlur={() => { patch({ project: projectInput || null }); setEditingProject(false) }}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') { patch({ project: projectInput || null }); setEditingProject(false) } }}
+                    placeholder="Project name…"
+                  />
+                  <datalist id="detail-project-list">
+                    {projects.map(p => <option key={p} value={p} />)}
+                  </datalist>
+                </>
               ) : (
                 <span className="detail-inline-value" onClick={() => setEditingProject(true)}>
                   {task.project || <span style={{ color: 'var(--muted)' }}>None</span>}

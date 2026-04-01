@@ -77,6 +77,28 @@ export async function deleteContext(slug: string): Promise<void> {
   await ipc('contexts:delete', slug)
 }
 
+export interface Project {
+  name: string
+  archived: number
+  created_at: string
+}
+
+export async function fetchProjects(includeArchived = false): Promise<Project[]> {
+  return ipc('projects:list', includeArchived)
+}
+
+export async function archiveProject(name: string): Promise<void> {
+  await ipc('projects:archive', name)
+}
+
+export async function unarchiveProject(name: string): Promise<void> {
+  await ipc('projects:unarchive', name)
+}
+
+export async function deleteProject(name: string): Promise<void> {
+  await ipc('projects:delete', name)
+}
+
 export interface Agent {
   name: string
   description: string | null

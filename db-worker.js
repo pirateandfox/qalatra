@@ -139,6 +139,11 @@ function migrate() {
       local_path TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS projects (
+      name       TEXT PRIMARY KEY,
+      archived   INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     CREATE TABLE IF NOT EXISTS notes (
       id           TEXT PRIMARY KEY,
       task_id      TEXT NOT NULL REFERENCES tasks(id),
@@ -193,6 +198,8 @@ function migrate() {
   // Always ensure the default context exists
   db.prepare('INSERT OR IGNORE INTO contexts (slug, display_name, label, color, sort_order) VALUES (?, ?, ?, ?, ?)').run('personal', 'Personal', 'Personal', '#4fcc8a', 1)
   db.prepare(`UPDATE tasks SET status = 'active', surface_after = NULL WHERE status = 'snoozed' AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime'))`).run()
+  // Backfill projects table from existing task project values
+  db.prepare(`INSERT OR IGNORE INTO projects (name) SELECT DISTINCT project FROM tasks WHERE project IS NOT NULL AND project != ''`).run()
 }
 
 // ── Query helpers ─────────────────────────────────────────────────────────────
@@ -284,6 +291,7 @@ function createTask(body) {
   const id = crypto.randomUUID(); const now = nowIso()
   db.prepare(`INSERT INTO tasks (id, title, status, context, project, my_priority, due_date, agent_path, task_type, source, ai_context, created_at, updated_at) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, 'task', 'manual', ?, ?, ?)`)
     .run(id, body.title, body.context ?? 'personal', body.project ?? null, body.my_priority ?? null, body.due_date || null, body.agent_path || null, body.ai_context ? `[${now.slice(0, 10)}] ${body.ai_context}` : null, now, now)
+  if (body.project) db.prepare(`INSERT OR IGNORE INTO projects (name) VALUES (?)`).run(body.project)
   return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
 }
 
@@ -293,6 +301,7 @@ function updateTask(id, body) {
   const sets = []; const params = {}
   for (const f of MUTABLE) { if (body[f] !== undefined) { sets.push(`${f} = @${f}`); params[f] = body[f] === '' ? null : body[f] } }
   if (sets.length) { params.id = id; db.prepare(`UPDATE tasks SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = @id`).run(params) }
+  if (body.project) db.prepare(`INSERT OR IGNORE INTO projects (name) VALUES (?)`).run(body.project)
   return { ok: true }
 }
 
@@ -432,6 +441,17 @@ function updateContext(slug, fields) {
 }
 function deleteContext(slug) { db.prepare('DELETE FROM contexts WHERE slug = ?').run(slug); return { ok: true } }
 
+// ── Projects ──────────────────────────────────────────────────────────────────
+
+function listProjects(includeArchived = false) {
+  return includeArchived
+    ? db.prepare('SELECT * FROM projects ORDER BY archived ASC, name ASC').all()
+    : db.prepare('SELECT * FROM projects WHERE archived = 0 ORDER BY name ASC').all()
+}
+function archiveProject(name) { db.prepare('UPDATE projects SET archived = 1 WHERE name = ?').run(name); return { ok: true } }
+function unarchiveProject(name) { db.prepare('UPDATE projects SET archived = 0 WHERE name = ?').run(name); return { ok: true } }
+function deleteProject(name) { db.prepare('DELETE FROM projects WHERE name = ?').run(name); return { ok: true } }
+
 // ── Habits ────────────────────────────────────────────────────────────────────
 
 function listHabits(date) {
@@ -555,6 +575,7 @@ const METHODS = {
   listNotes, addNote,
   getDailyNote, saveDailyNote,
   listContexts, createContext, updateContext, deleteContext,
+  listProjects, archiveProject, unarchiveProject, deleteProject,
   listHabits, createHabit, logHabit, unlogHabit,
   listAttachments, insertAttachment, getAttachment, deleteAttachment,
   getPendingAttachments, updateAttachmentStorage,

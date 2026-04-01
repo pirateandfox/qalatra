@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { fetchSettings, saveSettings, fetchAgents, syncAttachments, getMcpStatus, applyMcpPort, createContext, updateContext, deleteContext, type Agent } from '../api'
+import { fetchSettings, saveSettings, fetchAgents, syncAttachments, getMcpStatus, applyMcpPort, createContext, updateContext, deleteContext, fetchProjects, archiveProject, unarchiveProject, deleteProject, type Agent, type Project } from '../api'
 import { useContexts } from '../lib/ContextsProvider'
 import { useTheme } from '../lib/ThemeProvider'
 import { TOKEN_KEYS, TOKEN_LABELS, DARK_TOKENS, LIGHT_TOKENS, type ThemeMode } from '../lib/theme'
@@ -22,6 +22,7 @@ export default function Settings({ open, onClose }: Props) {
   const [mcpApplying, setMcpApplying] = useState(false)
   const [mcpResult, setMcpResult] = useState<'ok' | 'fail' | null>(null)
   const { contexts, refresh: refreshContexts } = useContexts()
+  const [projects, setProjects] = useState<Project[]>([])
   const { mode: themeMode, effectiveMode, tokens, setMode: setThemeMode, setToken, resetOverrides } = useTheme()
   const [newSlug, setNewSlug] = useState('')
   const [newLabel, setNewLabel] = useState('')
@@ -36,6 +37,7 @@ export default function Settings({ open, onClose }: Props) {
       fetchAgents().then(setAgents)
       getMcpStatus().then(s => { setMcpPort(String(s.port)); setMcpStatus(s) })
       refreshContexts()
+      fetchProjects(true).then(setProjects)
     }
   }, [open])
 
@@ -287,6 +289,25 @@ export default function Settings({ open, onClose }: Props) {
               refreshContexts()
               setNewSlug(''); setNewLabel(''); setNewColor('#888888')
             }}>Add</button>
+        </div>
+
+        <div className="settings-section-header">Projects</div>
+
+        {projects.length === 0 && (
+          <span className="settings-hint">No projects yet — set a project on any task to add it here.</span>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {projects.map(p => (
+            <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ flex: 1, color: p.archived ? 'var(--muted)' : 'var(--text)', textDecoration: p.archived ? 'line-through' : 'none', fontSize: 13 }}>{p.name}</span>
+              {p.archived ? (
+                <button className="settings-save" style={{ padding: '2px 8px', fontSize: 12 }} onClick={async () => { await unarchiveProject(p.name); fetchProjects(true).then(setProjects) }}>Restore</button>
+              ) : (
+                <button className="settings-save" style={{ padding: '2px 8px', fontSize: 12, background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }} onClick={async () => { await archiveProject(p.name); fetchProjects(true).then(setProjects) }}>Archive</button>
+              )}
+              <button className="settings-save" style={{ padding: '2px 8px', fontSize: 12, background: 'transparent', border: '1px solid #ef4444', color: '#ef4444' }} onClick={async () => { if (confirm(`Delete project "${p.name}"?`)) { await deleteProject(p.name); fetchProjects(true).then(setProjects) } }}>Delete</button>
+            </div>
+          ))}
         </div>
 
         <div className="settings-section-header">MCP Server</div>

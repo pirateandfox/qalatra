@@ -250,6 +250,12 @@ export function setupIpcHandlers(onMcpPortChange) {
   ipcMain.handle('contexts:update', (_, slug, fields) => dbCall('updateContext', slug, fields))
   ipcMain.handle('contexts:delete', (_, slug) => dbCall('deleteContext', slug))
 
+  // Projects
+  ipcMain.handle('projects:list', (_, includeArchived) => dbCall('listProjects', includeArchived))
+  ipcMain.handle('projects:archive', (_, name) => dbCall('archiveProject', name))
+  ipcMain.handle('projects:unarchive', (_, name) => dbCall('unarchiveProject', name))
+  ipcMain.handle('projects:delete', (_, name) => dbCall('deleteProject', name))
+
   // Habits
   ipcMain.handle('habits:list', (_, date) => dbCall('listHabits', date))
   ipcMain.handle('habits:create', (_, body) => dbCall('createHabit', body))
