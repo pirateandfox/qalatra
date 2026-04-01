@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   height: 0;
-  background: #0d1117;
+  background: var(--panel-bg);
   border-top: 1px solid var(--border);
   transition: height .2s ease;
   z-index: 98;
@@ -33,15 +33,15 @@
 .settings-label {
   font-size: 11px;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: .07em;
 }
 
 .settings-input {
-  background: #161b22;
-  border: 1px solid #30363d;
-  color: #e2e8f0;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 13px;
@@ -51,7 +51,7 @@
   max-width: 100%;
 }
 .settings-input:focus { border-color: var(--accent); }
-.settings-input::placeholder { color: #4a5568; }
+.settings-input::placeholder { color: var(--muted); }
 
 .settings-section-header {
   font-size: 11px;
@@ -60,13 +60,13 @@
   letter-spacing: .08em;
   color: var(--muted);
   padding-top: 12px;
-  border-top: 1px solid #1e2530;
+  border-top: 1px solid var(--border);
   margin-top: 4px;
 }
 
 .settings-hint {
   font-size: 11px;
-  color: #4a5568;
+  color: var(--muted);
 }
 
 .settings-actions {

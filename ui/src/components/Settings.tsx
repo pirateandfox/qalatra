@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { fetchSettings, saveSettings, fetchAgents, syncAttachments, getMcpStatus, applyMcpPort, createContext, updateContext, deleteContext, type Agent } from '../api'
 import { useContexts } from '../lib/ContextsProvider'
+import { useTheme } from '../lib/ThemeProvider'
+import { TOKEN_KEYS, TOKEN_LABELS, DARK_TOKENS, LIGHT_TOKENS, type ThemeMode } from '../lib/theme'
 import './Settings.css'
 
 interface Props {
@@ -20,6 +22,7 @@ export default function Settings({ open, onClose }: Props) {
   const [mcpApplying, setMcpApplying] = useState(false)
   const [mcpResult, setMcpResult] = useState<'ok' | 'fail' | null>(null)
   const { contexts, refresh: refreshContexts } = useContexts()
+  const { mode: themeMode, effectiveMode, tokens, setMode: setThemeMode, setToken, resetOverrides } = useTheme()
   const [newSlug, setNewSlug] = useState('')
   const [newLabel, setNewLabel] = useState('')
   const [newColor, setNewColor] = useState('#888888')
@@ -53,6 +56,69 @@ export default function Settings({ open, onClose }: Props) {
         <button className="terminal-close" onClick={onClose}>✕</button>
       </div>
       <div className="settings-body">
+
+        <div className="settings-section-header" style={{ borderTop: 'none', paddingTop: 0, marginTop: 0 }}>Appearance</div>
+
+        <div className="settings-row">
+          <label className="settings-label">Theme</label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(['system', 'light', 'dark'] as ThemeMode[]).map(m => (
+              <button
+                key={m}
+                className="settings-save"
+                style={{
+                  padding: '4px 14px',
+                  fontSize: 12,
+                  background: themeMode === m ? 'var(--accent)' : 'transparent',
+                  border: '1px solid var(--border)',
+                  color: themeMode === m ? '#fff' : 'var(--muted)',
+                }}
+                onClick={() => setThemeMode(m)}
+              >
+                {m === 'system' ? '◑ System' : m === 'light' ? '☀ Light' : '☾ Dark'}
+              </button>
+            ))}
+          </div>
+          <span className="settings-hint">Currently using {effectiveMode} theme.</span>
+        </div>
+
+        <div className="settings-row">
+          <label className="settings-label">Color Tokens</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+            {TOKEN_KEYS.map(key => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="color"
+                  value={tokens[key]}
+                  onChange={e => setToken(key, e.target.value)}
+                  style={{ width: 28, height: 28, border: 'none', background: 'none', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+                />
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--text)' }}>{TOKEN_LABELS[key]}</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>{tokens[key]}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button
+              className="settings-save"
+              style={{ padding: '4px 12px', fontSize: 12, background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+              onClick={() => { Object.entries(DARK_TOKENS).forEach(([k, v]) => setToken(k as any, v)) }}
+            >Reset to Dark</button>
+            <button
+              className="settings-save"
+              style={{ padding: '4px 12px', fontSize: 12, background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+              onClick={() => { Object.entries(LIGHT_TOKENS).forEach(([k, v]) => setToken(k as any, v)) }}
+            >Reset to Light</button>
+            <button
+              className="settings-save"
+              style={{ padding: '4px 12px', fontSize: 12, background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+              onClick={resetOverrides}
+            >Reset to Preset</button>
+          </div>
+        </div>
+
         <div className="settings-row">
           <label className="settings-label">Terminal working directory</label>
           <input
@@ -182,7 +248,7 @@ export default function Settings({ open, onClose }: Props) {
                     style={{ width: 28, height: 28, border: 'none', background: 'none', cursor: 'pointer', padding: 0 }} />
                   <input className="settings-input" style={{ width: 180, flex: 'unset' }} value={editLabel}
                     onChange={e => setEditLabel(e.target.value)} />
-                  <span style={{ fontSize: 11, color: '#4a5568', fontFamily: 'monospace' }}>{c.slug}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'monospace' }}>{c.slug}</span>
                   <button className="settings-save" style={{ padding: '4px 10px', fontSize: 12 }}
                     onClick={async () => {
                       await updateContext(c.slug, { label: editLabel, color: editColor })
@@ -195,9 +261,9 @@ export default function Settings({ open, onClose }: Props) {
               ) : (
                 <>
                   <span style={{ width: 12, height: 12, borderRadius: '50%', background: c.color, flexShrink: 0, display: 'inline-block' }} />
-                  <span style={{ fontSize: 13, color: '#e2e8f0', flex: 1 }}>{c.label}</span>
-                  <span style={{ fontSize: 11, color: '#4a5568', fontFamily: 'monospace' }}>{c.slug}</span>
-                  <button style={{ background: 'none', border: 'none', color: '#4a5568', cursor: 'pointer', fontSize: 12, padding: '2px 6px' }}
+                  <span style={{ fontSize: 13, color: 'var(--text)', flex: 1 }}>{c.label}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'monospace' }}>{c.slug}</span>
+                  <button style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '2px 6px' }}
                     onClick={() => { setEditingSlug(c.slug); setEditLabel(c.label); setEditColor(c.color) }}>Edit</button>
                   <button style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 12, padding: '2px 6px' }}
                     onClick={async () => { await deleteContext(c.slug); refreshContexts() }}>✕</button>
@@ -275,10 +341,10 @@ export default function Settings({ open, onClose }: Props) {
             <label className="settings-label">Discovered agents ({agents.length})</label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {agents.map(a => (
-                <div key={a.path} style={{ fontSize: 12, color: '#94a3b8' }}>
-                  <span style={{ color: '#e2e8f0', fontWeight: 500 }}>{a.name}</span>
-                  {a.description && <span style={{ marginLeft: 8, color: '#4a5568' }}>{a.description}</span>}
-                  <div style={{ fontSize: 11, color: '#4a5568', fontFamily: 'monospace' }}>{a.relativePath}</div>
+                <div key={a.path} style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  <span style={{ color: 'var(--text)', fontWeight: 500 }}>{a.name}</span>
+                  {a.description && <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{a.description}</span>}
+                  <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'monospace' }}>{a.relativePath}</div>
                 </div>
               ))}
             </div>

@@ -1,3 +1,4 @@
+/* Dark theme defaults — overridden at runtime by ThemeProvider via inline style */
 :root {
   --bg: #0f1117;
   --surface: #1a1d27;
@@ -6,6 +7,8 @@
   --text: #e2e8f0;
   --muted: #64748b;
   --accent: #4f9cf9;
+  --panel-bg: #0d1117;
+  --input-bg: #161b22;
 }
 
 *, *::before, *::after { box-sizing: border-box; }

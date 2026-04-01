@@ -1,5 +1,9 @@
 import { offsetDate, today as todayStr } from '../lib/constants'
+import type { ThemeMode } from '../lib/theme'
 import './Header.css'
+
+const THEME_ICONS: Record<ThemeMode, string> = { system: '◑', light: '☀', dark: '☾' }
+const THEME_CYCLE: ThemeMode[] = ['system', 'light', 'dark']
 
 interface Props {
   date: string
@@ -15,9 +19,15 @@ interface Props {
   onSettingsToggle: () => void
   onNewTask: () => void
   onRefresh: () => void
+  themeMode: ThemeMode
+  onThemeModeChange: (mode: ThemeMode) => void
 }
 
-export default function Header({ date, view, screen, onDateChange, onViewChange, onScreenChange, onTerminalToggle, dailyNoteOpen, onDailyNoteToggle, settingsOpen, onSettingsToggle, onNewTask, onRefresh }: Props) {
+export default function Header({ date, view, screen, onDateChange, onViewChange, onScreenChange, onTerminalToggle, dailyNoteOpen, onDailyNoteToggle, settingsOpen, onSettingsToggle, onNewTask, onRefresh, themeMode, onThemeModeChange }: Props) {
+  function cycleTheme() {
+    const idx = THEME_CYCLE.indexOf(themeMode)
+    onThemeModeChange(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length])
+  }
   const today = todayStr()
   const prev = offsetDate(date, -1)
   const next = offsetDate(date, 1)
@@ -33,6 +43,7 @@ export default function Header({ date, view, screen, onDateChange, onViewChange,
       <button className="nav-btn terminal-btn" onClick={onTerminalToggle} title="Toggle Terminal (Ctrl+`)">_$</button>
       <button className={`nav-btn note-btn${dailyNoteOpen ? ' note-btn-active' : ''}`} onClick={onDailyNoteToggle} title="Toggle Daily Note">✎</button>
       <button className={`nav-btn${settingsOpen ? ' note-btn-active' : ''}`} onClick={onSettingsToggle} title="Settings">⚙</button>
+      <button className="nav-btn" onClick={cycleTheme} title={`Theme: ${themeMode} (click to cycle)`}>{THEME_ICONS[themeMode]}</button>
       <button className="nav-btn" onClick={onRefresh} title="Refresh (R)">↻</button>
 
       <div className="view-toggle">

@@ -48,32 +48,147 @@ Task OS runs an MCP server on `http://localhost:3457`. Add it to your `~/.claude
 
 Restart Claude Code after adding it. The Task OS app must be running for the MCP tools to be available.
 
-You can also change the port and auto-update `~/.claude.json` from the Settings panel inside the app.
+You can also change the port and auto-update `~/.claude.json` from Settings → MCP Server inside the app.
+
+---
+
+## Views
+
+The app has four main views, selectable from the top-right toggle:
+
+| View | Description |
+|---|---|
+| **Priority** | All of today's tasks grouped by context, sorted by `sort_order` (drag to reorder) |
+| **Project** | Same tasks grouped by project instead |
+| **Backlog** | All snoozed, unsurfaced, and future tasks |
+| **Habits** | Daily habit tracker |
+
+Use the date navigator in the top bar to view tasks for other days.
+
+---
+
+## Task Fields
+
+| Field | Description |
+|---|---|
+| **Title** | The task description |
+| **Status** | `active`, `snoozed`, `done`, `archived` |
+| **Context** | Which area of your life/work this belongs to (e.g. `personal`, `monroe`, `silvermouse`) |
+| **Project** | Optional grouping within a context |
+| **Due Date** | When the task is due — overdue tasks appear in red |
+| **Priority** | `p1`–`p4` for ordering within a section |
+| **Energy** | `high`, `medium`, `low` — helps pick tasks for your current state |
+| **Type** | `task`, `event`, `reminder` — events are permanent dated records |
+| **Recurrence** | RRULE string (e.g. `FREQ=WEEKLY;BYDAY=MO`) or shorthand (`daily`, `weekdays`, `weekly`, `monthly`) |
+| **Notes** | Free-text thread; supports multi-message history with user/agent attribution |
+
+---
+
+## Contexts
+
+Contexts represent different areas of your life or work. Each task belongs to one context. Contexts have a display label and a color dot.
+
+Manage contexts in **Settings → Contexts**: add, edit label/color, or delete. Default contexts: `personal`, `monroe`, `biztobiz`, `pirateandfox`, `silvermouse`, `flightdesk`, `internal`.
+
+Claude uses contexts to organize tasks when triaging: `list_contexts` to see all, `create_task` with a `context` field to assign one.
+
+---
+
+## Daily Note
+
+The daily note is a per-day scratchpad (monospace text). Open it with the **✎** button in the header or by pressing the button. Claude can also read and append to it via `get_daily_note` and `update_daily_note`.
+
+---
+
+## Habits
+
+The Habits view tracks repeating behaviors. Each habit has a title, optional description, and a recurrence rule. You can mark habits done or skipped, add notes per log entry, and see a streak dot display.
+
+Claude can log habits via `log_habit` and read history via `get_habit_history`.
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `N` | New task (when not in an input) |
+| `R` | Refresh task list |
+| `Ctrl + \`` | Toggle terminal |
+| `Escape` | Close detail panel / modal |
 
 ---
 
 ## Settings
 
-Open Settings from the top-right gear icon.
+Open Settings from the **⚙** gear icon in the header.
+
+### Appearance
+
+Choose between **System** (follows your OS dark/light preference), **Light**, or **Dark** mode. The header also has a ◑/☀/☾ button that cycles through modes.
+
+**Color Tokens** — customize any of the 9 theme tokens with a color picker:
+
+| Token | Controls |
+|---|---|
+| Background | Main window background |
+| Surface | Cards, header bar |
+| Surface Alt | Inputs, secondary fills |
+| Border | All dividers and outlines |
+| Text | Primary text |
+| Muted Text | Labels, metadata, placeholders |
+| Accent | Interactive elements, selected states, links |
+| Panel Background | Sliding panels (terminal, settings, daily note) |
+| Input Background | Text inputs |
+
+Use **Reset to Dark** / **Reset to Light** to apply a preset, or **Reset to Preset** to discard custom overrides and return to the active preset. Theme is stored in the browser's `localStorage` — persists across restarts.
 
 ### Terminal Working Directory
 
-Sets the working directory for the built-in terminal. This is also the root directory Task OS scans for agents (see below).
+Sets the working directory when the built-in terminal opens. Also the root for agent scanning (see below).
 
 ```
 /Users/you/IdeaProjects        # Mac/Linux
 C:\Users\you\IdeaProjects      # Windows
 ```
 
-### MCP Server Port
+### Agents Scan Root
 
-Default is `3457`. Click **Apply** to save the port and automatically update `~/.claude.json`. Restart Claude Code after applying.
+If you want Task OS to find agents (`agent.config` files) in a wider directory than your terminal CWD — for example, across multiple sibling repos — set this separately. Defaults to terminal working directory.
+
+### Terminal Auto-Run Command
+
+A command that runs automatically every time the terminal opens. Useful for activating an environment or launching a persistent session (e.g. `dangerclaude`).
+
+### Default Agent Command
+
+The CLI command used to invoke agents from the task queue. Defaults to `claude --dangerously-skip-permissions`. Per-agent `agent.config` overrides this.
+
+### Attachments & Storage
+
+Task OS can store task attachments in any S3-compatible bucket (Cloudflare R2 recommended):
+
+- **S3 Endpoint URL** — e.g. `https://<account_id>.r2.cloudflarestorage.com`
+- **Bucket Name** — e.g. `task-os-attachments`
+- **Access Key ID / Secret Access Key** — R2 API token credentials
+- **Public Base URL** — optional CDN prefix; if blank, presigned URLs are used
+- **Local Attachment Cache** — all files are also cached here on disk
+
+Use **Test Connection** to verify credentials, and **Sync Pending** to upload any locally-cached attachments that haven't been synced yet.
+
+### Contexts
+
+Add, edit, or remove contexts. Each context has a slug (e.g. `personal`), a display label, and a color.
+
+### MCP Server
+
+Default port is `3457`. Click **Apply** to save the new port and auto-update `~/.claude.json`. Restart Claude Code after applying.
 
 ---
 
 ## Agents
 
-An agent is a folder with an `agent.config` file. Task OS scans your terminal working directory recursively for these folders and lists discovered agents in Settings.
+An agent is a folder with an `agent.config` file. Task OS scans your agents scan root recursively for these folders and lists discovered agents in Settings.
 
 ### agent.config format
 
@@ -86,12 +201,12 @@ An agent is a folder with an `agent.config` file. Task OS scans your terminal wo
 ```
 
 - `name` — display name (defaults to folder name)
-- `description` — shown in the Settings panel
-- `command` — how to invoke the agent (defaults to `claude --dangerously-skip-permissions`)
+- `description` — shown in Settings
+- `command` — how to invoke the agent (overrides Default Agent Command)
 
 ### Assigning an agent to a task
 
-In the task detail panel, set the **Agent** field to point to the agent's folder. When you queue the agent job, Task OS runs the agent in that folder with the task's description as the prompt.
+In the task detail panel, set the **Agent** field to point to the agent's folder. Queue an agent job from the detail panel — Task OS runs the agent in that folder with the task description as the prompt. Job status (queued / running / done / failed) is shown on the task row.
 
 ---
 
@@ -134,7 +249,7 @@ This makes the file available for preview in Task OS.
 | Extension | Preview |
 |---|---|
 | `.md` | Markdown editor with PDF export |
-| `.html`, `.eml` | Email preview |
+| `.html`, `.eml` | Email/HTML preview with zoom |
 
 ---
 
@@ -144,17 +259,30 @@ Key tools available to Claude:
 
 | Tool | Description |
 |---|---|
+| `morning_briefing` | Full morning briefing with priorities and overdue tasks |
+| `afternoon_briefing` | Mid-day check-in summary |
 | `get_todays_tasks` | Today's active tasks |
-| `morning_briefing` | Full morning briefing with priorities |
-| `create_task` | Create a new task |
-| `update_task` | Update any field including links, status, agent |
-| `complete_task` | Mark a task done |
-| `snooze_task` | Snooze until a date |
-| `search_tasks` | Full-text search |
 | `get_overdue_tasks` | All overdue tasks |
-| `queue_agent_job` | Queue an agent job for a task |
+| `get_waking_tasks` | Tasks surfacing from snooze today |
+| `create_task` | Create a new task |
+| `update_task` | Update any field including links, status, context, agent |
+| `complete_task` | Mark a task done |
+| `skip_task` | Skip a recurring task occurrence |
+| `snooze_task` | Snooze until a date |
+| `move_to_backlog` | Move to backlog without a surface date |
+| `search_tasks` | Full-text search |
+| `get_task` | Get a single task by ID |
 | `get_daily_note` | Read today's daily note |
 | `update_daily_note` | Append to today's daily note |
+| `get_week_notes` | Read this week's daily notes |
+| `list_contexts` | List all registered contexts |
+| `create_context` | Register a new context |
+| `queue_agent_job` | Queue an agent job for a task |
+| `list_habits` | List all habits |
+| `log_habit` | Log a habit as done or skipped |
+| `get_habit_history` | Read habit completion history |
+| `end_of_day_triage` | End-of-day review and next-day planning |
+| `stale_backlog_review` | Review backlog tasks that haven't been touched recently |
 
 ---
 
@@ -164,6 +292,7 @@ Key tools available to Claude:
 - **SQLite** via `better-sqlite3`
 - **MCP** via `@modelcontextprotocol/sdk` (StreamableHTTP transport)
 - **S3-compatible** attachment storage (Cloudflare R2 recommended)
+- **xterm.js** for the built-in terminal
 
 ---
 

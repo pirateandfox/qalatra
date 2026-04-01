@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   height: 0;
-  background: #0d1117;
+  background: var(--panel-bg);
   border-top: 1px solid var(--border);
   transition: height .2s ease;
   z-index: 99;
@@ -25,7 +25,7 @@
 .note-textarea {
   flex: 1;
   background: transparent;
-  color: #e2e8f0;
+  color: var(--text);
   border: none;
   outline: none;
   font-size: 13px;
@@ -36,5 +36,5 @@
 }
 
 .note-textarea::placeholder {
-  color: #4a5568;
+  color: var(--muted);
 }

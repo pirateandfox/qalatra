@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   height: 0;
-  background: #0d1117;
+  background: var(--panel-bg);
   border-top: 1px solid var(--border);
   transition: height .2s ease;
   z-index: 1200;

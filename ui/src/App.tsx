@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { fetchTasks, fetchSettings, type TaskData } from './api'
 import { today as todayStr } from './lib/constants'
 import { ContextsProvider } from './lib/ContextsProvider'
+import { ThemeProvider, useTheme } from './lib/ThemeProvider'
 import Header from './components/Header'
 import TaskList from './components/TaskList'
 import BacklogView from './components/BacklogView'
@@ -17,6 +18,15 @@ import MdView from './mdpdf/MdView'
 import './index.css'
 
 export default function App() {
+  return (
+    <ThemeProvider>
+      <AppInner />
+    </ThemeProvider>
+  )
+}
+
+function AppInner() {
+  const { mode, setMode } = useTheme()
   const [date, setDate]             = useState(todayStr())
   const [view, setView]             = useState<'priority' | 'project'>('priority')
   const [screen, setScreen]         = useState<'main' | 'backlog' | 'habits'>('main')
@@ -115,6 +125,8 @@ export default function App() {
         onSettingsToggle={() => setSettingsOpen(o => !o)}
         onNewTask={() => setCreateOpen(true)}
         onRefresh={() => screen === 'main' ? load(date) : setBacklogRefresh(n => n + 1)}
+        themeMode={mode}
+        onThemeModeChange={setMode}
       />
 
       <div className={`layout ${selectedId ? 'panel-open' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
