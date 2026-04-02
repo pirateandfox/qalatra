@@ -225,7 +225,7 @@ function stampAgentJobs(...arrays) {
 
 function autoRolloverRecurring() {
   const t = today()
-  const stale = db.prepare(`SELECT * FROM tasks WHERE status = 'active' AND recurrence IS NOT NULL AND ((due_date IS NOT NULL AND due_date < ?) OR (due_date IS NULL AND start_date IS NOT NULL AND start_date < ?))`).all(t, t)
+  const stale = db.prepare(`SELECT * FROM tasks WHERE status = 'active' AND task_type != 'event' AND recurrence IS NOT NULL AND ((due_date IS NOT NULL AND due_date < ?) OR (due_date IS NULL AND start_date IS NOT NULL AND start_date < ?))`).all(t, t)
   const now = nowIso()
   for (const task of stale) {
     db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ?`).run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id)
@@ -276,9 +276,10 @@ function getTasksForDate(date) {
     stampAgentJobs(scheduled, timeSnoozed)
     return { view: 'future', date, scheduled, timeSnoozed, events, reminders }
   } else {
-    const completed = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'done' AND parent_id IS NULL AND last_touched_human >= ? AND last_touched_human < ? ORDER BY last_touched_human DESC`).all(date, nextDay))
-    const wasDue    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE due_date = ? AND parent_id IS NULL ORDER BY status ASC, ${ORDER}`).all(date))
-    return { view: 'past', date, completed, wasDue }
+    const completed = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'done' AND parent_id IS NULL AND task_type = 'task' AND last_touched_human >= ? AND last_touched_human < ? ORDER BY last_touched_human DESC`).all(date, nextDay))
+    const wasDue    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE due_date = ? AND parent_id IS NULL AND task_type = 'task' ORDER BY status ASC, ${ORDER}`).all(date))
+    const events    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE task_type = 'event' AND parent_id IS NULL AND due_date = ? ORDER BY event_time ASC NULLS LAST, created_at ASC`).all(date))
+    return { view: 'past', date, completed, wasDue, events }
   }
 }
 

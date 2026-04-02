@@ -112,9 +112,15 @@ function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: O
 
   return (
     <>
+      {(data.events?.length ?? 0) > 0 && (
+        <section className="task-section">
+          <h2>📅 Events <span className="count">{data.events!.length}</span></h2>
+          {data.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} />)}
+        </section>
+      )}
       <TaskSection title="Completed" icon="✅" tasks={data.completed ?? []} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
       <TaskSection title="Was Due" icon="📅" tasks={data.wasDue ?? []} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
-      {!data.completed?.length && !data.wasDue?.length && <div className="empty-state">No records for this date.</div>}
+      {!data.events?.length && !data.completed?.length && !data.wasDue?.length && <div className="empty-state">No records for this date.</div>}
     </>
   )
 }
