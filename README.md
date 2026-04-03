@@ -286,6 +286,46 @@ Key tools available to Claude:
 
 ---
 
+## Contributing
+
+### Branch protection
+
+The `main` branch is protected — direct pushes are blocked for contributors. All changes must go through a pull request and require **1 approval** before merging.
+
+### Workflow
+
+```bash
+# 1. Branch off main
+git checkout -b feature/my-feature   # or fix/, chore/
+
+# 2. Make changes, commit
+git add <files>
+git commit -m "feat: describe what you did"
+
+# 3. Push and open a PR against main
+git push -u origin feature/my-feature
+gh pr create --base main
+```
+
+Use conventional commit prefixes: `feat:`, `fix:`, `chore:`, `refactor:`, `docs:`.
+
+### What happens on merge
+
+Merging to `main` does **not** trigger a release. Releases are cut by the maintainer by pushing a version tag:
+
+```bash
+# Maintainer only — bump version in package.json first
+git tag v1.0.x && git push origin v1.0.x
+```
+
+This triggers the GitHub Actions build (macOS DMG + Windows EXE + Linux AppImage), signs/notarizes, and publishes to GitHub Releases.
+
+### Architecture
+
+See [`CLAUDE.md`](CLAUDE.md) for the full architecture overview, file layout, database schema, and development notes.
+
+---
+
 ## Tech Stack
 
 - **Electron** 41 + **Vite** + **React** + **TypeScript**
