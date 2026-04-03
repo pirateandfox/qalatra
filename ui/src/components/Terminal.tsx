@@ -6,15 +6,17 @@ import '@xterm/xterm/css/xterm.css'
 import './Terminal.css'
 
 interface Props {
-  open: boolean
+  mode: 'closed' | 'docked' | 'fullscreen'
   onClose: () => void
+  onToggleFullscreen: () => void
   pendingCommand?: string | null
   onCommandConsumed?: () => void
 }
 
 const eAPI = () => (window as any).electronAPI
 
-export default function Terminal({ open, onClose, pendingCommand, onCommandConsumed }: Props) {
+export default function Terminal({ mode, onClose, onToggleFullscreen, pendingCommand, onCommandConsumed }: Props) {
+  const open = mode !== 'closed'
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -137,10 +139,13 @@ export default function Terminal({ open, onClose, pendingCommand, onCommandConsu
   }, [onClose])
 
   return (
-    <div className={`terminal-panel ${open ? 'open' : ''}`}>
+    <div className={`terminal-panel ${mode !== 'closed' ? mode : ''}`}>
       <div className="terminal-toolbar">
         <span className="terminal-title">Terminal</span>
-        <button className="terminal-close" onClick={onClose}>✕</button>
+        <button className="terminal-close" title={mode === 'fullscreen' ? 'Restore' : 'Expand'} onClick={onToggleFullscreen}>
+          {mode === 'fullscreen' ? '⊡' : '⛶'}
+        </button>
+        <button className="terminal-close" title="Close" onClick={onClose}>✕</button>
       </div>
       <div ref={containerRef} id="terminal-container" />
     </div>

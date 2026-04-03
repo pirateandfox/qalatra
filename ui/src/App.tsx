@@ -33,7 +33,7 @@ function AppInner() {
   const [backlogRefresh, setBacklogRefresh] = useState(0)
   const [taskData, setTaskData]     = useState<TaskData | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [terminalOpen, setTerminalOpen] = useState(false)
+  const [terminalMode, setTerminalMode] = useState<'closed' | 'docked' | 'fullscreen'>('closed')
   const [terminalCommand, setTerminalCommand] = useState<string | null>(null)
   const [previewPath, setPreviewPath]   = useState<string | null>(null)
   const [mdPath, setMdPath]             = useState<string | null>(null)
@@ -83,7 +83,7 @@ function AppInner() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === '`' && e.ctrlKey) setTerminalOpen(o => !o)
+      if (e.key === '`' && e.ctrlKey) setTerminalMode(m => m === 'closed' ? 'docked' : 'closed')
       if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement) && !(e.target as HTMLElement).isContentEditable) {
         setCreateOpen(true)
       }
@@ -118,7 +118,7 @@ function AppInner() {
         onDateChange={d => { setDate(d); setSelectedId(null) }}
         onViewChange={setView}
         onScreenChange={s => { setScreen(s); setSelectedId(null) }}
-        onTerminalToggle={() => setTerminalOpen(o => !o)}
+        onTerminalToggle={() => setTerminalMode(m => m === 'closed' ? 'docked' : 'closed')}
         dailyNoteOpen={dailyNoteOpen}
         onDailyNoteToggle={() => setDailyNoteOpen(o => !o)}
         settingsOpen={settingsOpen}
@@ -130,7 +130,7 @@ function AppInner() {
       />
 
       <div className={`layout ${selectedId ? 'panel-open' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, paddingBottom: terminalOpen ? 300 : 0 }}>
+        <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, paddingBottom: terminalMode === 'docked' ? 300 : 0 }}>
           {screen === 'habits' ? (
             <HabitsView onMutate={() => load(date, true)} />
           ) : screen === 'backlog' ? (
@@ -169,7 +169,7 @@ function AppInner() {
           onClose={() => setSelectedId(null)}
           onMutate={() => screen === 'main' ? load(date, true) : setBacklogRefresh(n => n + 1)}
           onDelete={() => { setSelectedId(null); screen === 'main' ? load(date, true) : setBacklogRefresh(n => n + 1) }}
-          terminalOpen={terminalOpen}
+          terminalOpen={terminalMode !== 'closed'}
           onPreview={path => path.endsWith('.md') ? setMdPath(path) : setPreviewPath(path)}
         />
       </div>
@@ -190,8 +190,9 @@ function AppInner() {
         date={date}
       />
       <Terminal
-        open={terminalOpen}
-        onClose={() => setTerminalOpen(false)}
+        mode={terminalMode}
+        onClose={() => setTerminalMode('closed')}
+        onToggleFullscreen={() => setTerminalMode(m => m === 'fullscreen' ? 'docked' : 'fullscreen')}
         pendingCommand={terminalCommand}
         onCommandConsumed={() => setTerminalCommand(null)}
       />
@@ -199,15 +200,15 @@ function AppInner() {
         <EmailPreview
           filePath={previewPath}
           onClose={() => setPreviewPath(null)}
-          terminalOpen={terminalOpen}
-          onTerminalToggle={() => setTerminalOpen(o => !o)}
+          terminalOpen={terminalMode !== 'closed'}
+          onTerminalToggle={() => setTerminalMode(m => m === 'closed' ? 'docked' : 'closed')}
           onChatWithDoc={async (fp) => {
             const settings = await fetchSettings().catch(() => ({} as Record<string, string>))
             const agentCmd = settings.defaultAgentCommand || 'claude --dangerously-skip-permissions'
             const dir = fp.substring(0, fp.lastIndexOf('/'))
             const name = fp.split('/').pop() ?? fp
             setTerminalCommand(`cd "${dir}" && ${agentCmd} "I want to work on ${name}"\r`)
-            setTerminalOpen(true)
+            setTerminalMode('docked')
           }}
         />
       )}
@@ -215,15 +216,15 @@ function AppInner() {
         <MdView
           filePath={mdPath}
           onClose={() => setMdPath(null)}
-          terminalOpen={terminalOpen}
-          onTerminalToggle={() => setTerminalOpen(o => !o)}
+          terminalOpen={terminalMode !== 'closed'}
+          onTerminalToggle={() => setTerminalMode(m => m === 'closed' ? 'docked' : 'closed')}
           onChatWithDoc={async (fp) => {
             const settings = await fetchSettings().catch(() => ({} as Record<string, string>))
             const agentCmd = settings.defaultAgentCommand || 'claude --dangerously-skip-permissions'
             const dir = fp.substring(0, fp.lastIndexOf('/'))
             const name = fp.split('/').pop() ?? fp
             setTerminalCommand(`cd "${dir}" && ${agentCmd} "I want to work on ${name}"\r`)
-            setTerminalOpen(true)
+            setTerminalMode('docked')
           }}
         />
       )}

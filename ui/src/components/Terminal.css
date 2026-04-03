@@ -6,13 +6,14 @@
   height: 0;
   background: var(--panel-bg);
   border-top: 1px solid var(--border);
-  transition: height .2s ease;
+  transition: height .2s ease, top .2s ease;
   z-index: 1200;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.terminal-panel.open { height: 300px; }
+.terminal-panel.docked { height: 300px; }
+.terminal-panel.fullscreen { top: 0; height: 100%; border-top: none; }
 
 .terminal-toolbar {
   background: var(--surface);
