@@ -1,18 +1,3 @@
-.settings-panel {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 0;
-  background: var(--panel-bg);
-  border-top: 1px solid var(--border);
-  transition: height .2s ease;
-  z-index: 98;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.settings-panel.open { height: 520px; }
 
 .settings-body {
   flex: 1;

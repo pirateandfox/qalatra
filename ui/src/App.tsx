@@ -38,7 +38,9 @@ function AppInner() {
   const [previewPath, setPreviewPath]   = useState<string | null>(null)
   const [mdPath, setMdPath]             = useState<string | null>(null)
   const [dailyNoteOpen, setDailyNoteOpen] = useState(false)
+  const [dailyNoteFullscreen, setDailyNoteFullscreen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsFullscreen, setSettingsFullscreen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [meetingId, setMeetingId]   = useState<string | null>(null)
   const [loading, setLoading]       = useState(false)
@@ -182,11 +184,15 @@ function AppInner() {
       />
       <Settings
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        fullscreen={settingsFullscreen}
+        onClose={() => { setSettingsOpen(false); setSettingsFullscreen(false) }}
+        onToggleFullscreen={() => setSettingsFullscreen(f => !f)}
       />
       <DailyNote
         open={dailyNoteOpen}
-        onClose={() => setDailyNoteOpen(false)}
+        fullscreen={dailyNoteFullscreen}
+        onClose={() => { setDailyNoteOpen(false); setDailyNoteFullscreen(false) }}
+        onToggleFullscreen={() => setDailyNoteFullscreen(f => !f)}
         date={date}
       />
       <Terminal

@@ -1,14 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { fetchDailyNote, saveDailyNote } from '../api'
+import BottomPanel from './BottomPanel'
 import './DailyNote.css'
 
 interface Props {
   open: boolean
+  fullscreen: boolean
   onClose: () => void
+  onToggleFullscreen: () => void
   date: string
 }
 
-export default function DailyNote({ open, onClose, date }: Props) {
+export default function DailyNote({ open, fullscreen, onClose, onToggleFullscreen, date }: Props) {
   const [content, setContent] = useState('')
   const [saving, setSaving] = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -47,12 +50,15 @@ export default function DailyNote({ open, onClose, date }: Props) {
   }
 
   return (
-    <div className={`note-panel ${open ? 'open' : ''}`}>
-      <div className="terminal-toolbar">
-        <span className="terminal-title">Daily Note — {date}</span>
-        {saving && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>saving…</span>}
-        <button className="terminal-close" onClick={onClose}>✕</button>
-      </div>
+    <BottomPanel
+      title={<>Daily Note — {date}{saving && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8, textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>saving…</span>}</>}
+      open={open}
+      fullscreen={fullscreen}
+      onClose={onClose}
+      onToggleFullscreen={onToggleFullscreen}
+      dockedHeight={300}
+      zIndex={99}
+    >
       <div className="note-body">
         <textarea
           ref={textareaRef}
@@ -63,6 +69,6 @@ export default function DailyNote({ open, onClose, date }: Props) {
           placeholder="What's on your mind today? Jot down thoughts, context, intentions…"
         />
       </div>
-    </div>
+    </BottomPanel>
   )
 }

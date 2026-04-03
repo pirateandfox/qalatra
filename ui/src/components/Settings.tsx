@@ -3,14 +3,17 @@ import { fetchSettings, saveSettings, fetchAgents, syncAttachments, getMcpStatus
 import { useContexts } from '../lib/ContextsProvider'
 import { useTheme } from '../lib/ThemeProvider'
 import { TOKEN_KEYS, TOKEN_LABELS, DARK_TOKENS, LIGHT_TOKENS, type ThemeMode } from '../lib/theme'
+import BottomPanel from './BottomPanel'
 import './Settings.css'
 
 interface Props {
   open: boolean
+  fullscreen: boolean
   onClose: () => void
+  onToggleFullscreen: () => void
 }
 
-export default function Settings({ open, onClose }: Props) {
+export default function Settings({ open, fullscreen, onClose, onToggleFullscreen }: Props) {
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [agents, setAgents] = useState<Agent[]>([])
   const [saved, setSaved] = useState(false)
@@ -52,11 +55,15 @@ export default function Settings({ open, onClose }: Props) {
   }
 
   return (
-    <div className={`settings-panel ${open ? 'open' : ''}`}>
-      <div className="terminal-toolbar">
-        <span className="terminal-title">Settings</span>
-        <button className="terminal-close" onClick={onClose}>✕</button>
-      </div>
+    <BottomPanel
+      title="Settings"
+      open={open}
+      fullscreen={fullscreen}
+      onClose={onClose}
+      onToggleFullscreen={onToggleFullscreen}
+      dockedHeight={520}
+      zIndex={98}
+    >
       <div className="settings-body">
 
         <div className="settings-section-header" style={{ borderTop: 'none', paddingTop: 0, marginTop: 0 }}>Appearance</div>
@@ -378,6 +385,6 @@ export default function Settings({ open, onClose }: Props) {
           </button>
         </div>
       </div>
-    </div>
+    </BottomPanel>
   )
 }

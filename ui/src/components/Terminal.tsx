@@ -3,7 +3,7 @@ import { fetchSettings } from '../api'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import './Terminal.css'
+import BottomPanel from './BottomPanel'
 
 interface Props {
   mode: 'closed' | 'docked' | 'fullscreen'
@@ -139,15 +139,16 @@ export default function Terminal({ mode, onClose, onToggleFullscreen, pendingCom
   }, [onClose])
 
   return (
-    <div className={`terminal-panel ${mode !== 'closed' ? mode : ''}`}>
-      <div className="terminal-toolbar">
-        <span className="terminal-title">Terminal</span>
-        <button className="terminal-close" title={mode === 'fullscreen' ? 'Restore' : 'Expand'} onClick={onToggleFullscreen}>
-          {mode === 'fullscreen' ? '⊡' : '⛶'}
-        </button>
-        <button className="terminal-close" title="Close" onClick={onClose}>✕</button>
-      </div>
-      <div ref={containerRef} id="terminal-container" />
-    </div>
+    <BottomPanel
+      title="Terminal"
+      open={mode !== 'closed'}
+      fullscreen={mode === 'fullscreen'}
+      onClose={onClose}
+      onToggleFullscreen={onToggleFullscreen}
+      dockedHeight={300}
+      zIndex={1200}
+    >
+      <div ref={containerRef} id="terminal-container" style={{ flex: 1, minHeight: 0, padding: '4px 8px', overflow: 'hidden' }} />
+    </BottomPanel>
   )
 }
