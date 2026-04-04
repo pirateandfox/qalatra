@@ -1,5 +1,15 @@
 # Task OS — Evolution Notes
 
+## 1.0.60 — Habit recurrence_days: specific day scheduling (2026-04-04)
+
+- **New field**: `recurrence_days TEXT` added to the `habits` table (migration runs on startup). Stores comma-separated day abbreviations: `mon,wed,fri` or `tue,thu` etc.
+- **Filtering logic**: `isHabitDueOn()` in both `db-worker.js` and `mcp/tools/habits.js` checks `recurrence_days` first — if set, only fires on those days. Existing habits with no `recurrence_days` behave exactly as before.
+- **Habits screen shows all habits**: `listHabits` no longer filters by due-today — all active habits are always shown. The task screen inline habits list still filters to due-today only.
+- **Day picker UI**: When creating or editing a habit with recurrence = "Weekdays", a row of day chips (Mo Tu We Th Fr Sa Su) appears. Selected days are highlighted green and stored as `recurrence_days`.
+- **Inline edit UI**: Each `HabitRow` now has a ✎ button (visible on hover) that expands an inline edit form — title, notes prompt, recurrence + day picker. Also includes an Archive button.
+- **Day badge**: Habits with `recurrence_days` show a compact badge (e.g. `Mo We Fr`) next to the title.
+- **MCP tools updated**: `create_habit` and `update_habit` both accept `recurrence_days`. Set to empty string to clear.
+
 ## Unreleased — Light/dark mode + configurable color tokens
 
 - **Architecture**: Color token system in `ui/src/lib/theme.ts` — 9 named tokens (`bg`, `surface`, `surface2`, `border`, `text`, `muted`, `accent`, `panelBg`, `inputBg`) with full dark and light presets.
