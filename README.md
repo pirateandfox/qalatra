@@ -8,9 +8,7 @@ Your data lives in a local SQLite database on your machine. Nothing goes to a se
 
 ---
 
-![Task OS — priority view with task detail](assets/screenshot-main.png)
-
-![Task OS — with terminal and Claude session](assets/screenshot-terminal.png)
+![Task OS — priority view, task detail, and Claude running in the integrated terminal](assets/screenshot-terminal.png)
 
 ---
 
@@ -121,6 +119,35 @@ Task OS runs an MCP server on `http://localhost:3457`. Add it to `~/.claude.json
 Restart Claude Code. The app must be running for the tools to be available.
 
 You can also change the port and auto-update `~/.claude.json` from **Settings → MCP Server** inside the app.
+
+---
+
+## First-time setup
+
+Open **Settings** (gear icon, top right) and configure two things before you start:
+
+**1. Working directory**
+
+Set this to your main projects folder — the directory where your work lives:
+
+```
+/Users/you/IdeaProjects        # Mac/Linux
+C:\Users\you\IdeaProjects      # Windows
+```
+
+This is the working directory for the built-in terminal and the root Task OS scans for agents. Everything flows from here.
+
+**2. Agent command**
+
+Task OS dispatches agents using a configurable CLI command. The default is:
+
+```
+claude --dangerously-skip-permissions
+```
+
+**Task OS works with any command-line agent, not just Claude.** If you use a different AI CLI, a custom script, or your own agent runner — change this to whatever command invokes it. Claude is what we use and what all the examples show, but it's not hardwired.
+
+Per-agent overrides are also available — each agent folder can specify its own command in `agent.config`, so you can mix different agents across different tasks.
 
 ---
 
