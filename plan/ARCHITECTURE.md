@@ -41,9 +41,68 @@ The MCP server reads/writes Automerge documents directly. SQLite is not part of 
 - Data is end-to-end encrypted — the relay cannot read user content
 - Stateless from the user's perspective: if the relay goes down, your data is still on your device
 
-### Identity
+The relay server is built with **NestleJS** (Justin's own framework) backed by **Postgres** for encrypted blob storage.
 
-Keypair per user — no username/password accounts. Sharing a collaborative project means sharing the project's encryption key with a collaborator's public key.
+### Identity & Auth
+
+**No username/password accounts.** Identity is keypair-based — the desktop is the root of trust.
+
+#### Personal mode (one person, multiple devices)
+
+Pairing flow:
+1. Desktop generates a keypair on first launch, stores it in the OS keychain
+2. To add a device: desktop displays a QR code / one-time pairing code
+3. New device scans it, receives the shared encryption key
+4. Both devices sync via the relay — the relay authenticates by key, not by account
+
+Device recovery scenarios:
+
+| Scenario | Solution |
+|---|---|
+| Add new device | Pair from any existing device (QR/code) |
+| Lost phone | Revoke from desktop → relay rejects old key → pair new phone |
+| Lost desktop | Pair new desktop, approve from phone |
+| Lost everything | Recovery phrase → regenerate root keypair |
+
+**Recovery phrase:** a BIP39-style 24-word mnemonic generated at setup. Written down once, stored safely. If all devices are lost, the phrase regenerates the root keypair and re-accesses encrypted relay data. This is the only credential that needs to exist.
+
+The relay never sees plaintext data. If a device is stolen, it has encrypted blobs it cannot read and a key the relay will reject once revoked.
+
+#### Team mode (shared agent hub, company use)
+
+A different product mode where a company runs a Task OS instance and multiple people connect to dispatch agents and share task pools. This mode benefits from traditional accounts + admin-managed access control. Designed for later — personal mode ships first.
+
+---
+
+## Platform Targets
+
+```
+taskos/
+  packages/
+    core/        ← Automerge documents, data model, sync logic, keypair/crypto
+    mcp/         ← MCP server (Claude integration)
+    desktop/     ← Electron app
+    mobile/      ← React Native app (iOS + Android)
+    sync-server/ ← NestleJS relay server
+```
+
+**Desktop** is the primary environment — full MCP integration, Claude talks to the local Automerge store directly. Fast, local, AI-native. Desktop app stays **Electron**:
+
+- Already built and working — no rewrite cost
+- Auto-updater via electron-updater already in place
+- MCP server runs as a utilityProcess alongside the app (current architecture)
+- Frontend stays React/TypeScript
+
+**Mobile** is **React Native** (not React Native Web):
+
+- Installed on device — encryption key never leaves the device
+- Same trust model as desktop: relay sees only encrypted blobs
+- React Native Web rejected: JS served from a web server at runtime, which would require trusting the server not to exfiltrate keys — breaks the E2E encryption guarantee
+- No web app for task data for the same reason
+
+**Web** is limited to unauthenticated surfaces: marketing site, public/shared task views (if a user opts to share). Not a home for private task data.
+
+**Note on SQLite:** SQLite does not go away in v2 — it drops down a layer. Automerge uses it internally as its local persistence mechanism via a storage adapter. Your application code never writes SQL directly; you interact only with the Automerge API. Same file format, completely different relationship to your code.
 
 ---
 
@@ -68,33 +127,6 @@ Settings → Storage
 ```
 
 Files upload directly from the client to the user's bucket via presigned URLs. The sync server never touches file content.
-
----
-
-## Platform Targets
-
-```
-taskos/
-  packages/
-    core/        ← Automerge documents, data model, sync logic
-    mcp/         ← MCP server (Claude integration)
-    desktop/     ← Electron or Tauri app
-    web/         ← Web UI (manual input, not Claude-connected)
-    mobile/      ← React Native (manual input)
-    sync-server/ ← Hosted relay
-```
-
-**Desktop** is the primary environment — full MCP integration, Claude talks to the local Automerge store directly. Fast, local, AI-native. Desktop app is built with **Tauri** (Rust + web frontend):
-
-- Distributable is 3-10MB vs Electron's 80-150MB
-- Auto-updater built in
-- MCP server runs as a Tauri sidecar — bundled with the app, auto-started alongside it
-- Frontend stays React/TypeScript; Rust surface area is minimal (thin glue, existing plugins)
-- SQLite support built in via `tauri-plugin-sql`, used by Automerge's storage adapter internally
-
-**Note on SQLite:** SQLite does not go away in v2 — it drops down a layer. Automerge uses it internally as its local persistence mechanism via a storage adapter. Your application code never writes SQL directly; you interact only with the Automerge API. Same file format, completely different relationship to your code.
-
-**Web and mobile** are secondary — for manual input and visibility when away from the desktop. They hit the sync server's API. No MCP/Claude integration in these environments.
 
 ---
 
@@ -127,12 +159,16 @@ $10/mo:   Sync relay + hosted file storage (Xgb included, R2 under the hood)
 
 If offering hosted storage: use Cloudflare R2 on the backend (zero egress fees). Start with BYOS-only — it sidesteps GDPR/data retention complexity. Add hosted storage as an upsell once operationally ready.
 
+### GDPR & Privacy
+
+Because the relay stores only encrypted blobs it cannot read, data custody obligations are minimal. Users own their data cryptographically — even if the relay is subpoenaed, the data is unreadable without the user's key. This is a strong legal and ethical position.
+
 ---
 
 ## Open Source Strategy
 
 - App is open source (MIT or Apache 2)
-- Self-hosters run their own sync relay (documented, simple to deploy)
+- Self-hosters run their own sync relay (documented, simple to deploy with NestleJS + Postgres)
 - Hosted relay is the commercial offering — sell convenience, not the software
 - Self-hosters are free marketing to technical users who refer paying friends
 
@@ -144,7 +180,7 @@ This is the Obsidian model: free local app, paid sync.
 
 - **Compaction strategy** — how often to squash Automerge history to keep storage flat
 - **Buffer window** — how long the hosted relay retains state for offline devices
-- **Mobile framework** — React Native (shared JS with web) vs Flutter
+- **Team mode auth** — account model for shared/company instances (personal mode ships first)
 
 ---
 
