@@ -219,6 +219,18 @@ This is the Obsidian model: free local app, paid sync.
 
 ---
 
+## Why Automerge (not hand-rolled sync)
+
+This was a deliberate decision worth documenting. The simpler alternative — SQLite on desktop syncing to a Postgres backend via a `sync_log` table, last-write-wins — was considered and rejected for the following reasons:
+
+- **Conflict handling is harder than it looks.** Complete task on phone + snooze on desktop simultaneously. Recurring task fires on both devices while offline. Subtask added on mobile while desktop reorders the parent list. Last-write-wins silently destroys one of those intentions. Automerge resolves all of these correctly by design.
+- **The sync_log approach scales badly.** Every new column, every new table, every new operation requires updating the sync logic. It becomes a parallel system maintained forever alongside the real schema.
+- **Offline is not a luxury.** Mobile apps get backgrounded, connections drop at the worst moments. A sync system needs to handle every combination of online/offline states across every device correctly. That's exactly what CRDTs are built for.
+- **Building it once correctly.** Hand-rolled sync ships faster but gets rewritten in two years when edge cases accumulate. Automerge is that rewrite done upfront.
+- **Cost for personal use is negligible.** A single-user relay storing encrypted CRDT blobs costs essentially nothing — a small Fly.io instance handles it comfortably.
+
+The primary user is also the most demanding user: running agents, complex recurrence, heavy Claude integration, editing tasks across desktop and phone constantly. Building for that use case correctly from day one is the right call.
+
 ## Open Questions
 
 - **Compaction strategy** — how often to squash Automerge history to keep storage flat
