@@ -30,6 +30,9 @@ export default function Terminal({ mode, onClose, onToggleFullscreen, pendingCom
     outputCleanupRef.current?.()
     exitCleanupRef.current?.()
     readyRef.current = false
+    // Reset terminal display state — clears alternate screen, raw mode, and any other
+    // settings left behind by programs (e.g. Claude Code) that exited uncleanly via Ctrl+C.
+    termRef.current?.reset()
 
     const cols = termRef.current?.cols ?? 80
     const rows = termRef.current?.rows ?? 24
@@ -106,7 +109,7 @@ export default function Terminal({ mode, onClose, onToggleFullscreen, pendingCom
     if (open) {
       setTimeout(() => { fitRef.current?.fit(); termRef.current?.focus() }, 250)
     }
-  }, [open])
+  }, [open, mode])
 
   // Fire a one-shot command when the terminal opens with a pending command.
   // If the terminal is already running (readyRef = true), kill it and reconnect first
