@@ -155,13 +155,43 @@ $5/mo:    Sync relay (tasks) + BYOS for file attachments
 $10/mo:   Sync relay + hosted file storage (Xgb included, R2 under the hood)
 ```
 
+### Billing & Auth
+
+Billing identity and data identity are fully decoupled — the relay never knows who you are, only whether your token is valid.
+
+**Billing layer (NestleJS, Postgres):**
+- Minimal accounts table: `(email, stripe_customer_id, subscription_status)`
+- Stripe handles payment, invoicing, and the customer-facing subscription portal
+- On active subscription: the billing API issues a signed relay token tied to the user's public key
+- Token format: `{ pubkey, valid_until, sig }` — signed with the relay's private key
+
+**Relay layer:**
+- Validates token signature and expiry on connection
+- Never looks up email or user account
+- Rejects connections with expired or missing tokens
+- Accepts self-hosters with no token (they own their relay)
+
+**Flow:**
+```
+1. User subscribes via Stripe Customer Portal (email + card)
+2. Billing API issues relay token: { pubkey: "abc...", valid_until: "2027-01-01", sig: "..." }
+3. Token stored locally on device
+4. Device connects to relay → presents token → relay validates → sync allowed
+5. Subscription cancelled → token expires → relay rejects → local data unaffected
+```
+
+**Device management:**
+- New device paired via QR/code → relay token travels with keypair or re-issued from billing portal
+- Lost device revoked from desktop or billing portal → relay rejects that public key
+- Billing portal (web, email login) is the only place email is used — purely for subscription management
+
 ### File Storage (hosted tier)
 
 If offering hosted storage: use Cloudflare R2 on the backend (zero egress fees). Start with BYOS-only — it sidesteps GDPR/data retention complexity. Add hosted storage as an upsell once operationally ready.
 
 ### GDPR & Privacy
 
-Because the relay stores only encrypted blobs it cannot read, data custody obligations are minimal. Users own their data cryptographically — even if the relay is subpoenaed, the data is unreadable without the user's key. This is a strong legal and ethical position.
+Because the relay stores only encrypted blobs it cannot read, data custody obligations are minimal. Users own their data cryptographically — even if the relay is subpoenaed, the data is unreadable without the user's key. Billing data (email, payment history) is standard Stripe-managed PII — well-understood obligations, nothing unusual. This is a strong legal and ethical position.
 
 ---
 
