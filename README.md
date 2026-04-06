@@ -8,6 +8,12 @@ Your data lives in a local SQLite database on your machine. Nothing goes to a se
 
 ---
 
+![Task OS — priority view with task detail](assets/screenshot-main.png)
+
+![Task OS — with terminal and Claude session](assets/screenshot-terminal.png)
+
+---
+
 ## The idea
 
 Most people use Claude like a smart search engine. You copy-paste context in, ask a question, copy the answer out. Task OS is built on a different premise: **Claude should be a participant in your work, not a consultant you have to brief every time.**
