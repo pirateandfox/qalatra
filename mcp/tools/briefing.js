@@ -15,7 +15,15 @@ function autoRolloverRecurring(db) {
   for (const task of stale) {
     db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ?`)
       .run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id);
-    const nextDate = nextRecurrenceDate(t, task.recurrence);
+    // Advance from the task's original due_date (not today) to preserve cadence alignment.
+    // If the task was skipped/missed across multiple periods, walk forward until we find
+    // the next occurrence that is >= today.
+    let baseDate = task.due_date ?? t;
+    let nextDate = nextRecurrenceDate(baseDate, task.recurrence);
+    while (nextDate && nextDate < t) {
+      baseDate = nextDate;
+      nextDate = nextRecurrenceDate(baseDate, task.recurrence);
+    }
     if (nextDate) {
       db.prepare(`
         INSERT INTO tasks (
