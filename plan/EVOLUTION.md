@@ -1,5 +1,39 @@
 # Task OS — Evolution Notes
 
+## 1.0.67 — Link chips, agent output rules, recurrence + view fixes, HTTP timeout (2026-04-14)
+
+### Link chips with labels
+- All attached links now render as chips showing icon + name (e.g. "Asana", "Linear", "FlightDesk") in both the task row and detail panel. Previously icon-only.
+- Unknown URLs fall back to the hostname as the label.
+- `detectPlatform()` in `constants.ts` is the single source of truth for platform detection and display names.
+- Platform icons updated: FlightDesk now uses its real SVG logo instead of a placeholder triangle.
+
+### Agent output rules
+- `agent.config` now supports an `output_rules` array. Rules define regex patterns to match against agent stdout and actions to take when they match.
+- Currently supported action: `add_link` — extracts a capture group from the output and adds the interpolated URL as a link on the Task OS task.
+- Example: capture a FlightDesk task ID from `flightdesk register` output and attach the FlightDesk task URL automatically.
+- Rules are per-agent and live in the agent's own repo — nothing ships globally with Task OS.
+- Rule format:
+  ```json
+  {
+    "output_rules": [
+      {
+        "pattern": "Task ID: ([a-f0-9-]{36})",
+        "action": "add_link",
+        "url": "https://yourapp.com/tasks/{1}"
+      }
+    ]
+  }
+  ```
+
+### Bug fixes
+- **Weekly recurrence cadence**: `nextRecurrenceDate` now uses `baseDate` as `dtstart` with `rule.after(dtstart, false)` (exclusive) instead of day+1 with inclusive. `FREQ=WEEKLY` without `BYDAY` was anchoring to the completion day's weekday rather than the original task day, causing a Monday task completed on Tuesday to recur on Tuesday. Now correctly recurs on the following Monday.
+- **Future view showing completed tasks**: The future `scheduled` query now filters `status = 'active'` only. Previously `status != 'snoozed'` allowed done tasks (e.g. tasks previously deferred which had a future `due_date` set) to appear in forward date views after being completed.
+
+### MCP HTTP server timeouts
+- Per-request timeout of 30 seconds: if a request hasn't completed, the server sends a `504` JSON-RPC error and destroys the socket. Prevents stale connections from blocking indefinitely.
+- `keepAliveTimeout` (65 s) and `headersTimeout` (31 s) added to the server instance.
+
 ## 1.0.60 — Habit recurrence_days: specific day scheduling (2026-04-04)
 
 - **New field**: `recurrence_days TEXT` added to the `habits` table (migration runs on startup). Stores comma-separated day abbreviations: `mon,wed,fri` or `tue,thu` etc.

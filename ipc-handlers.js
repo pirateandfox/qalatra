@@ -161,8 +161,9 @@ async function processAgentJobs() {
     runningJobs++
     await dbCall('startAgentJob', job.id)
     let agentCommand = settings.defaultAgentCommand || 'claude --dangerously-skip-permissions'
+    let cfg = null
     try {
-      const cfg = JSON.parse(fs.readFileSync(path.join(job.agent_path, 'agent.config'), 'utf8'))
+      cfg = JSON.parse(fs.readFileSync(path.join(job.agent_path, 'agent.config'), 'utf8'))
       if (cfg.command) agentCommand = cfg.command
     } catch {}
     const isTemplateCommand = agentCommand.includes('{spec_file}') || agentCommand.includes('{description}')
@@ -237,6 +238,21 @@ async function processAgentJobs() {
       else if (status === 'failed' && stderr.trim()) result += `\n\nStderr:\n${stderr.trim()}`
       await dbCall('finishAgentJob', job.id, status, result, sessionId)
       if (status === 'done' && job.task_id) await dbCall('insertAgentNote', uuidv4(), job.task_id, result, job.id)
+      // Apply output_rules from agent.config — e.g. extract a task ID from stdout and add a link
+      if (status === 'done' && job.task_id) {
+        const rules = cfg?.output_rules ?? []
+        for (const rule of rules) {
+          try {
+            if (rule.action === 'add_link' && rule.pattern && rule.url) {
+              const match = stdout.match(new RegExp(rule.pattern))
+              if (match) {
+                const url = rule.url.replace(/\{(\d+)\}/g, (_, i) => match[parseInt(i)] ?? '')
+                if (url) await dbCall('addTaskLink', job.task_id, url)
+              }
+            }
+          } catch {}
+        }
+      }
       BrowserWindow.getAllWindows()[0]?.webContents.send('agent-job:complete', { taskId: job.task_id, jobId: job.id })
     })
     proc.on('error', async err => {

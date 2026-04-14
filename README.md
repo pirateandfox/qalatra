@@ -67,7 +67,7 @@ stale_backlog_review  → surface tasks that haven't been touched recently
 
 **A built-in terminal** with docked and fullscreen modes — run Claude Code alongside your task view without switching windows.
 
-**Agents** — any folder with an `agent.config` file becomes a dispatchable agent. Assign one to a task, queue a job, and Task OS runs it with the task description as the prompt. Agents can write output files that preview directly in the app.
+**Agents** — any folder with an `agent.config` file becomes a dispatchable agent. Assign one to a task, queue a job, and Task OS runs it with the task description as the prompt. Agents can write output files that preview directly in the app. Agents can also define `output_rules` to extract data from their output and automatically attach links back to the task.
 
 **Habits** — recurring behaviors with flexible scheduling. Daily, weekdays, specific days of the week (Mon/Wed/Fri, Tue/Thu). Streak dots, session notes, completion history.
 
@@ -181,6 +181,24 @@ update_task(task_id: "...", links: [{ url: "/absolute/path/to/report.md" }])
 ```
 
 Linked `.md` files open in a markdown editor with PDF export. Linked `.html` and `.eml` files open in an email preview.
+
+**Output rules** — agents can parse their own stdout and automatically add links to the Task OS task. Add an `output_rules` array to `agent.config`:
+
+```json
+{
+  "name": "My Agent",
+  "command": "my-cli --flag '{description}'",
+  "output_rules": [
+    {
+      "pattern": "Task ID: ([a-f0-9-]{36})",
+      "action": "add_link",
+      "url": "https://yourapp.com/tasks/{1}"
+    }
+  ]
+}
+```
+
+`pattern` is a JavaScript regex. `{1}`, `{2}`, etc. reference capture groups. When the agent job completes successfully, Task OS applies each rule against the raw output and adds matching links to the task. Rules live in your agent's repo — nothing is configured globally in Task OS.
 
 **Starter agents:** Clone [taskos-projects-template](https://github.com/pirateandfox/taskos-projects-template) as your working directory to get a set of ready-to-use agents — research, writing, triage, and more. Point Settings → Working Directory at the cloned folder to activate them.
 
