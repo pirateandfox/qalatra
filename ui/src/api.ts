@@ -102,6 +102,7 @@ export async function deleteProject(name: string): Promise<void> {
 export interface Agent {
   name: string
   context: string | null
+  project: string | null
   description: string | null
   command: string | null
   path: string
