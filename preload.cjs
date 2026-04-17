@@ -27,4 +27,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('agent-job:complete', handler)
     return () => ipcRenderer.removeListener('agent-job:complete', handler)
   },
+
+  checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+  downloadUpdate: () => ipcRenderer.invoke('updater:download'),
+  installUpdate: () => ipcRenderer.invoke('updater:install'),
+  onUpdaterStatus: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('updater:status', handler)
+    return () => ipcRenderer.removeListener('updater:status', handler)
+  },
 })

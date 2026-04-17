@@ -150,6 +150,7 @@ export default function Terminal({ mode, onClose, onToggleFullscreen, pendingCom
       onToggleFullscreen={onToggleFullscreen}
       dockedHeight={300}
       zIndex={1200}
+      inline
     >
       <div ref={containerRef} id="terminal-container" style={{ flex: 1, minHeight: 0, padding: '4px 8px', overflow: 'hidden' }} />
     </BottomPanel>

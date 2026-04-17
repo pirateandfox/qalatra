@@ -128,81 +128,78 @@ function restartMcpServer(dbDir, newPort) {
 
 let _autoUpdater = null
 
+function sendUpdaterStatus(status, payload = {}) {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (win) win.webContents.send('updater:status', { status, ...payload })
+}
+
 async function getAutoUpdater() {
   if (_autoUpdater) return _autoUpdater
   const mod = await import('electron-updater')
   const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater ?? mod.default
+  autoUpdater.autoDownload = false
   autoUpdater.logger = { info: m => console.log('[updater]', m), warn: m => console.warn('[updater]', m), error: m => console.error('[updater]', m) }
-  autoUpdater.on('checking-for-update', () => console.log('[updater] Checking for update...'))
-  autoUpdater.on('update-not-available', info => console.log('[updater] Up to date:', info.version))
+  autoUpdater.on('checking-for-update', () => {
+    console.log('[updater] Checking for update...')
+    if (autoUpdater._verbose) sendUpdaterStatus('checking')
+  })
+  autoUpdater.on('update-not-available', info => {
+    console.log('[updater] Up to date:', info.version)
+    if (autoUpdater._verbose) sendUpdaterStatus('not-available', { version: info.version })
+  })
   autoUpdater.on('update-available', info => {
     console.log('[updater] Update available:', info.version)
-    const win = BrowserWindow.getAllWindows()[0]
-    if (win) win.setProgressBar(0.01) // start indeterminate-ish progress in dock
+    // Always show the banner when an update is found — whether from manual check or scheduled poll
+    sendUpdaterStatus('available', { version: info.version })
   })
   autoUpdater.on('download-progress', p => {
     console.log(`[updater] Downloading: ${Math.round(p.percent)}%`)
     const win = BrowserWindow.getAllWindows()[0]
     if (win) win.setProgressBar(p.percent / 100)
+    sendUpdaterStatus('downloading', { percent: Math.round(p.percent) })
   })
-  autoUpdater.on('update-downloaded', () => {
+  autoUpdater.on('update-downloaded', info => {
     const win = BrowserWindow.getAllWindows()[0]
-    if (win) win.setProgressBar(-1) // clear dock progress
-    dialog.showMessageBox({
-      type: 'info',
-      title: 'Update ready',
-      message: 'A new version of Task OS is ready.',
-      detail: 'It will be installed the next time you restart the app.',
-      buttons: ['Restart now', 'Later'],
-      defaultId: 0,
-    }).then(({ response }) => {
-      if (response === 0) autoUpdater.quitAndInstall()
-    })
+    if (win) win.setProgressBar(-1)
+    sendUpdaterStatus('downloaded', { version: info.version })
   })
   autoUpdater.on('error', err => {
     console.error('[updater] Error:', err.message)
     const win = BrowserWindow.getAllWindows()[0]
-    if (win) win.setProgressBar(-1) // clear dock progress on error
-    // Only show a dialog for manual checks — suppress the noisy startup check errors
-    // (those just log to the file). The manual check path sets a flag we read here.
-    if (!autoUpdater._silentCheck) {
+    if (win) win.setProgressBar(-1)
+    if (autoUpdater._verbose) {
       const isAvailability = /404|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|certificate|getaddrinfo|net::/i.test(err.message)
-      dialog.showMessageBox({
-        type: 'warning',
-        title: 'Update check failed',
-        message: isAvailability ? 'Update server not currently available.' : 'Could not check for updates.',
-        detail: isAvailability
-          ? 'The update server may still be building the latest release. Please try again in a few minutes.'
-          : err.message.slice(0, 300),
-        buttons: ['OK'],
-      })
+      sendUpdaterStatus('error', { message: isAvailability ? 'Update server not currently available.' : 'Could not check for updates.' })
     }
   })
   _autoUpdater = autoUpdater
   return autoUpdater
 }
 
+async function pollForUpdates(verbose = false) {
+  try {
+    const au = await getAutoUpdater()
+    au._verbose = verbose
+    await au.checkForUpdates()
+  } catch (err) {
+    console.error('[updater] poll error:', err.message)
+  }
+}
+
 function setupAutoUpdater() {
   if (isDev) return
-  getAutoUpdater().then(au => {
-    au._silentCheck = true  // suppress error dialogs on background startup check
-    // checkForUpdates() both emits 'error' AND rejects the promise — catch both
-    au.checkForUpdates().catch(err => console.error('[updater] silent check failed:', err.message))
-  }).catch(err => console.error('[updater] init error:', err.message))
+  // Check on launch, then every 4 hours
+  pollForUpdates(false)
+  setInterval(() => pollForUpdates(false), 4 * 60 * 60 * 1000)
 }
 
 async function checkForUpdatesManually() {
   if (isDev) {
-    dialog.showMessageBox({ type: 'info', title: 'Dev mode', message: 'Auto-updater is disabled in dev mode.' })
+    sendUpdaterStatus('checking')
+    setTimeout(() => sendUpdaterStatus('not-available', { version: 'dev' }), 1000)
     return
   }
-  try {
-    const au = await getAutoUpdater()
-    au._silentCheck = false  // show error dialogs for manual checks
-    await au.checkForUpdates()
-  } catch (err) {
-    console.error('[updater] manual check error:', err.message)
-  }
+  await pollForUpdates(true)
 }
 
 // ── Window ────────────────────────────────────────────────────────────────────
@@ -385,6 +382,18 @@ function setupTerminalIpc(win) {
   ipcMain.on('terminal:resize', (_, cols, rows) => { try { ptyProcess?.resize(cols, rows) } catch {} })
 }
 
+function setupUpdaterIpc() {
+  ipcMain.handle('updater:check', () => checkForUpdatesManually())
+  ipcMain.handle('updater:download', async () => {
+    const au = await getAutoUpdater().catch(() => null)
+    if (au) au.downloadUpdate().catch(err => console.error('[updater] download error:', err.message))
+  })
+  ipcMain.handle('updater:install', async () => {
+    const au = await getAutoUpdater().catch(() => null)
+    if (au) au.quitAndInstall()
+  })
+}
+
 app.whenReady().then(async () => {
   setupLogging()
 
@@ -409,6 +418,7 @@ app.whenReady().then(async () => {
   const win = createWindow()
   win._dbDir = dbDir  // stash for terminal IPC
   setupTerminalIpc(win)
+  setupUpdaterIpc()
   setupAutoUpdater()
 
   app.on('activate', () => {

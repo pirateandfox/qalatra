@@ -454,7 +454,13 @@ export const handlers = {
     const db = openDb();
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(args.task_id);
     if (!task) throw new Error(`Task not found: ${args.task_id}`);
-    db.prepare('DELETE FROM agent_jobs WHERE task_id = ?').run(args.task_id);
+    const subtaskIds = db.prepare('SELECT id FROM tasks WHERE parent_id = ?').all(args.task_id).map(r => r.id);
+    const allIds = [args.task_id, ...subtaskIds];
+    const ph = allIds.map(() => '?').join(',');
+    db.prepare(`DELETE FROM notes       WHERE task_id IN (${ph})`).run(...allIds);
+    db.prepare(`DELETE FROM agent_jobs  WHERE task_id IN (${ph})`).run(...allIds);
+    db.prepare(`DELETE FROM attachments WHERE task_id IN (${ph})`).run(...allIds);
+    db.prepare(`DELETE FROM sync_log    WHERE task_id IN (${ph})`).run(...allIds);
     db.prepare('DELETE FROM tasks WHERE id = ? OR parent_id = ?').run(args.task_id, args.task_id);
     return { deleted: args.task_id, title: task.title };
   },

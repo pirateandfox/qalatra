@@ -268,8 +268,7 @@ async function processAgentJobs() {
 async function autoRunAgents() {
   const tasks = await dbCall('getAutorunTasks')
   for (const task of tasks) {
-    const prompt = [task.title, task.description].filter(Boolean).join('\n')
-    await dbCall('insertAutorunJob', task.id, task.agent_path, prompt)
+    await dbCall('createAgentJob', task.id, null)
   }
 }
 

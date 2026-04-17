@@ -45,6 +45,7 @@ function AppInner() {
   const [meetingId, setMeetingId]   = useState<string | null>(null)
   const [loading, setLoading]       = useState(false)
   const [apiError, setApiError]     = useState<string | null>(null)
+  const [updateStatus, setUpdateStatus] = useState<{ status: string; version?: string; percent?: number; message?: string } | null>(null)
 
   const load = useCallback(async (d: string, silent = false) => {
     if (!silent) setLoading(true)
@@ -80,6 +81,19 @@ function AppInner() {
       if (filePath.endsWith('.md')) setMdPath(filePath)
       else setPreviewPath(filePath)
     })
+  }, [])
+
+  // Update status banner
+  useEffect(() => {
+    const api = (window as any).electronAPI
+    if (!api?.onUpdaterStatus) return
+    const unsub = api.onUpdaterStatus((data: { status: string; version?: string; percent?: number; message?: string }) => {
+      setUpdateStatus(data)
+      if (data.status === 'not-available') {
+        setTimeout(() => setUpdateStatus(s => s?.status === 'not-available' ? null : s), 3000)
+      }
+    })
+    return unsub
   }, [])
 
   // Keyboard shortcuts
@@ -132,7 +146,7 @@ function AppInner() {
       />
 
       <div className={`layout ${selectedId ? 'panel-open' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, paddingBottom: terminalMode === 'docked' ? 300 : 0 }}>
+        <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
           {screen === 'habits' ? (
             <HabitsView onMutate={() => load(date, true)} />
           ) : screen === 'backlog' ? (
@@ -176,6 +190,14 @@ function AppInner() {
         />
       </div>
 
+      <Terminal
+        mode={terminalMode}
+        onClose={() => setTerminalMode('closed')}
+        onToggleFullscreen={() => setTerminalMode(m => m === 'fullscreen' ? 'docked' : 'fullscreen')}
+        pendingCommand={terminalCommand}
+        onCommandConsumed={() => setTerminalCommand(null)}
+      />
+
       <CreateTask
         open={createOpen}
         defaultDate={date}
@@ -194,13 +216,6 @@ function AppInner() {
         onClose={() => { setDailyNoteOpen(false); setDailyNoteFullscreen(false) }}
         onToggleFullscreen={() => setDailyNoteFullscreen(f => !f)}
         date={date}
-      />
-      <Terminal
-        mode={terminalMode}
-        onClose={() => setTerminalMode('closed')}
-        onToggleFullscreen={() => setTerminalMode(m => m === 'fullscreen' ? 'docked' : 'fullscreen')}
-        pendingCommand={terminalCommand}
-        onCommandConsumed={() => setTerminalCommand(null)}
       />
       {previewPath && (
         <EmailPreview
@@ -234,7 +249,87 @@ function AppInner() {
           }}
         />
       )}
+      <UpdateBanner status={updateStatus} onDismiss={() => setUpdateStatus(null)} />
     </div>
     </ContextsProvider>
+  )
+}
+
+function UpdateBanner({ status, onDismiss }: { status: { status: string; version?: string; percent?: number; message?: string } | null; onDismiss: () => void }) {
+  if (!status) return null
+
+  const { status: s, version, percent, message } = status
+
+  const bg: Record<string, string> = {
+    checking: 'var(--surface2)',
+    'not-available': 'var(--surface2)',
+    available: 'var(--surface2)',
+    downloading: 'var(--surface2)',
+    downloaded: '#1a6b3c',
+    error: '#6b2a1a',
+  }
+
+  let text = ''
+  if (s === 'checking') text = 'Checking for updates…'
+  else if (s === 'not-available') text = `Up to date${version ? ` (v${version})` : ''}`
+  else if (s === 'available') text = `Update v${version} available`
+  else if (s === 'downloading') text = `Downloading update… ${percent ?? 0}%`
+  else if (s === 'downloaded') text = `v${version} ready to install`
+  else if (s === 'error') text = message ?? 'Update check failed'
+
+  const canDismiss = s === 'not-available' || s === 'error' || s === 'available' || s === 'downloaded'
+
+  return (
+    <div style={{
+      position: 'fixed',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      height: 32,
+      background: bg[s] ?? 'var(--surface2)',
+      borderTop: '1px solid var(--border)',
+      display: 'flex',
+      alignItems: 'center',
+      padding: '0 12px',
+      gap: 8,
+      fontSize: 12,
+      color: 'var(--text)',
+      zIndex: 9999,
+    }}>
+      {s === 'checking' && (
+        <span style={{ width: 12, height: 12, border: '2px solid var(--muted)', borderTopColor: 'var(--text)', borderRadius: '50%', display: 'inline-block', animation: 'agent-spin 0.7s linear infinite' }} />
+      )}
+      {s === 'downloading' && (
+        <div style={{ width: 80, height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ width: `${percent ?? 0}%`, height: '100%', background: 'var(--accent, #4a9eff)', transition: 'width 0.3s' }} />
+        </div>
+      )}
+      <span style={{ flex: 1 }}>{text}</span>
+      {s === 'available' && (
+        <button
+          onClick={() => (window as any).electronAPI?.downloadUpdate?.()}
+          style={{ fontSize: 11, padding: '2px 10px', cursor: 'pointer', borderRadius: 4, background: 'var(--accent, #4a9eff)', color: '#fff', border: 'none' }}
+        >
+          Download
+        </button>
+      )}
+      {s === 'downloaded' && (
+        <button
+          onClick={() => (window as any).electronAPI?.installUpdate?.()}
+          style={{ fontSize: 11, padding: '2px 10px', cursor: 'pointer', borderRadius: 4, background: '#2d9e5f', color: '#fff', border: 'none' }}
+        >
+          Restart &amp; Install
+        </button>
+      )}
+      {canDismiss && (
+        <button
+          onClick={onDismiss}
+          style={{ fontSize: 11, padding: '2px 6px', cursor: 'pointer', borderRadius: 4, background: 'transparent', color: 'var(--muted)', border: 'none', lineHeight: 1 }}
+          aria-label="Dismiss"
+        >
+          ✕
+        </button>
+      )}
+    </div>
   )
 }

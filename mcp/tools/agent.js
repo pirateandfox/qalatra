@@ -44,10 +44,25 @@ export const handlers = {
     if (!task) throw new Error(`Task not found: ${args.task_id}`);
     if (!task.agent_path) throw new Error(`Task ${args.task_id} has no agent_path assigned`);
 
-    const prompt = [task.title, task.description].filter(Boolean).join('\n\n');
+    const existingNotes = db.prepare(`SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC`).all(args.task_id);
+    const parts = [
+      `You are an agent running inside Task OS. Task ID: ${args.task_id}`,
+      `If you create any output files, save them to ${task.agent_path}/output/ and include their paths in your response so Task OS can link them back to this task.`,
+      `Task: ${task.title}`,
+    ];
+    if (task.description) parts.push(task.description);
+    const links = (() => { try { return JSON.parse(task.links || '[]'); } catch { return []; } })();
+    if (links.length > 0) parts.push(`\nAttached links:\n${links.map(l => `- ${l}`).join('\n')}`);
+    const attachments = db.prepare('SELECT filename, local_path, url FROM attachments WHERE task_id = ? ORDER BY created_at ASC').all(args.task_id);
+    if (attachments.length > 0) parts.push(`\nAttached files:\n${attachments.map(a => `- ${a.filename}: ${a.local_path || a.url}`).join('\n')}`);
+    if (existingNotes.length > 0) {
+      parts.push('\n--- Conversation ---');
+      for (const n of existingNotes) parts.push(`[${n.author}]: ${n.body}`);
+    }
+
     const id = uuidv4();
     db.prepare(`INSERT INTO agent_jobs (id, task_id, agent_path, prompt) VALUES (?, ?, ?, ?)`)
-      .run(id, args.task_id, task.agent_path, prompt);
+      .run(id, args.task_id, task.agent_path, parts.join('\n'));
 
     return { job_id: id, status: 'queued', agent_path: task.agent_path };
   },

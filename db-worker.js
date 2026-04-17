@@ -313,7 +313,13 @@ function updateTask(id, body) {
 }
 
 function deleteTask(id) {
-  db.prepare('DELETE FROM agent_jobs WHERE task_id = ?').run(id)
+  const subtaskIds = db.prepare('SELECT id FROM tasks WHERE parent_id = ?').all(id).map(r => r.id)
+  const allIds = [id, ...subtaskIds]
+  const ph = allIds.map(() => '?').join(',')
+  db.prepare(`DELETE FROM notes       WHERE task_id IN (${ph})`).run(...allIds)
+  db.prepare(`DELETE FROM agent_jobs  WHERE task_id IN (${ph})`).run(...allIds)
+  db.prepare(`DELETE FROM attachments WHERE task_id IN (${ph})`).run(...allIds)
+  db.prepare(`DELETE FROM sync_log    WHERE task_id IN (${ph})`).run(...allIds)
   db.prepare('DELETE FROM tasks WHERE id = ? OR parent_id = ?').run(id, id)
   return { ok: true }
 }

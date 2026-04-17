@@ -1,5 +1,29 @@
 # Task OS — Evolution Notes
 
+## 1.0.71 — Update banner, terminal layout fix, cascade delete, full agent context (2026-04-17)
+
+### In-app update banner
+- Replaced the native `dialog.showMessageBox` update flow with a slim 32px banner at the bottom of the app.
+- `autoDownload` is now `false` — finding an update never triggers a background download automatically.
+- On launch and every 4 hours, the app silently polls for a new version. If one is found, the banner appears with a **Download** button.
+- Manual "Check for Updates…" from the menu shows all states: checking (spinner), up to date (auto-dismisses after 3s), and error.
+- Download progress shows a progress bar in the banner. Once downloaded, the banner turns green with a **Restart & Install** button.
+- All states can be dismissed with ✕ except checking/downloading (which transition automatically).
+
+### Terminal no longer overlays task list
+- The docked terminal panel now participates in the flex column layout instead of floating as a fixed overlay over the content.
+- Added `inline` prop to `BottomPanel` — when set, the panel is `position: relative` and pushes the layout up rather than covering it. Settings and DailyNote retain their fixed-overlay behavior.
+- Removed the `paddingBottom` hack in `App.tsx` that was compensating for the overlay.
+
+### Cascade delete fix
+- Deleting a task now correctly removes all dependent records first: `notes`, `agent_jobs`, `attachments`, and `sync_log`, for both the task and any subtasks.
+- Fixed in both `db-worker.js` (UI path) and `mcp/tools/tasks.js` (MCP/Claude path). Previously the UI path only cleaned `agent_jobs`, leaving notes and attachments behind and causing silent failures when FK constraints were enforced.
+
+### Full context passed to agents
+- Agent jobs now include the full task context in the prompt: title, description, attached links, attached files, and the full existing notes/conversation history.
+- Applied to all three launch paths: MCP `queue_agent_job` tool, UI "Run Agent" button (`createAgentJob` in db-worker), and the autorun scheduler (`autoRunAgents` in ipc-handlers).
+- `autoRunAgents` now calls `createAgentJob` directly instead of building its own minimal prompt, ensuring consistent context across all launch paths.
+
 ## 1.0.70 — Terminal & MCP stability fixes (2026-04-16)
 
 ### Terminal reopen fix

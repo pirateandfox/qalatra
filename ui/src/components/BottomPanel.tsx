@@ -8,18 +8,19 @@ interface Props {
   onToggleFullscreen: () => void
   dockedHeight?: number
   zIndex?: number
+  inline?: boolean
   children: React.ReactNode
 }
 
 export default function BottomPanel({
   title, open, fullscreen, onClose, onToggleFullscreen,
-  dockedHeight = 300, zIndex = 100, children,
+  dockedHeight = 300, zIndex = 100, inline = false, children,
 }: Props) {
-  const cls = fullscreen ? 'fullscreen' : open ? 'open' : ''
+  const cls = [fullscreen ? 'fullscreen' : open ? 'open' : '', inline ? 'inline' : ''].filter(Boolean).join(' ')
   return (
     <div
       className={`bottom-panel ${cls}`}
-      style={{ '--bottom-panel-height': `${dockedHeight}px`, zIndex } as React.CSSProperties}
+      style={{ '--bottom-panel-height': `${dockedHeight}px`, zIndex: inline && !fullscreen ? undefined : zIndex } as React.CSSProperties}
     >
       <div className="bottom-panel-toolbar">
         <span className="bottom-panel-title">{title}</span>
