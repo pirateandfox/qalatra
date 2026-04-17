@@ -365,14 +365,20 @@ function setupTerminalIpc(win) {
       ? (process.env.ComSpec || 'cmd.exe')
       : (process.env.SHELL || '/bin/zsh')
     console.log(`[terminal] spawning pty: shell=${shell} cwd=${cwd}`)
-    ptyProcess = pty.spawn(shell, [], { name: 'xterm-256color', cols: cols || 80, rows: rows || 24, cwd, env: process.env })
-    ptyProcess.onData(data => { if (!win.isDestroyed()) win.webContents.send('terminal:output', data) })
-    ptyProcess.onExit(({ exitCode }) => {
+    const thisPty = pty.spawn(shell, [], { name: 'xterm-256color', cols: cols || 80, rows: rows || 24, cwd, env: process.env })
+    ptyProcess = thisPty
+    thisPty.onData(data => { if (!win.isDestroyed()) win.webContents.send('terminal:output', data) })
+    thisPty.onExit(({ exitCode }) => {
       console.log(`[terminal] pty exited code=${exitCode}`)
-      ptyProcess = null
-      if (!win.isDestroyed()) win.webContents.send('terminal:exit', exitCode)
+      // Only clear ptyProcess and notify the renderer if this is still the active pty.
+      // If terminal:start was called again before this fires (e.g. panel reopen), the
+      // old pty's exit must NOT null out the new pty or trigger a "Process exited" message.
+      if (ptyProcess === thisPty) {
+        ptyProcess = null
+        if (!win.isDestroyed()) win.webContents.send('terminal:exit', exitCode)
+      }
     })
-    console.log(`[terminal] pty spawned pid=${ptyProcess.pid}`)
+    console.log(`[terminal] pty spawned pid=${thisPty.pid}`)
     return { ok: true }
   })
   ipcMain.on('terminal:input', (_, data) => { ptyProcess?.write(data) })

@@ -1,6 +1,6 @@
 {
   "name": "task-os",
-  "version": "1.0.69",
+  "version": "1.0.70",
   "description": "Personal task management system with Claude AI integration",
   "author": "Justin Handley",
   "type": "module",

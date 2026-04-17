@@ -1,5 +1,17 @@
 # Task OS — Evolution Notes
 
+## 1.0.70 — Terminal & MCP stability fixes (2026-04-16)
+
+### Terminal reopen fix
+- Closing and reopening the terminal panel now works reliably every time.
+- **Root cause:** the old pty's `onExit` callback fired asynchronously after the new pty was already spawned, nulling out `ptyProcess` and sending a spurious `terminal:exit` event to the renderer. This left the new pty unreachable (input silently dropped) and showed a false "Process exited" message.
+- **Fix:** each `onExit` closure now captures its own `thisPty` reference and only clears `ptyProcess` / notifies the renderer if it's still the active process.
+
+### MCP HTTP server crash fix
+- The MCP HTTP server no longer crashes with `ERR_HTTP_HEADERS_SENT` when a long-lived SSE connection hits the 30-second timeout.
+- **Root cause:** the timeout handler called `res.writeHead(504)` without checking `res.headersSent`. For SSE (GET) connections, headers are sent immediately when the event stream opens, so the timeout fired on a half-open connection and threw.
+- **Fix:** added `!res.headersSent` guard — the timeout now just destroys the socket for already-streaming connections instead of trying to write a new status line.
+
 ## Unreleased — Project-scoped agent filtering
 
 ### agent.config `project` field

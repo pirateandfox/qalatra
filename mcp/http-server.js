@@ -70,7 +70,7 @@ const REQUEST_TIMEOUT_MS = 30_000; // 30 s — kill hung requests
 const httpServer = http.createServer(async (req, res) => {
   // Abort any request that hasn't completed within the timeout window.
   const timeout = setTimeout(() => {
-    if (!res.writableEnded) {
+    if (!res.headersSent && !res.writableEnded) {
       res.writeHead(504, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Request timeout' }, id: null }));
     }
