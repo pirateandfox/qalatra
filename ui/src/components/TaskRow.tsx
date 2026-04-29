@@ -15,9 +15,10 @@ interface Props {
   selected?: boolean
   onSelect: (id: string) => void
   onMutate: () => void
+  onClearInbox?: () => void
 }
 
-export default function TaskRow({ task, showContext = true, draggable = false, selected = false, onSelect, onMutate }: Props) {
+export default function TaskRow({ task, showContext = true, draggable = false, selected = false, onSelect, onMutate, onClearInbox }: Props) {
   const { getColor, getLabel } = useContexts()
   const [snoozeAnchor, setSnoozeAnchor] = useState<DOMRect | null>(null)
   const isDone = task.status === 'done'
@@ -138,8 +139,8 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
               </span>
             )}
             {task.description && <span className="has-notes" title="Has description">●</span>}
-            {task.agent_job_status === 'running' && <span className="agent-running" title="Agent running">⟳</span>}
-            {task.agent_job_status === 'queued'  && <span className="agent-queued"   title="Agent queued">◌</span>}
+            {task.agent_job_status === 'running' && <span className="agent-running" title="Agent running"><span className="agent-running-pip" /></span>}
+            {task.agent_job_status === 'queued'  && <span className="agent-queued" title="Agent queued"><span className="agent-queued-pip" /></span>}
             {task.agent_job_status === 'done'    && <span className="agent-done"     title="Agent result ready for review">★</span>}
             {task.agent_job_status === 'failed'  && <span className="agent-failed"   title="Agent job failed">✕</span>}
             {task.recurrence && <span className="recurrence-indicator" title={task.recurrence}>↻</span>}
@@ -163,6 +164,15 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
         </div>
 
         <div className="task-actions">
+          {onClearInbox && (
+            <button
+              className="inbox-clear-btn"
+              title="Move to task list"
+              onClick={e => { e.stopPropagation(); onClearInbox() }}
+            >
+              Schedule →
+            </button>
+          )}
           <div className="task-actions-buttons">
             {!isDone && !task.recurrence && (
               <button

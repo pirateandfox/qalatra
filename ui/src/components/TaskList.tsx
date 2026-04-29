@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type React from 'react'
 import { api, type TaskData } from '../api'
 import type { Task } from '../types/task'
 import { useContexts } from '../lib/ContextsProvider'
@@ -61,12 +62,50 @@ function FutureView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: Omi
   )
 }
 
+function DeferredSection({ title, icon, count, storageKey, defaultOpen = false, children }: {
+  title: string; icon: string; count: number; storageKey: string; defaultOpen?: boolean; children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(() => {
+    const stored = localStorage.getItem(storageKey)
+    return stored !== null ? stored === 'true' : defaultOpen
+  })
+  if (count === 0) return null
+  function toggle() {
+    setOpen(o => {
+      localStorage.setItem(storageKey, String(!o))
+      return !o
+    })
+  }
+  return (
+    <div className="deferred-section">
+      <button className="deferred-toggle" onClick={toggle}>
+        <span className="deferred-arrow">{open ? '▾' : '▸'}</span>
+        {icon} {title} <span className="count">{count}</span>
+      </button>
+      {open && <div className="deferred-body">{children}</div>}
+    </div>
+  )
+}
+
 function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: Omit<Props, 'view'>) {
-  const allTasks = [...(data.overdue ?? []), ...(data.dueToday ?? []), ...(data.active ?? [])]
-  const [showSnoozed, setShowSnoozed] = useState(false)
+  const allRaw = [...(data.overdue ?? []), ...(data.dueToday ?? []), ...(data.active ?? [])]
+  // Scheduled = autorun tasks that haven't fired yet (no agent job)
+  const scheduledTasks = allRaw.filter(t => t.agent_autorun === 1 && !t.agent_job_status)
+  const scheduledIds = new Set(scheduledTasks.map(t => t.id))
+  const allTasks = allRaw.filter(t => !scheduledIds.has(t.id))
+
+  async function clearInbox(id: string) {
+    await api.clearInbox(id)
+    onMutate()
+  }
 
   if (data.view === 'today') return (
     <>
+      <DeferredSection title="Inbox" icon="📥" count={data.inbox?.length ?? 0} storageKey="section-inbox" defaultOpen>
+        {(data.inbox ?? []).map(t => (
+          <TaskRow key={t.id} task={t} selected={selectedId === t.id} onSelect={onSelect} onMutate={onMutate} onClearInbox={() => clearInbox(t.id)} />
+        ))}
+      </DeferredSection>
       {(data.events?.length ?? 0) > 0 && (
         <section className="task-section">
           <h2>📅 Events <span className="count">{data.events!.length}</span></h2>
@@ -88,21 +127,14 @@ function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: O
       {allTasks.length > 0 && (
         <TaskSection title="Tasks" icon="📋" tasks={allTasks} draggable groupKey="priority" selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
       )}
-      {(data.timeSnoozed?.length ?? 0) > 0 && (() => {
-        const count = data.timeSnoozed!.length
-        return (
-          <>
-            <button className="time-snoozed-toggle" onClick={() => setShowSnoozed(s => !s)}>
-              {showSnoozed ? '▾' : '▸'} 💤 {count} snoozed task{count !== 1 ? 's' : ''}
-            </button>
-            {showSnoozed && (
-              <TaskSection title="" icon="" tasks={data.timeSnoozed!} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
-            )}
-          </>
-        )
-      })()}
+      <DeferredSection title="Snoozed" icon="💤" count={data.timeSnoozed?.length ?? 0} storageKey="section-snoozed">
+        <TaskSection title="" icon="" tasks={data.timeSnoozed ?? []} hideHeader selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
+      </DeferredSection>
+      <DeferredSection title="Scheduled" icon="🤖" count={scheduledTasks.length} storageKey="section-scheduled">
+        <TaskSection title="" icon="" tasks={scheduledTasks} hideHeader selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
+      </DeferredSection>
       <TaskSection title="Done Today" icon="✅" tasks={data.doneToday ?? []} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
-      {allTasks.length === 0 && !data.events?.length && <div className="empty-state">Nothing to show for today.</div>}
+      {allTasks.length === 0 && scheduledTasks.length === 0 && !data.events?.length && <div className="empty-state">Nothing to show for today.</div>}
     </>
   )
 

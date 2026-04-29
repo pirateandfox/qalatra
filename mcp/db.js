@@ -147,6 +147,7 @@ function initSchema(db) {
   if (!existingCols.includes('agent_autorun'))      db.exec('ALTER TABLE tasks ADD COLUMN agent_autorun INTEGER NOT NULL DEFAULT 0');
   if (!existingCols.includes('agent_autorun_time')) db.exec("ALTER TABLE tasks ADD COLUMN agent_autorun_time TEXT DEFAULT '09:00'");
   if (!existingCols.includes('description'))        db.exec('ALTER TABLE tasks ADD COLUMN description TEXT');
+  if (!existingCols.includes('inbox'))              db.exec('ALTER TABLE tasks ADD COLUMN inbox INTEGER NOT NULL DEFAULT 0');
 
   // Migrations for contexts table columns added after initial schema
   const contextCols = db.prepare(`PRAGMA table_info(contexts)`).all().map(r => r.name);

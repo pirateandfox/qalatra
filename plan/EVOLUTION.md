@@ -1,5 +1,27 @@
 # Task OS — Evolution Notes
 
+## 1.0.73 — Inbox, collapsible sections, agent indicator (2026-04-27)
+
+### Inbox
+- Agent-created tasks can now be flagged as `inbox = 1`, placing them in a separate triage area at the top of the today view (open by default).
+- Inbox tasks are excluded from the overdue/dueToday/active lists so they don't pollute the main task view.
+- Each inbox task shows a **Schedule →** button that clears the inbox flag and moves it into the regular task list.
+- MCP `create_task` and `update_task` both support the `inbox` boolean field.
+
+### Collapsible Scheduled and Snoozed sections
+- The today view now shows **Snoozed** (time-deferred tasks) and **Scheduled** (autorun tasks not yet fired) as collapsible sections at the bottom, collapsed by default.
+- Collapse state persists across page loads via localStorage.
+- Scheduled tasks (autorun with no job yet) are filtered out of the main task list and shown only in the Scheduled section.
+
+### Agent running indicator redesign
+- Replaced the tiny spinning `⟳` with a 10px amber pulsing circle for running jobs, and a hollow muted circle for queued jobs.
+- The green ★ (done) and red ✕ (failed) indicators are unchanged.
+
+### DeferredSection component
+- Extracted reusable `DeferredSection` component used for Inbox, Snoozed, and Scheduled sections.
+- Header style matches the Tasks section: 12px, uppercase, bold, with icon and count on the same line.
+- Accepts a `defaultOpen` prop (defaults false) with localStorage override.
+
 ## 1.0.72 — Autorun timezone fix, snoozed task wake-up, meeting attachments (2026-04-29)
 
 ### Autorun timezone fix

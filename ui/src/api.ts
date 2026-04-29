@@ -16,6 +16,7 @@ export interface HabitSummary {
 export interface TaskData {
   view: 'today' | 'future' | 'past'
   date: string
+  inbox?: Task[]
   overdue?: Task[]
   dueToday?: Task[]
   active?: Task[]
@@ -202,4 +203,5 @@ export const api = {
   createTask:           (body: Partial<Task> & { title: string }) => ipc('task:create', body),
   deleteTask:           (taskId: string) => ipc('task:delete', taskId),
   updateNotes:          (taskId: string, notes: string) => ipc('task:update', taskId, { notes }),
+  clearInbox:           (taskId: string) => ipc('task:update', taskId, { inbox: 0 }),
 }

@@ -89,6 +89,7 @@ export const toolDefs = [
         parent_id:       { type: 'string', description: 'ID of parent task (for subtasks)' },
         recurrence:      { type: 'string', description: 'daily | weekdays | weekly | monthly — auto-respawns on completion' },
         agent_path:      { type: 'string', description: 'Absolute path to the agent folder to dispatch this task to (e.g. /Users/you/IdeaProjects/myrepo/agents/planning)' },
+        inbox:           { type: 'boolean', description: 'Mark as inbox item — surfaces in a separate Inbox section for human review before scheduling. Use when creating tasks on behalf of the user that need triage.' },
       },
       required: ['title'],
     },
@@ -123,6 +124,7 @@ export const toolDefs = [
         agent_path:          { type: 'string', description: 'Absolute path to the agent folder for this task. Pass empty string to clear.' },
         agent_autorun:       { type: 'boolean', description: 'Whether the agent should run automatically on a schedule.' },
         agent_autorun_time:  { type: 'string', description: 'HH:MM time for the daily auto-run (e.g. "05:00"). Requires agent_autorun: true.' },
+        inbox:               { type: 'boolean', description: 'Set to false to clear from inbox (move to normal task list).' },
       },
       required: ['task_id'],
     },
@@ -259,12 +261,12 @@ export const handlers = {
         id, title, description, status, my_priority, energy_required, context, project, tags,
         source, source_id, source_url, source_priority, due_date, start_date, surface_after,
         created_at, updated_at, ai_context, task_type, event_time, end_time, parent_id, recurrence,
-        agent_path
+        agent_path, inbox
       ) VALUES (
         @id, @title, @description, @status, @my_priority, @energy_required, @context, @project, @tags,
         @source, @source_id, @source_url, @source_priority, @due_date, @start_date, @surface_after,
         @created_at, @updated_at, @ai_context, @task_type, @event_time, @end_time, @parent_id, @recurrence,
-        @agent_path
+        @agent_path, @inbox
       )
     `).run({
       id,
@@ -292,6 +294,7 @@ export const handlers = {
       parent_id:       args.parent_id       ?? null,
       recurrence:      args.recurrence      ?? null,
       agent_path:      args.agent_path      ?? null,
+      inbox:           args.inbox ? 1 : 0,
     });
     const status = args.status ?? 'active';
     return { task_id: id, title: args.title, status, created_at: now };
@@ -309,7 +312,7 @@ export const handlers = {
       'title', 'description', 'status', 'my_priority', 'energy_required',
       'context', 'project', 'tags', 'source_url', 'due_date', 'start_date', 'surface_after',
       'task_type', 'event_time', 'end_time', 'recurrence', 'parent_id', 'agent_path',
-      'agent_autorun', 'agent_autorun_time',
+      'agent_autorun', 'agent_autorun_time', 'inbox',
     ];
 
     const updates = {};

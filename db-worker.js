@@ -193,6 +193,7 @@ function migrate() {
   tryAlter('ALTER TABLE tasks ADD COLUMN agent_resume INTEGER NOT NULL DEFAULT 1')
   tryAlter('ALTER TABLE tasks ADD COLUMN agent_autorun INTEGER NOT NULL DEFAULT 0')
   tryAlter("ALTER TABLE tasks ADD COLUMN agent_autorun_time TEXT DEFAULT '09:00'")
+  tryAlter('ALTER TABLE tasks ADD COLUMN inbox INTEGER NOT NULL DEFAULT 0')
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN session_id TEXT')
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN user_message TEXT')
   tryAlter('ALTER TABLE contexts ADD COLUMN label TEXT')
@@ -263,9 +264,10 @@ function getTasksForDate(date) {
   if (date === t) {
     db.prepare(`UPDATE tasks SET status = 'active', surface_after = NULL WHERE status = 'snoozed' AND surface_after IS NOT NULL AND surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')`).run()
     autoRolloverRecurring()
-    const overdue     = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'active' AND parent_id IS NULL AND due_date IS NOT NULL AND due_date < ? AND task_type = 'task' ORDER BY due_date ASC, ${ORDER}`).all(date))
-    const dueToday    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'active' AND parent_id IS NULL AND strftime('%Y-%m-%d', due_date) = ? AND task_type = 'task' AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime') OR strftime('%Y-%m-%d', due_date) <= ?) ORDER BY ${ORDER}`).all(date, date))
-    const active      = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'active' AND parent_id IS NULL AND task_type = 'task' AND (due_date IS NULL OR due_date > ?) AND ((start_date IS NULL AND due_date IS NULL) OR (start_date IS NOT NULL AND start_date <= ?)) AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')) ORDER BY ${ORDER}`).all(date, date))
+    const inbox       = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 1 AND status = 'active' AND parent_id IS NULL AND task_type = 'task' ORDER BY created_at DESC`).all())
+    const overdue     = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND due_date IS NOT NULL AND due_date < ? AND task_type = 'task' ORDER BY due_date ASC, ${ORDER}`).all(date))
+    const dueToday    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND strftime('%Y-%m-%d', due_date) = ? AND task_type = 'task' AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime') OR strftime('%Y-%m-%d', due_date) <= ?) ORDER BY ${ORDER}`).all(date, date))
+    const active      = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND task_type = 'task' AND (due_date IS NULL OR due_date > ?) AND ((start_date IS NULL AND due_date IS NULL) OR (start_date IS NOT NULL AND start_date <= ?)) AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')) ORDER BY ${ORDER}`).all(date, date))
     const doneToday   = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'done' AND parent_id IS NULL AND last_touched_human >= ? AND last_touched_human < ? ORDER BY last_touched_human DESC`).all(date, nextDay))
     const events      = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE task_type = 'event' AND parent_id IS NULL AND status != 'done' AND (due_date = ? OR due_date IS NULL) ORDER BY event_time ASC NULLS LAST, created_at ASC`).all(date))
     const reminders   = db.prepare(`SELECT * FROM tasks WHERE task_type = 'reminder' AND parent_id IS NULL AND status != 'done' AND (due_date IS NULL OR due_date <= ?) AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')) ORDER BY ${ORDER}`).all(date)
@@ -276,8 +278,8 @@ function getTasksForDate(date) {
     const habitLogMap = {}
     for (const l of habitLogs) habitLogMap[l.habit_id] = l
     const habits = todayHabits.map(h => ({ ...h, today_log: habitLogMap[h.id] ?? null }))
-    stampAgentJobs(overdue, dueToday, active)
-    return { view: 'today', date, overdue, dueToday, active, doneToday, timeSnoozed, events, reminders, habits }
+    stampAgentJobs(inbox, overdue, dueToday, active)
+    return { view: 'today', date, inbox, overdue, dueToday, active, doneToday, timeSnoozed, events, reminders, habits }
   } else if (date > t) {
     const scheduled   = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE strftime('%Y-%m-%d', due_date) = ? AND parent_id IS NULL AND task_type = 'task' AND status = 'active' ORDER BY ${ORDER}`).all(date))
     const timeSnoozed = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE strftime('%Y-%m-%d', due_date) = ? AND parent_id IS NULL AND task_type = 'task' AND status = 'snoozed' ORDER BY surface_after ASC`).all(date))
@@ -307,7 +309,7 @@ function createTask(body) {
 }
 
 function updateTask(id, body) {
-  const MUTABLE = ['title','description','status','my_priority','energy_required','context','project','tags','source_url','due_date','start_date','surface_after','task_type','event_time','end_time','recurrence','parent_id','agent_path','agent_resume','agent_autorun','agent_autorun_time','outcome','notes']
+  const MUTABLE = ['title','description','status','my_priority','energy_required','context','project','tags','source_url','due_date','start_date','surface_after','task_type','event_time','end_time','recurrence','parent_id','agent_path','agent_resume','agent_autorun','agent_autorun_time','outcome','notes','inbox']
   if (body.links !== undefined) db.prepare("UPDATE tasks SET links = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(body.links), id)
   const sets = []; const params = {}
   for (const f of MUTABLE) { if (body[f] !== undefined) { sets.push(`${f} = @${f}`); params[f] = body[f] === '' ? null : body[f] } }

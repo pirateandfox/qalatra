@@ -68,11 +68,24 @@
 .due-date--normal   { color: var(--muted); }
 .has-notes { font-size: 8px; color: var(--accent); vertical-align: middle; }
 .recurrence-indicator { font-size: 11px; color: var(--muted); }
-.agent-running { font-size: 13px; color: #f59e0b; vertical-align: middle; display: inline-block; animation: agent-spin 1.2s linear infinite; }
-.agent-queued  { font-size: 11px; color: var(--muted); vertical-align: middle; }
-.agent-done    { font-size: 11px; color: #22c55e; vertical-align: middle; }
-.agent-failed  { font-size: 10px; color: #ef4444; vertical-align: middle; }
-@keyframes agent-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.agent-running { display: inline-flex; align-items: center; vertical-align: middle; }
+.agent-running-pip {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: #f59e0b;
+  animation: agent-pulse 1.4s ease-in-out infinite;
+}
+.agent-queued { display: inline-flex; align-items: center; vertical-align: middle; }
+.agent-queued-pip {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: transparent; border: 2px solid var(--muted);
+}
+.agent-done   { font-size: 13px; color: #22c55e; vertical-align: middle; }
+.agent-failed { font-size: 13px; color: #ef4444; vertical-align: middle; }
+@keyframes agent-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .4; transform: scale(.7); }
+}
 
 .subtask-progress-wrap { margin-top: 5px; }
 .subtask-progress { height: 2px; background: var(--surface2); border-radius: 1px; overflow: hidden; margin-bottom: 4px; }
@@ -91,6 +104,13 @@
 }
 .task-row:hover .task-actions { opacity: 1; }
 .task-actions-buttons { display: flex; gap: 4px; align-items: center; }
+
+.inbox-clear-btn {
+  background: transparent; border: 1px solid var(--accent); border-radius: 4px;
+  padding: 2px 8px; cursor: pointer; font-size: 11px; color: var(--accent);
+  white-space: nowrap; margin-bottom: 4px;
+}
+.inbox-clear-btn:hover { background: var(--accent); color: #fff; }
 
 .action-btn {
   background: transparent;

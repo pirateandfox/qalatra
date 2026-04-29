@@ -49,3 +49,15 @@
   margin: 4px 0;
 }
 .time-snoozed-toggle:hover { color: var(--text); }
+
+.deferred-section { margin-bottom: 28px; }
+.deferred-toggle {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); padding: 0 0 8px 0;
+  display: flex; align-items: center; gap: 6px;
+  width: 100%;
+}
+.deferred-toggle:hover { color: var(--text); }
+.deferred-arrow { font-size: 10px; line-height: 1; }
+.deferred-body { margin-top: -4px; }

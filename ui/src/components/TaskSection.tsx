@@ -10,12 +10,13 @@ interface Props {
   draggable?: boolean
   showContext?: boolean
   groupKey?: string
+  hideHeader?: boolean
   selectedId?: string | null
   onSelect: (id: string) => void
   onMutate: () => void
 }
 
-export default function TaskSection({ title, icon, tasks, draggable, showContext = true, groupKey, selectedId, onSelect, onMutate }: Props) {
+export default function TaskSection({ title, icon, tasks, draggable, showContext = true, groupKey, hideHeader, selectedId, onSelect, onMutate }: Props) {
   if (!tasks.length) return null
 
   function handleDragEnter(e: React.DragEvent) {
@@ -83,7 +84,7 @@ export default function TaskSection({ title, icon, tasks, draggable, showContext
 
   return (
     <section className="task-section">
-      <h2>{icon} {title} <span className="count">{tasks.length}</span></h2>
+      {!hideHeader && <h2>{icon} {title} <span className="count">{tasks.length}</span></h2>}
       <div
         data-group={groupKey ?? title}
         onDragEnter={draggable ? handleDragEnter : undefined}
