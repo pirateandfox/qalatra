@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { fetchTask, fetchSubtasks, api } from '../api'
-import type { Task } from '../types/task'
+import { fetchTask, fetchSubtasks, fetchAttachments, api } from '../api'
+import type { Task, Attachment } from '../types/task'
 import { fmtTime } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
 import './MeetingView.css'
@@ -19,13 +19,15 @@ export default function MeetingView({ taskId, onBack }: Props) {
   const [newTaskDate, setNewTaskDate] = useState('')
   const [createdTasks, setCreatedTasks] = useState<string[]>([])
   const [saveStatus, setSaveStatus] = useState('')
+  const [attachments, setAttachments] = useState<Attachment[]>([])
   const notesRef = useRef<HTMLTextAreaElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback(async () => {
-    const [t, s] = await Promise.all([fetchTask(taskId), fetchSubtasks(taskId)])
+    const [t, s, atts] = await Promise.all([fetchTask(taskId), fetchSubtasks(taskId), fetchAttachments(taskId)])
     setEvent(t)
     setSubtasks(s as Task[])
+    setAttachments(atts)
   }, [taskId])
 
   useEffect(() => { load() }, [load])
@@ -125,6 +127,25 @@ export default function MeetingView({ taskId, onBack }: Props) {
             />
             <button className="add-agenda-btn" onClick={addAgendaItem}>+</button>
           </div>
+
+          {attachments.length > 0 && (
+            <div className="meeting-tasks">
+              <div className="meeting-section-label" style={{ marginTop: 16 }}>Attachments</div>
+              {attachments.map(a => (
+                <div key={a.id} className="meeting-attachment-row">
+                  <a
+                    href={a.url ?? `/api/attachment/${a.id}/local`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="meeting-attachment-link"
+                    title={a.filename}
+                  >
+                    📎 {a.filename}
+                  </a>
+                </div>
+              ))}
+            </div>
+          )}
 
           {createdTasks.length > 0 && (
             <div className="meeting-tasks">

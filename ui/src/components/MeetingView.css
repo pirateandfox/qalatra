@@ -91,3 +91,10 @@
   padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap;
 }
 .quick-task-btn:hover { opacity: .85; }
+
+.meeting-attachment-row { padding: 3px 0; }
+.meeting-attachment-link {
+  font-size: 13px; color: var(--accent); text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; max-width: 100%;
+}
+.meeting-attachment-link:hover { text-decoration: underline; }

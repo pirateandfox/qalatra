@@ -1,5 +1,24 @@
 # Task OS — Evolution Notes
 
+## 1.0.72 — Autorun timezone fix, snoozed task wake-up, meeting attachments (2026-04-29)
+
+### Autorun timezone fix
+- Fixed a bug where agent autorun tasks fired at 8 PM local time instead of their scheduled time for users in negative UTC offsets (e.g. US Eastern).
+- **Root cause:** `getAutorunTasks()` in `db-worker.js` used `date('now')` (UTC) for the due-date check but `time('now', 'localtime')` (local) for the time check. For UTC-4 users, after 8 PM local the UTC date had already rolled to the next day, making the next day's task appear immediately eligible.
+- **Fix:** changed `date('now')` to `date('now', 'localtime')` so both checks use local time consistently.
+
+### Snoozed task wake-up without restart
+- Snoozed tasks with a past `surface_after` are now activated every time the today view loads, not only on app startup.
+- Previously the wake-up query only ran once in `migrate()` at launch. Tasks snoozed by the EOD agent overnight would not surface until the app was restarted.
+
+### Meeting view attachments
+- Attachments are now listed in the Meeting view panel below the agenda items.
+- Event cards show a 📎 indicator when attachments are present.
+- `attachSubtasks` now returns `attachment_count` so the indicator is available without a separate fetch.
+
+### MCP update_task accepts `notes` as alias for `description`
+- `update_task` now accepts either `description` or `notes` — whichever the agent uses. Normalised server-side before write.
+
 ## 1.0.71 — Update banner, terminal layout fix, cascade delete, full agent context (2026-04-17)
 
 ### In-app update banner

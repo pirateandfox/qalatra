@@ -218,7 +218,10 @@ function attachSubtasks(tasks) {
   const subs = db.prepare(`SELECT * FROM tasks WHERE parent_id IN (${ids}) ORDER BY sort_order ASC NULLS LAST, created_at ASC`).all()
   const byParent = {}
   for (const s of subs) { if (!byParent[s.parent_id]) byParent[s.parent_id] = []; byParent[s.parent_id].push(s) }
-  return tasks.map(t => ({ ...t, subtasks: byParent[t.id] ?? [] }))
+  const attCounts = db.prepare(`SELECT task_id, COUNT(*) as cnt FROM attachments WHERE task_id IN (${ids}) GROUP BY task_id`).all()
+  const attByTask = {}
+  for (const r of attCounts) attByTask[r.task_id] = r.cnt
+  return tasks.map(t => ({ ...t, subtasks: byParent[t.id] ?? [], attachment_count: attByTask[t.id] ?? 0 }))
 }
 
 function stampAgentJobs(...arrays) {
@@ -258,6 +261,7 @@ function getTasksForDate(date) {
   const t = today()
   const nextDay = offsetDate(date, 1)
   if (date === t) {
+    db.prepare(`UPDATE tasks SET status = 'active', surface_after = NULL WHERE status = 'snoozed' AND surface_after IS NOT NULL AND surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')`).run()
     autoRolloverRecurring()
     const overdue     = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'active' AND parent_id IS NULL AND due_date IS NOT NULL AND due_date < ? AND task_type = 'task' ORDER BY due_date ASC, ${ORDER}`).all(date))
     const dueToday    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'active' AND parent_id IS NULL AND strftime('%Y-%m-%d', due_date) = ? AND task_type = 'task' AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime') OR strftime('%Y-%m-%d', due_date) <= ?) ORDER BY ${ORDER}`).all(date, date))
@@ -583,7 +587,7 @@ function insertAgentNote(id, taskId, result, jobId) {
 }
 function resetStuckJobs() { db.prepare(`UPDATE agent_jobs SET status = 'queued', started_at = NULL WHERE status = 'running'`).run(); return { ok: true } }
 function getAutorunTasks() {
-  return db.prepare(`SELECT t.* FROM tasks t WHERE t.agent_path IS NOT NULL AND t.agent_autorun = 1 AND t.status = 'active' AND (t.due_date IS NULL OR t.due_date <= date('now')) AND time('now', 'localtime') >= COALESCE(t.agent_autorun_time, '09:00') AND NOT EXISTS (SELECT 1 FROM agent_jobs j WHERE j.task_id = t.id)`).all()
+  return db.prepare(`SELECT t.* FROM tasks t WHERE t.agent_path IS NOT NULL AND t.agent_autorun = 1 AND t.status = 'active' AND (t.due_date IS NULL OR t.due_date <= date('now', 'localtime')) AND time('now', 'localtime') >= COALESCE(t.agent_autorun_time, '09:00') AND NOT EXISTS (SELECT 1 FROM agent_jobs j WHERE j.task_id = t.id)`).all()
 }
 function insertAutorunJob(taskId, agentPath, prompt) {
   const fullPrompt = `You are an agent running inside Task OS. Task ID: ${taskId}\nIf you create any output files, save them to ${agentPath}/output/ and include their paths in your response so Task OS can link them back to this task.\n${prompt}`

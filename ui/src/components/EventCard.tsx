@@ -34,6 +34,7 @@ export default function EventCard({ event, onSelect, onMeetingOpen }: Props) {
               <span className="event-agenda-count">{done}/{subtasks.length} items</span>
             )}
             {event.notes && <span className="has-notes" title="Has notes">●</span>}
+            {(event as any).attachment_count > 0 && <span className="has-notes" title="Has attachments">📎</span>}
           </div>
         </div>
         <button className="meeting-btn" onClick={() => onMeetingOpen(event.id)}>▶ Meeting</button>

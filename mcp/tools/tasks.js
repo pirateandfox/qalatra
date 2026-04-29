@@ -101,7 +101,8 @@ export const toolDefs = [
       properties: {
         task_id:         { type: 'string' },
         title:           { type: 'string' },
-        description:     { type: 'string', description: 'Detailed task description / agent prompt' },
+        description:     { type: 'string', description: 'Detailed task description / agent prompt (also accepted as "notes")' },
+        notes:           { type: 'string', description: 'Alias for description — use either field name' },
         status:          { type: 'string', description: 'active | snoozed | backlog | archived | done' },
         context:         { type: 'string' },
         project:         { type: 'string' },
@@ -300,6 +301,9 @@ export const handlers = {
     const db = openDb();
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(args.task_id);
     if (!task) throw new Error(`Task not found: ${args.task_id}`);
+
+    // Accept 'notes' as an alias for 'description' (legacy field name)
+    if (args.notes !== undefined && args.description === undefined) args.description = args.notes;
 
     const mutableFields = [
       'title', 'description', 'status', 'my_priority', 'energy_required',
