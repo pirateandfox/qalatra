@@ -1,8 +1,8 @@
-// S3-compatible attachment storage helpers (works with AWS S3 and Cloudflare R2).
+// Attachment storage helpers for S3-compatible providers (e.g., Cloudflare R2).
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-// Returns null when credentials are missing so callers can short-circuit gracefully.
+// Returns null when the endpoint or either credential is missing so callers can short-circuit gracefully.
 export function getS3Client(settings) {
   const { s3Endpoint, s3AccessKey, s3SecretKey } = settings;
   if (!s3Endpoint || !s3AccessKey || !s3SecretKey) return null;
