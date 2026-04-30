@@ -81,6 +81,27 @@ stale_backlog_review  → surface tasks that haven't been touched recently
 
 ---
 
+## Upgrading from Task OS
+
+If you were running the app when it was called **Task OS**, your database is stored under the old app name and needs to be moved once before launching Qalatra for the first time. The database itself is unchanged — this is just a folder rename.
+
+**Mac**
+```bash
+cp -r ~/Library/Application\ Support/Task\ OS/db \
+      ~/Library/Application\ Support/Qalatra/
+```
+
+**Windows** (run in PowerShell or Command Prompt)
+```
+xcopy "%APPDATA%\Task OS\db" "%APPDATA%\Qalatra\db\" /E /I
+```
+
+Then launch Qalatra. Your tasks, notes, habits, and history will all be there.
+
+If you skip this step Qalatra starts with an empty database. You can still do it after the fact — just quit the app, run the copy command above, and relaunch.
+
+---
+
 ## Install
 
 Download the latest release from the [Releases page](https://github.com/pirateandfox/qalatra/releases/latest):
