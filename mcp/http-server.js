@@ -28,7 +28,7 @@ const allHandlers = { ...taskHandlers, ...triageHandlers, ...briefingHandlers, .
 
 function createMcpServer() {
   const server = new Server(
-    { name: 'task-os', version: '1.0.0' },
+    { name: 'qalatra', version: '1.0.0' },
     { capabilities: { tools: {} } }
   );
 

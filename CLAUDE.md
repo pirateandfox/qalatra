@@ -1,13 +1,13 @@
-# Task OS — Developer CLAUDE.md
+# Qalatra — Developer CLAUDE.md
 
-Task OS is Justin's personal task management system: a local SQLite database with an MCP server (for Claude integration) and an Electron/React UI.
+Qalatra is Justin's personal task management system: a local SQLite database with an MCP server (for Claude integration) and an Electron/React UI.
 
 ---
 
 ## Architecture
 
 ```
-~/IdeaProjects/task-os/
+~/IdeaProjects/qalatra/
 ├── electron-main.js        ← Electron main process; spawns api.js + mcp/http-server.js via utilityProcess
 ├── api-entry.cjs           ← CJS shim so utilityProcess.fork() can load ESM api.js
 ├── api.js                  ← HTTP backend, port 3456
@@ -39,7 +39,7 @@ Task OS is Justin's personal task management system: a local SQLite database wit
 ## Running Locally
 
 ```bash
-cd ~/IdeaProjects/task-os
+cd ~/IdeaProjects/qalatra
 npm run electron-dev        # starts api.js + Vite + Electron all at once
 ```
 
@@ -51,7 +51,7 @@ npm run electron-dev        # starts api.js + Vite + Electron all at once
 
 ## Database
 
-SQLite at `~/IdeaProjects/task-os/db/tasks.db`. Schema is managed via inline migrations in `api.js` (`migrate()` function at the top). Migrations use `ALTER TABLE ... ADD COLUMN` wrapped in try/catch so they're idempotent.
+SQLite at `~/IdeaProjects/qalatra/db/tasks.db`. Schema is managed via inline migrations in `api.js` (`migrate()` function at the top). Migrations use `ALTER TABLE ... ADD COLUMN` wrapped in try/catch so they're idempotent.
 
 **Key fields:** `id`, `title`, `status`, `context`, `due_date`, `surface_after`, `sort_order`, `my_priority`, `energy_required`, `recurrence`, `parent_id`, `task_type`, `source_url`, `links`, `notes`, `project`, `created_at`, `last_touched_human`
 
@@ -70,13 +70,13 @@ Runs as an HTTP server on port **3457** (StreamableHTTP transport). Registered i
 
 The port and `~/.claude.json` entry can be changed in the app's Settings panel (MCP Server section) — it saves the port and rewrites the entry automatically. Restart Claude Code after changing.
 
-The MCP tools are the primary interface for Claude to interact with Task OS during PM sessions. All task management goes through these tools.
+The MCP tools are the primary interface for Claude to interact with Qalatra during PM sessions. All task management goes through these tools.
 
 ---
 
 ## Git & Release Workflow
 
-**Repo:** `github.com/pirateandfox/task-os`
+**Repo:** `github.com/pirateandfox/qalatra`
 
 **Branch strategy:** single `main` branch — commit directly, tag to release.
 

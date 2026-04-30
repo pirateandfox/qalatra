@@ -46,8 +46,8 @@ export const handlers = {
 
     const existingNotes = db.prepare(`SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC`).all(args.task_id);
     const parts = [
-      `You are an agent running inside Task OS. Task ID: ${args.task_id}`,
-      `If you create any output files, save them to ${task.agent_path}/output/ and include their paths in your response so Task OS can link them back to this task.`,
+      `You are an agent running inside Qalatra. Task ID: ${args.task_id}`,
+      `If you create any output files, save them to ${task.agent_path}/output/ and include their paths in your response so Qalatra can link them back to this task.`,
       `Task: ${task.title}`,
     ];
     if (task.description) parts.push(task.description);

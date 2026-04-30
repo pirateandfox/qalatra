@@ -1,4 +1,4 @@
-# Task OS
+# Qalatra
 
 **Project management for the AI era.**
 
@@ -10,7 +10,7 @@ Your data lives in a local SQLite database on your machine. Nothing goes to a se
 
 ---
 
-![Task OS — priority view, task detail, and Claude running in the integrated terminal](assets/screenshot-terminal.png)
+![Qalatra — priority view, task detail, and Claude running in the integrated terminal](assets/screenshot-terminal.png)
 
 ---
 
@@ -18,11 +18,11 @@ Your data lives in a local SQLite database on your machine. Nothing goes to a se
 
 The AI project management space has split into two camps. One camp uses markdown files — tasks as text, everything in a folder, Claude reads the files. Simple, but no structure, no recurrence, no real query capability. The other camp keeps using traditional task managers and just asks Claude questions about them — but Claude has no write access, no persistence, no memory across sessions.
 
-Task OS is a third approach: **a structured task database that your AI agent lives inside of.**
+Qalatra is a third approach: **a structured task database that your AI agent lives inside of.**
 
 Your agent gets full read/write access to your tasks, your daily notes, and your habit log simultaneously. That combination is what makes it different. Your tasks capture what you need to do. Your daily notes capture everything else — the meeting that went sideways, the idea you had at 2pm, the thing you wanted to remember but didn't have time to turn into a task. Together, they give your agent a real memory of your work across days and weeks.
 
-Task OS was designed for Claude Code and all the examples use it — but it works with any command-line AI agent. That's configurable in Settings.
+Qalatra was designed for Claude Code and all the examples use it — but it works with any command-line AI agent. That's configurable in Settings.
 
 In practice that looks like:
 
@@ -30,7 +30,7 @@ In practice that looks like:
 - **During work:** *"I need to follow up with Sarah about the contract, remind me Thursday"* → task created, snoozed, done. No switching apps.
 - **End of day:** *"Triage me"* → your agent reviews what got done, moves stale items to backlog, proposes priorities for tomorrow.
 - **Weekly review:** *"How was my week?"* → your agent reads all seven daily notes plus task completion history and gives you a real account of what happened — including the small things that never became tasks but mattered.
-- **Agents:** Assign an agent to a task. Task OS dispatches it, captures the output, and marks the task complete. You come back to work already done.
+- **Agents:** Assign an agent to a task. Qalatra dispatches it, captures the output, and marks the task complete. You come back to work already done.
 
 The terminal is built in so you never leave the context. Claude runs in a panel below your task list. The daily note is one click away. Everything is in one place because context-switching is where work dies.
 
@@ -67,7 +67,7 @@ stale_backlog_review  → surface tasks that haven't been touched recently
 
 **A built-in terminal** with docked and fullscreen modes — run Claude Code alongside your task view without switching windows.
 
-**Agents** — any folder with an `agent.config` file becomes a dispatchable agent. Assign one to a task, queue a job, and Task OS runs it with the task description as the prompt. Agents can write output files that preview directly in the app. Agents can also define `output_rules` to extract data from their output and automatically attach links back to the task.
+**Agents** — any folder with an `agent.config` file becomes a dispatchable agent. Assign one to a task, queue a job, and Qalatra runs it with the task description as the prompt. Agents can write output files that preview directly in the app. Agents can also define `output_rules` to extract data from their output and automatically attach links back to the task.
 
 **Habits** — recurring behaviors with flexible scheduling. Daily, weekdays, specific days of the week (Mon/Wed/Fri, Tue/Thu). Streak dots, session notes, completion history.
 
@@ -83,7 +83,7 @@ stale_backlog_review  → surface tasks that haven't been touched recently
 
 ## Install
 
-Download the latest release from the [Releases page](https://github.com/pirateandfox/task-os/releases/latest):
+Download the latest release from the [Releases page](https://github.com/pirateandfox/qalatra/releases/latest):
 
 | Platform | File |
 |---|---|
@@ -101,8 +101,8 @@ Download the latest release from the [Releases page](https://github.com/piratean
 Requires Node.js 20+.
 
 ```bash
-git clone https://github.com/pirateandfox/task-os.git
-cd task-os
+git clone https://github.com/pirateandfox/qalatra.git
+cd qalatra
 npm install
 npm install --prefix ui
 npm run electron-dev
@@ -112,12 +112,12 @@ npm run electron-dev
 
 ## Connect Claude
 
-Task OS runs an MCP server on `http://localhost:3457`. Add it to `~/.claude.json`:
+Qalatra runs an MCP server on `http://localhost:3457`. Add it to `~/.claude.json`:
 
 ```json
 {
   "mcpServers": {
-    "task-os": {
+    "qalatra": {
       "type": "http",
       "url": "http://localhost:3457/mcp"
     }
@@ -144,17 +144,17 @@ Set this to your main projects folder — the directory where your work lives:
 C:\Users\you\IdeaProjects      # Windows
 ```
 
-This is the working directory for the built-in terminal and the root Task OS scans for agents. Everything flows from here.
+This is the working directory for the built-in terminal and the root Qalatra scans for agents. Everything flows from here.
 
 **2. Agent command**
 
-Task OS dispatches agents using a configurable CLI command. The default is:
+Qalatra dispatches agents using a configurable CLI command. The default is:
 
 ```
 claude --dangerously-skip-permissions
 ```
 
-**Task OS works with any command-line agent, not just Claude.** If you use a different AI CLI, a custom script, or your own agent runner — change this to whatever command invokes it. Claude is what we use and what all the examples show, but it's not hardwired.
+**Qalatra works with any command-line agent, not just Claude.** If you use a different AI CLI, a custom script, or your own agent runner — change this to whatever command invokes it. Claude is what we use and what all the examples show, but it's not hardwired.
 
 Per-agent overrides are also available — each agent folder can specify its own command in `agent.config`, so you can mix different agents across different tasks.
 
@@ -172,7 +172,7 @@ An agent is a folder with an `agent.config` file:
 }
 ```
 
-Task OS scans your configured agents root and lists discovered agents in Settings. Assign an agent to a task from the detail panel. When you queue a job, Task OS spawns the agent in that folder with the task description as the prompt. Results appear as a note on the task.
+Qalatra scans your configured agents root and lists discovered agents in Settings. Assign an agent to a task from the detail panel. When you queue a job, Qalatra spawns the agent in that folder with the task description as the prompt. Results appear as a note on the task.
 
 Agents can attach output files to tasks via the `update_task` MCP tool:
 
@@ -182,7 +182,7 @@ update_task(task_id: "...", links: [{ url: "/absolute/path/to/report.md" }])
 
 Linked `.md` files open in a markdown editor with PDF export. Linked `.html` and `.eml` files open in an email preview.
 
-**Output rules** — agents can parse their own stdout and automatically add links to the Task OS task. Add an `output_rules` array to `agent.config`:
+**Output rules** — agents can parse their own stdout and automatically add links to the Qalatra task. Add an `output_rules` array to `agent.config`:
 
 ```json
 {
@@ -198,7 +198,7 @@ Linked `.md` files open in a markdown editor with PDF export. Linked `.html` and
 }
 ```
 
-`pattern` is a JavaScript regex. `{1}`, `{2}`, etc. reference capture groups. When the agent job completes successfully, Task OS applies each rule against the raw output and adds matching links to the task. Rules live in your agent's repo — nothing is configured globally in Task OS.
+`pattern` is a JavaScript regex. `{1}`, `{2}`, etc. reference capture groups. When the agent job completes successfully, Qalatra applies each rule against the raw output and adds matching links to the task. Rules live in your agent's repo — nothing is configured globally in Qalatra.
 
 **Starter agents:** Clone [taskos-projects-template](https://github.com/pirateandfox/taskos-projects-template) as your working directory to get a set of ready-to-use agents — research, writing, triage, and more. Point Settings → Working Directory at the cloned folder to activate them.
 

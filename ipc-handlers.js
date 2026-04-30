@@ -82,7 +82,7 @@ const MIME_EXTENSIONS = {
 function extFromMime(mime) { return MIME_EXTENSIONS[mime] || '' }
 
 function getAttachmentCacheDir(settings) {
-  const raw = settings.attachmentCacheDir || path.join(os.homedir(), 'Library', 'Application Support', 'task-os', 'attachments')
+  const raw = settings.attachmentCacheDir || path.join(os.homedir(), 'Library', 'Application Support', 'qalatra', 'attachments')
   const dir = raw.replace(/^~/, os.homedir())
   fs.mkdirSync(dir, { recursive: true })
   return dir
@@ -409,7 +409,7 @@ export function setupIpcHandlers(onMcpPortChange) {
     const port = parseInt(s.mcpPort ?? '3457', 10)
     let claudeJson = {}
     try { claudeJson = JSON.parse(fs.readFileSync(CLAUDE_JSON_PATH, 'utf8')) } catch {}
-    const entry = claudeJson.mcpServers?.['task-os']
+    const entry = claudeJson.mcpServers?.['qalatra']
     const url = `http://localhost:${port}/mcp`
     const isHttpConfigured = (entry?.type === 'http' && entry?.url === url) ||
       (entry?.type === 'stdio' && entry?.args?.includes(url))
@@ -422,9 +422,9 @@ export function setupIpcHandlers(onMcpPortChange) {
     let claudeJson = {}
     try { claudeJson = JSON.parse(fs.readFileSync(CLAUDE_JSON_PATH, 'utf8')) } catch {}
     if (!claudeJson.mcpServers) claudeJson.mcpServers = {}
-    // Use mcp-remote stdio proxy so task-os works in both interactive and non-interactive
+    // Use mcp-remote stdio proxy so qalatra works in both interactive and non-interactive
     // (agent subprocess) Claude Code sessions. Direct HTTP type is skipped in -p mode.
-    claudeJson.mcpServers['task-os'] = { type: 'stdio', command: 'npx', args: ['-y', 'mcp-remote', `http://localhost:${p}/mcp`] }
+    claudeJson.mcpServers['qalatra'] = { type: 'stdio', command: 'npx', args: ['-y', 'mcp-remote', `http://localhost:${p}/mcp`] }
     fs.writeFileSync(CLAUDE_JSON_PATH, JSON.stringify(claudeJson, null, 2))
     if (onMcpPortChange) onMcpPortChange(p)
     return { ok: true, port: p, url: `http://localhost:${p}/mcp` }

@@ -1,5 +1,5 @@
-appId: com.justinhandley.taskos
-productName: Task OS
+appId: com.justinhandley.qalatra
+productName: Qalatra
 copyright: Copyright © 2026 Justin Handley
 
 asar: false
@@ -43,7 +43,7 @@ mac:
         - x64
 
 dmg:
-  title: Task OS
+  title: Qalatra
   sign: false
 
 win:
@@ -63,7 +63,7 @@ linux:
 publish:
   provider: github
   owner: pirateandfox
-  repo: task-os
+  repo: qalatra
   releaseType: release
 
 afterSign: scripts/notarize.mjs

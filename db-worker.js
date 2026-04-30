@@ -23,6 +23,7 @@ function offsetDate(dateStr, days) {
   d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString().slice(0, 10)
 }
+const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 86400000)
 function nextRecurrenceDate(fromDate, rule) {
   if (!rule) return null
   const SHORTHANDS = { daily: 'FREQ=DAILY', weekdays: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', weekly: 'FREQ=WEEKLY', monthly: 'FREQ=MONTHLY' }
@@ -241,7 +242,7 @@ function autoRolloverRecurring() {
     db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ?`).run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id)
     // Advance all the way to today-or-future in one shot to prevent cascade duplication
     // when autoRolloverRecurring runs multiple times (e.g. repeated UI refreshes).
-    let baseDate = task.due_date ?? t
+    let baseDate = task.due_date ?? task.start_date ?? t
     let nextDate = nextRecurrenceDate(baseDate, task.recurrence)
     while (nextDate && nextDate < t) {
       baseDate = nextDate
@@ -252,8 +253,18 @@ function autoRolloverRecurring() {
 }
 
 function spawnRecurrence(task, nextDate, now, reason) {
+  // Preserve start→due span for multi-day recurring tasks.
+  // nextDate is always the new due_date anchor (or start_date if original had no due_date).
+  let spawnedStart = null
+  let spawnedDue = nextDate
+  if (task.start_date && task.due_date) {
+    spawnedStart = offsetDate(nextDate, -daysBetween(task.start_date, task.due_date))
+  } else if (task.start_date && !task.due_date) {
+    spawnedStart = nextDate
+    spawnedDue = null
+  }
   db.prepare(`INSERT INTO tasks (id, title, description, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, start_date, due_date, task_type, recurrence, ai_context, agent_path, agent_resume, agent_autorun, agent_autorun_time) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(crypto.randomUUID(), task.title, task.description, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, nextDate, nextDate, task.task_type, task.recurrence, appendAiContext(null, reason), task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00')
+    .run(crypto.randomUUID(), task.title, task.description, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, spawnedStart, spawnedDue, task.task_type, task.recurrence, appendAiContext(null, reason), task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00')
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -338,7 +349,7 @@ function completeTask(id) {
   const now = nowIso()
   db.prepare(`UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = ?, ai_context = ? WHERE id = ?`).run(now, appendAiContext(task.ai_context, 'Marked complete via UI.'), id)
   if (task.recurrence) {
-    const nextDate = nextRecurrenceDate(task.due_date ?? today(), task.recurrence)
+    const nextDate = nextRecurrenceDate(task.due_date ?? task.start_date ?? today(), task.recurrence)
     if (nextDate) spawnRecurrence(task, nextDate, now, `Recurred from task ${id}`)
   }
   return { ok: true }
@@ -365,7 +376,7 @@ function skipTask(id) {
   if (!task || !task.recurrence) return { ok: false }
   const now = nowIso()
   db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ?`).run(now, appendAiContext(task.ai_context, 'Skipped via UI.'), id)
-  const nextDate = nextRecurrenceDate(task.due_date ?? today(), task.recurrence)
+  const nextDate = nextRecurrenceDate(task.due_date ?? task.start_date ?? today(), task.recurrence)
   if (nextDate) spawnRecurrence(task, nextDate, now, `Recurred from task ${id}`)
   return { ok: true }
 }
@@ -549,8 +560,8 @@ function createAgentJob(taskId, userMessage) {
   if (!task || !task.agent_path) throw new Error('task_id required and task must have agent_path')
   const existingNotes = db.prepare(`SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC`).all(taskId)
   const parts = [
-    `You are an agent running inside Task OS. Task ID: ${taskId}`,
-    `If you create any output files, save them to ${task.agent_path}/output/ and include their paths in your response so Task OS can link them back to this task.`,
+    `You are an agent running inside Qalatra. Task ID: ${taskId}`,
+    `If you create any output files, save them to ${task.agent_path}/output/ and include their paths in your response so Qalatra can link them back to this task.`,
     `Task: ${task.title}`
   ]
   if (task.description) parts.push(task.description)
@@ -592,7 +603,7 @@ function getAutorunTasks() {
   return db.prepare(`SELECT t.* FROM tasks t WHERE t.agent_path IS NOT NULL AND t.agent_autorun = 1 AND t.status = 'active' AND (t.due_date IS NULL OR t.due_date <= date('now', 'localtime')) AND time('now', 'localtime') >= COALESCE(t.agent_autorun_time, '09:00') AND NOT EXISTS (SELECT 1 FROM agent_jobs j WHERE j.task_id = t.id)`).all()
 }
 function insertAutorunJob(taskId, agentPath, prompt) {
-  const fullPrompt = `You are an agent running inside Task OS. Task ID: ${taskId}\nIf you create any output files, save them to ${agentPath}/output/ and include their paths in your response so Task OS can link them back to this task.\n${prompt}`
+  const fullPrompt = `You are an agent running inside Qalatra. Task ID: ${taskId}\nIf you create any output files, save them to ${agentPath}/output/ and include their paths in your response so Qalatra can link them back to this task.\n${prompt}`
   db.prepare(`INSERT INTO agent_jobs (id, task_id, agent_path, prompt) VALUES (?, ?, ?, ?)`).run(crypto.randomUUID(), taskId, agentPath, fullPrompt)
   return { ok: true }
 }

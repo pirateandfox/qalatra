@@ -1,4 +1,4 @@
-# Task OS — Evolution Notes
+# Qalatra — Evolution Notes
 
 ## 1.0.73 — Inbox, collapsible sections, agent indicator (2026-04-27)
 
@@ -99,9 +99,9 @@
 
 ### Agent output rules
 - `agent.config` now supports an `output_rules` array. Rules define regex patterns to match against agent stdout and actions to take when they match.
-- Currently supported action: `add_link` — extracts a capture group from the output and adds the interpolated URL as a link on the Task OS task.
+- Currently supported action: `add_link` — extracts a capture group from the output and adds the interpolated URL as a link on the Qalatra task.
 - Example: capture a FlightDesk task ID from `flightdesk register` output and attach the FlightDesk task URL automatically.
-- Rules are per-agent and live in the agent's own repo — nothing ships globally with Task OS.
+- Rules are per-agent and live in the agent's own repo — nothing ships globally with Qalatra.
 - Rule format:
   ```json
   {

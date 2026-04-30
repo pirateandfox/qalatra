@@ -200,7 +200,7 @@ export default function Settings({ open, fullscreen, onClose, onToggleFullscreen
         <div className="settings-row">
           <label className="settings-label">Bucket Name</label>
           <input className="settings-input" type="text" value={settings.s3Bucket ?? ''} onChange={e => set('s3Bucket', e.target.value)}
-            placeholder="task-os-attachments" spellCheck={false} />
+            placeholder="qalatra-attachments" spellCheck={false} />
         </div>
 
         <div className="settings-row">
@@ -223,7 +223,7 @@ export default function Settings({ open, fullscreen, onClose, onToggleFullscreen
         <div className="settings-row">
           <label className="settings-label">Local Attachment Cache</label>
           <input className="settings-input" type="text" value={settings.attachmentCacheDir ?? ''} onChange={e => set('attachmentCacheDir', e.target.value)}
-            placeholder="e.g. ~/Library/Application Support/task-os/attachments or C:\Users\you\AppData\Roaming\task-os" spellCheck={false} />
+            placeholder="e.g. ~/Library/Application Support/qalatra/attachments or C:\Users\you\AppData\Roaming\qalatra" spellCheck={false} />
           <span className="settings-hint">Files are always cached here locally regardless of cloud storage.</span>
         </div>
 

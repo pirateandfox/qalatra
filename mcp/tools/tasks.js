@@ -1,13 +1,16 @@
 import { v4 as uuidv4 } from 'uuid';
 import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate } from '../db.js';
 
+const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 86400000)
+const offsetDate = (dateStr, days) => { const d = new Date(dateStr + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10) }
+
 function spawnNextOccurrence(db, task, now) {
   if (!task.recurrence) return null;
-  // Advance from the task's due_date to today-or-future in one shot,
+  // Advance from the task's due_date (or start_date) to today-or-future in one shot,
   // so completing a long-overdue task spawns for today (or next future occurrence),
   // not for a date that's already in the past.
   const t = today();
-  let baseDate = task.due_date ?? t;
+  let baseDate = task.due_date ?? task.start_date ?? t;
   let nextDate = nextRecurrenceDate(baseDate, task.recurrence);
   while (nextDate && nextDate < t) {
     baseDate = nextDate;
@@ -40,8 +43,8 @@ function spawnNextOccurrence(db, task, now) {
     source_url:        task.source_url,
     created_at:        now,
     updated_at:        now,
-    start_date:        nextDate,
-    due_date:          nextDate,
+    start_date:        task.start_date && task.due_date ? offsetDate(nextDate, -daysBetween(task.start_date, task.due_date)) : (task.start_date && !task.due_date ? nextDate : null),
+    due_date:          task.start_date && !task.due_date ? null : nextDate,
     task_type:         task.task_type,
     recurrence:        task.recurrence,
     ai_context:        appendAiContext(null, `Recurred from task ${task.id}`),

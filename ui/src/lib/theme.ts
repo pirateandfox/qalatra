@@ -69,8 +69,17 @@ export function applyTokens(tokens: ThemeTokens) {
   root.style.setProperty('--input-bg', tokens.inputBg)
 }
 
-const MODE_KEY = 'task-os-theme-mode'
-const OVERRIDES_KEY = 'task-os-theme-overrides'
+const MODE_KEY = 'qalatra-theme-mode'
+const OVERRIDES_KEY = 'qalatra-theme-overrides'
+
+// Migrate old task-os localStorage keys on first load
+;(function migrate() {
+  for (const [old, next] of [['task-os-theme-mode', MODE_KEY], ['task-os-theme-overrides', OVERRIDES_KEY]]) {
+    const v = localStorage.getItem(old)
+    if (v !== null && localStorage.getItem(next) === null) { localStorage.setItem(next, v) }
+    localStorage.removeItem(old)
+  }
+})()
 
 export function loadThemeFromStorage(): { mode: ThemeMode; overrides: Partial<ThemeTokens> } {
   const mode = (localStorage.getItem(MODE_KEY) as ThemeMode | null) ?? 'system'

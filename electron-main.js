@@ -37,16 +37,16 @@ async function ensureUserData() {
 
   // On first production launch, offer to migrate existing dev data
   if (!fs.existsSync(targetDb)) {
-    const devDb = path.join(os.homedir(), 'IdeaProjects', 'task-os', 'db', 'tasks.db')
-    const devSettings = path.join(os.homedir(), 'IdeaProjects', 'task-os', 'db', 'settings.json')
+    const devDb = path.join(os.homedir(), 'IdeaProjects', 'qalatra', 'db', 'tasks.db')
+    const devSettings = path.join(os.homedir(), 'IdeaProjects', 'qalatra', 'db', 'settings.json')
 
     if (fs.existsSync(devDb)) {
       const { response } = await dialog.showMessageBox({
         type: 'question',
         buttons: ['Copy my data', 'Start fresh'],
         defaultId: 0,
-        title: 'Task OS — First Launch',
-        message: 'Found existing Task OS data',
+        title: 'Qalatra — First Launch',
+        message: 'Found existing Qalatra data',
         detail: `Copy your database from:\n${devDb}\n\nto the app data directory?`,
       })
       if (response === 0) {
@@ -78,7 +78,7 @@ function setupLogging() {
   console.log   = (...a) => { orig.log(...a);   logStream.write(`${tag()} INFO  ${a.join(' ')}\n`) }
   console.error = (...a) => { orig.error(...a); logStream.write(`${tag()} ERROR ${a.join(' ')}\n`) }
   console.warn  = (...a) => { orig.warn(...a);  logStream.write(`${tag()} WARN  ${a.join(' ')}\n`) }
-  console.log(`Task OS starting — version ${app.getVersion()} pid=${process.pid}`)
+  console.log(`Qalatra starting — version ${app.getVersion()} pid=${process.pid}`)
 }
 
 // ── Backend processes ─────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: 'Task OS',
+    title: 'Qalatra',
     icon: path.join(__dirname, 'assets/icon.png'),
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 20 },

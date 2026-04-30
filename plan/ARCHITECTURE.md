@@ -1,8 +1,8 @@
-# Task OS — Architecture Spec
+# Qalatra — Architecture Spec
 
 ## Current State
 
-The existing Task OS is a working, battle-tested personal tool: SQLite database, MCP server, Electron app. It has been in daily use and the schema is proven. This document captures the architecture for **Task OS v2** — adding sync, multi-device, multi-instance, and external integration support without throwing away what works.
+The existing Qalatra is a working, battle-tested personal tool: SQLite database, MCP server, Electron app. It has been in daily use and the schema is proven. This document captures the architecture for **Qalatra v2** — adding sync, multi-device, multi-instance, and external integration support without throwing away what works.
 
 **Core principle: evolve, don't rewrite.**
 
@@ -10,7 +10,7 @@ The existing Task OS is a working, battle-tested personal tool: SQLite database,
 
 ## Core Philosophy
 
-**Instances, not users.** You authenticate to an instance, not to an account within a system. Each TaskOS installation is an instance. You can have multiple instances (personal Mac, work cloud VM) and access them all from a single web or mobile app. Teammates access a shared instance by being granted access to it — no per-user data partitioning within an instance.
+**Instances, not users.** You authenticate to an instance, not to an account within a system. Each Qalatra installation is an instance. You can have multiple instances (personal Mac, work cloud VM) and access them all from a single web or mobile app. Teammates access a shared instance by being granted access to it — no per-user data partitioning within an instance.
 
 **Task data never touches the NestJS backend.** NestJS is the auth, billing, and instance registry layer only. All task data lives in per-user Turso databases and syncs directly between instances and clients.
 
@@ -28,7 +28,7 @@ The existing Task OS is a working, battle-tested personal tool: SQLite database,
     ┌──────────┼────────────────────┐
     ▼          ▼                    ▼
 [Your Mac]  [Cloud VM]         [Web / Mobile]
-TaskOS       TaskOS              thin client
+Qalatra       Qalatra              thin client
 Electron     Electron            React / React Native
     │            │                    │
     └────────────┴────────────────────┘
@@ -42,7 +42,7 @@ Electron     Electron            React / React Native
 ### NestJS Backend (auth + registry only)
 
 - User accounts, orgs, billing (Stripe)
-- Instance registry: each TaskOS install registers with a UUID, last-heartbeat timestamp, human name ("Justin's Mac", "Work Cloud VM")
+- Instance registry: each Qalatra install registers with a UUID, last-heartbeat timestamp, human name ("Justin's Mac", "Work Cloud VM")
 - On login, returns: Turso DB credentials + list of registered instances + their online status
 - **Does not store or proxy task data**
 
@@ -80,27 +80,27 @@ Electron     Electron            React / React Native
 
 ## Cloud VM Instances
 
-TaskOS runs on Linux identically to Mac — the Electron app has a Linux build. A cloud VM instance is just TaskOS installed on a Linux server.
+Qalatra runs on Linux identically to Mac — the Electron app has a Linux build. A cloud VM instance is just Qalatra installed on a Linux server.
 
 **Recommended stack for a cloud instance:**
 - Hetzner CX22 (~$5-6/mo) or any Linux VPS
 - Tailscale for private network access (no public exposure needed)
 - noVNC + Xfce for browser-based desktop access (OAuth re-auth, MCP setup, etc.)
 - Cloudflare Tunnel if the API needs to be reachable from external services (e.g. Slack)
-- TaskOS Linux build installed and running
+- Qalatra Linux build installed and running
 
 **Use cases for cloud instances:**
 - Company shared instance: teammates connect via Tailscale, shared contexts/agents
 - Always-on personal instance: agents run even when your Mac is closed
 - Proof of concept: existing cloud Linux box + Linux release + noVNC = running today
 
-**Agent considerations:** Cloud agents often need MCP servers with OAuth (Shopify, etc.) and occasional browser re-authentication. noVNC provides the desktop access for this. TaskOS does not try to abstract or containerize the execution environment — the machine is the machine.
+**Agent considerations:** Cloud agents often need MCP servers with OAuth (Shopify, etc.) and occasional browser re-authentication. noVNC provides the desktop access for this. Qalatra does not try to abstract or containerize the execution environment — the machine is the machine.
 
 ---
 
 ## Multi-Instance Model
 
-The web and mobile apps maintain a list of instances associated with your account. Instances are registered by NestJS when the TaskOS app authenticates. You switch between instances like switching workspaces.
+The web and mobile apps maintain a list of instances associated with your account. Instances are registered by NestJS when the Qalatra app authenticates. You switch between instances like switching workspaces.
 
 ```
 Web/Mobile instance switcher:
@@ -115,17 +115,17 @@ All instances share the same Turso DB (same task data). "Online" means agents ca
 
 ## External Integrations (Slack, etc.)
 
-### Incoming: Slack → TaskOS
+### Incoming: Slack → Qalatra
 
 - Slack Block Kit modal mirrors the task creation form
 - User submits → Slack POSTs to a webhook endpoint (NestJS or Cloudflare Worker)
-- Webhook creates task via TaskOS API
+- Webhook creates task via Qalatra API
 
 ### Thread-as-conversation
 
 ```
 User submits Slack form
-  → task created in TaskOS
+  → task created in Qalatra
   → bot posts confirmation message in Slack channel
 
 User replies in thread
@@ -134,18 +134,18 @@ User replies in thread
   → agent picks up new context on next run
 
 Agent completes / produces output
-  → TaskOS pushes result to Slack thread via bot
+  → Qalatra pushes result to Slack thread via bot
   → conversation continues naturally in Slack
 ```
 
 ### API Security
 
-The TaskOS API endpoint must be protected when exposed to external services. Required:
+The Qalatra API endpoint must be protected when exposed to external services. Required:
 - **API token** on all incoming webhook requests — generated per-integration, stored in NestJS, verified on every request
 - **Slack signing secret** verification — Slack signs every outgoing request; verify the signature before processing
 - Cloudflare Tunnel handles HTTPS termination; the API itself stays on localhost on the VM
 
-Anyone hitting the port without a valid token gets a 401. The token is configured once in the Slack app settings and in TaskOS settings.
+Anyone hitting the port without a valid token gets a 401. The token is configured once in the Slack app settings and in Qalatra settings.
 
 ---
 
@@ -191,7 +191,7 @@ To share agents between instances:
 - Package an agent folder as a zip (agent code + `agent.config`)
 - POST to a remote instance's API (authenticated)
 - Remote instance unpacks into its `agentsRoot` directory
-- Agent immediately available in that instance's TaskOS
+- Agent immediately available in that instance's Qalatra
 
 ---
 
@@ -220,7 +220,7 @@ Unchanged from current implementation. S3-compatible object storage (Cloudflare 
 Free:      Local only, no sync, no Turso provisioning
 $5/mo:     Sync (Turso DB provisioned), web + mobile access
 $10/mo:    Sync + hosted file storage (R2)
-Cloud VM:  Setup fee + ~$25/mo (we host a Hetzner VM for you, configured with TaskOS + Claude Code + Tailscale + noVNC)
+Cloud VM:  Setup fee + ~$25/mo (we host a Hetzner VM for you, configured with Qalatra + Claude Code + Tailscale + noVNC)
 ```
 
 ---
