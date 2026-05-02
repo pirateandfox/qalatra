@@ -161,6 +161,15 @@ async function processAgentJobs() {
   for (const job of jobs) {
     runningJobs++
     await dbCall('startAgentJob', job.id)
+
+    // Fail fast if agent_path doesn't exist — spawn would throw synchronously, leaving
+    // the job permanently stuck in 'running' with no close/error handler attached.
+    if (!fs.existsSync(job.agent_path)) {
+      runningJobs--
+      await dbCall('finishAgentJob', job.id, 'failed', `Agent path does not exist: ${job.agent_path}\n\nCreate the directory or update the task's agent path.`, null)
+      continue
+    }
+
     let agentCommand = settings.defaultAgentCommand || 'claude --dangerously-skip-permissions'
     let cfg = null
     try {
@@ -172,58 +181,68 @@ async function processAgentJobs() {
 
     let stdout = '', stderr = '', timedOut = false, settled = false
     let proc, promptFile = null
+    // Declared here so the error handler can reference them regardless of which branch ran.
+    let bin = '', spawnArgs = []
 
-    if (isTemplateCommand) {
-      // Template mode: supports {spec_file} and {description} placeholders.
-      // Runs the command as a raw shell string so pipes, redirects, etc. work.
-      // Does NOT append -p or --output-format json — the command is fully specified.
-      let resolvedCommand = agentCommand
+    try {
+      if (isTemplateCommand) {
+        // Template mode: supports {spec_file} and {description} placeholders.
+        // Runs the command as a raw shell string so pipes, redirects, etc. work.
+        // Does NOT append -p or --output-format json — the command is fully specified.
+        let resolvedCommand = agentCommand
 
-      if (agentCommand.includes('{spec_file}')) {
-        const specPath = path.join(job.agent_path, 'spec.md')
-        fs.writeFileSync(specPath, job.prompt, 'utf8')
-        resolvedCommand = resolvedCommand.replace(/\{spec_file\}/g, './spec.md')
-      }
-
-      if (agentCommand.includes('{description}') || agentCommand.includes('{title}')) {
-        const task = job.task_id ? await dbCall('getTask', job.task_id) : null
-        if (agentCommand.includes('{description}')) {
-          const description = (task?.description ?? job.user_message ?? '').replace(/\n/g, ' ').replace(/'/g, "\\'")
-          resolvedCommand = resolvedCommand.replace(/\{description\}/g, description)
+        if (agentCommand.includes('{spec_file}')) {
+          const specPath = path.join(job.agent_path, 'spec.md')
+          fs.writeFileSync(specPath, job.prompt, 'utf8')
+          resolvedCommand = resolvedCommand.replace(/\{spec_file\}/g, './spec.md')
         }
-        if (agentCommand.includes('{title}')) {
-          const title = (task?.title ?? '').replace(/'/g, "\\'")
-          resolvedCommand = resolvedCommand.replace(/\{title\}/g, title)
+
+        if (agentCommand.includes('{description}') || agentCommand.includes('{title}')) {
+          const task = job.task_id ? await dbCall('getTask', job.task_id) : null
+          if (agentCommand.includes('{description}')) {
+            const description = (task?.description ?? job.user_message ?? '').replace(/\n/g, ' ').replace(/'/g, "\\'")
+            resolvedCommand = resolvedCommand.replace(/\{description\}/g, description)
+          }
+          if (agentCommand.includes('{title}')) {
+            const title = (task?.title ?? '').replace(/'/g, "\\'")
+            resolvedCommand = resolvedCommand.replace(/\{title\}/g, title)
+          }
         }
+
+        bin = shellBin; spawnArgs = ['-i', '-l', '-c', resolvedCommand]
+        proc = process.platform === 'win32'
+          ? spawn('cmd.exe', ['/c', resolvedCommand], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'] })
+          : spawn(shellBin, ['-i', '-l', '-c', resolvedCommand], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'] })
+      } else {
+        // Standard mode: append -p {prompt} --output-format json and use safe arg passing.
+        const parts = agentCommand.trim().split(/\s+/)
+        bin = parts[0]; const baseArgs = parts.slice(1)
+
+        // On Windows with shell:true, cmd.exe joins args without quoting, so any multi-word
+        // prompt passed via -p gets truncated at the first space (Claude only receives "You").
+        // Fix: write the full prompt to a temp file and pass a short quoted instruction instead.
+        // Temp file is cleaned up after the process exits.
+        let promptArg = job.prompt
+        if (process.platform === 'win32' && !job.prevSessionId) {
+          promptFile = path.join(os.tmpdir(), `taskos-prompt-${job.id}.txt`)
+          fs.writeFileSync(promptFile, job.prompt, 'utf8')
+          promptArg = `"Read and follow the instructions in the file: ${promptFile}"`
+        }
+
+        spawnArgs = job.prevSessionId
+          ? [...baseArgs, '--resume', job.prevSessionId, '-p', job.user_message || job.prompt, '--output-format', 'json']
+          : [...baseArgs, '-p', promptArg, '--output-format', 'json']
+
+        proc = process.platform === 'win32'
+          ? spawn(bin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+          : spawn(shellBin, ['-i', '-l', '-c', `${bin} "$@"`, '--', ...spawnArgs], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'] })
       }
-
-      proc = process.platform === 'win32'
-        ? spawn('cmd.exe', ['/c', resolvedCommand], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'] })
-        : spawn(shellBin, ['-i', '-l', '-c', resolvedCommand], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'] })
-    } else {
-      // Standard mode: append -p {prompt} --output-format json and use safe arg passing.
-      const parts = agentCommand.trim().split(/\s+/)
-      const bin = parts[0]; const baseArgs = parts.slice(1)
-
-      // On Windows with shell:true, cmd.exe joins args without quoting, so any multi-word
-      // prompt passed via -p gets truncated at the first space (Claude only receives "You").
-      // Fix: write the full prompt to a temp file and pass a short quoted instruction instead.
-      // Temp file is cleaned up after the process exits.
-      let promptArg = job.prompt
-      if (process.platform === 'win32' && !job.prevSessionId) {
-        promptFile = path.join(os.tmpdir(), `taskos-prompt-${job.id}.txt`)
-        fs.writeFileSync(promptFile, job.prompt, 'utf8')
-        promptArg = `"Read and follow the instructions in the file: ${promptFile}"`
-      }
-
-      const args = job.prevSessionId
-        ? [...baseArgs, '--resume', job.prevSessionId, '-p', job.user_message || job.prompt, '--output-format', 'json']
-        : [...baseArgs, '-p', promptArg, '--output-format', 'json']
-
-      proc = process.platform === 'win32'
-        ? spawn(bin, args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], shell: true })
-        : spawn(shellBin, ['-i', '-l', '-c', `${bin} "$@"`, '--', ...args], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (spawnErr) {
+      runningJobs--
+      await dbCall('finishAgentJob', job.id, 'failed', `Failed to start agent: ${spawnErr.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`, null)
+      continue
     }
+
     proc.stdout.on('data', d => { stdout += d })
     proc.stderr.on('data', d => { stderr += d })
     const timeout = setTimeout(() => { timedOut = true; proc.kill('SIGKILL') }, 15 * 60 * 1000)
@@ -260,7 +279,7 @@ async function processAgentJobs() {
       if (settled) return
       settled = true
       clearTimeout(timeout); runningJobs--
-      await dbCall('finishAgentJob', job.id, 'failed', `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${args.slice(0,2).join(' ')} ...\nCheck that the agent command is correct in Settings.`, null)
+      await dbCall('finishAgentJob', job.id, 'failed', `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`, null)
     })
   }
 }

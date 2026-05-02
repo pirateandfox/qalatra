@@ -8,6 +8,7 @@ import pty from 'node-pty'
 import { initDbWorker, initSettings, setupIpcHandlers, startBackgroundWorkers } from './ipc-handlers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+app.name = 'Qalatra'
 const isDev = process.env.NODE_ENV === 'development'
 const DEV_PORT = 5173
 
@@ -35,27 +36,49 @@ async function ensureUserData() {
 
   fs.mkdirSync(dbDir, { recursive: true })
 
-  // On first production launch, offer to migrate existing dev data
   if (!fs.existsSync(targetDb)) {
-    const devDb = path.join(os.homedir(), 'IdeaProjects', 'qalatra', 'db', 'tasks.db')
-    const devSettings = path.join(os.homedir(), 'IdeaProjects', 'qalatra', 'db', 'settings.json')
+    // Check for Task OS data first (rename upgrade path)
+    const taskOsDir = path.join(app.getPath('appData'), 'Task OS', 'db')
+    const taskOsDb  = path.join(taskOsDir, 'tasks.db')
 
-    if (fs.existsSync(devDb)) {
+    if (fs.existsSync(taskOsDb)) {
       const { response } = await dialog.showMessageBox({
         type: 'question',
-        buttons: ['Copy my data', 'Start fresh'],
+        buttons: ['Migrate my data', 'Start fresh'],
         defaultId: 0,
-        title: 'Qalatra — First Launch',
-        message: 'Found existing Qalatra data',
-        detail: `Copy your database from:\n${devDb}\n\nto the app data directory?`,
+        title: 'Welcome to Qalatra',
+        message: 'Your Task OS data was found',
+        detail: 'Qalatra is the new name for Task OS. Your tasks, notes, habits, and history will be migrated automatically.\n\nYour original Task OS data is not affected.',
       })
       if (response === 0) {
-        fs.copyFileSync(devDb, targetDb)
-        for (const ext of ['-wal', '-shm']) {
-          if (fs.existsSync(devDb + ext)) fs.copyFileSync(devDb + ext, targetDb + ext)
+        for (const file of ['tasks.db', 'tasks.db-wal', 'tasks.db-shm', 'settings.json']) {
+          const src = path.join(taskOsDir, file)
+          if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dbDir, file))
         }
-        if (fs.existsSync(devSettings)) fs.copyFileSync(devSettings, targetSettings)
-        console.log('Data migrated to', dbDir)
+        console.log('Migrated Task OS data to', dbDir)
+      }
+    } else {
+      // On first production launch, offer to migrate existing dev data
+      const devDb = path.join(os.homedir(), 'IdeaProjects', 'qalatra', 'db', 'tasks.db')
+      const devSettings = path.join(os.homedir(), 'IdeaProjects', 'qalatra', 'db', 'settings.json')
+
+      if (fs.existsSync(devDb)) {
+        const { response } = await dialog.showMessageBox({
+          type: 'question',
+          buttons: ['Copy my data', 'Start fresh'],
+          defaultId: 0,
+          title: 'Qalatra — First Launch',
+          message: 'Found existing Qalatra data',
+          detail: `Copy your database from:\n${devDb}\n\nto the app data directory?`,
+        })
+        if (response === 0) {
+          fs.copyFileSync(devDb, targetDb)
+          for (const ext of ['-wal', '-shm']) {
+            if (fs.existsSync(devDb + ext)) fs.copyFileSync(devDb + ext, targetDb + ext)
+          }
+          if (fs.existsSync(devSettings)) fs.copyFileSync(devSettings, targetSettings)
+          console.log('Data migrated to', dbDir)
+        }
       }
     }
   }
@@ -264,7 +287,7 @@ function createWindow() {
 function setupMenu() {
   const template = [
     {
-      label: app.name,
+      label: 'Qalatra',
       submenu: [
         { role: 'about' },
         { type: 'separator' },

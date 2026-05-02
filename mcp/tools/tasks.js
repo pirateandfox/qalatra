@@ -92,6 +92,7 @@ export const toolDefs = [
         parent_id:       { type: 'string', description: 'ID of parent task (for subtasks)' },
         recurrence:      { type: 'string', description: 'daily | weekdays | weekly | monthly — auto-respawns on completion' },
         agent_path:      { type: 'string', description: 'Absolute path to the agent folder to dispatch this task to (e.g. /Users/you/IdeaProjects/myrepo/agents/planning)' },
+        links:           { type: 'array', items: { type: 'string' }, description: 'Array of URLs or file paths to attach to the task' },
         inbox:           { type: 'boolean', description: 'Mark as inbox item — surfaces in a separate Inbox section for human review before scheduling. Use when creating tasks on behalf of the user that need triage.' },
       },
       required: ['title'],
@@ -150,7 +151,7 @@ export const toolDefs = [
       type: 'object',
       properties: {
         query:   { type: 'string', description: 'Searches title, description, ai_context' },
-        context: { type: 'string' },
+        context: { type: 'string', description: 'Context slug or label (e.g. "monroe" or "Monroe Institute"). Use list_contexts to see all values.' },
         status:  { type: 'string', description: 'active | snoozed | backlog | archived | done' },
         tags:    { type: 'string' },
         limit:   { type: 'integer', description: 'Default 20' },
@@ -264,12 +265,12 @@ export const handlers = {
         id, title, description, status, my_priority, energy_required, context, project, tags,
         source, source_id, source_url, source_priority, due_date, start_date, surface_after,
         created_at, updated_at, ai_context, task_type, event_time, end_time, parent_id, recurrence,
-        agent_path, inbox
+        agent_path, links, inbox
       ) VALUES (
         @id, @title, @description, @status, @my_priority, @energy_required, @context, @project, @tags,
         @source, @source_id, @source_url, @source_priority, @due_date, @start_date, @surface_after,
         @created_at, @updated_at, @ai_context, @task_type, @event_time, @end_time, @parent_id, @recurrence,
-        @agent_path, @inbox
+        @agent_path, @links, @inbox
       )
     `).run({
       id,
@@ -297,6 +298,7 @@ export const handlers = {
       parent_id:       args.parent_id       ?? null,
       recurrence:      args.recurrence      ?? null,
       agent_path:      args.agent_path      ?? null,
+      links:           args.links ? JSON.stringify(args.links) : null,
       inbox:           args.inbox ? 1 : 0,
     });
     const status = args.status ?? 'active';
@@ -368,8 +370,11 @@ export const handlers = {
       params.query = `%${args.query}%`;
     }
     if (args.context) {
+      const ctx = db.prepare(
+        `SELECT slug FROM contexts WHERE LOWER(slug) = LOWER(?) OR LOWER(label) = LOWER(?) LIMIT 1`
+      ).get(args.context, args.context);
       conditions.push('context = @context');
-      params.context = args.context;
+      params.context = ctx ? ctx.slug : args.context;
     }
     if (args.status) {
       conditions.push('status = @status');

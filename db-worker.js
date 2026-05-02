@@ -598,7 +598,13 @@ function insertAgentNote(id, taskId, result, jobId) {
   db.prepare(`INSERT INTO notes (id, task_id, body, author, agent_job_id) VALUES (?, ?, ?, 'agent', ?)`).run(id, taskId, result, jobId)
   return { ok: true }
 }
-function resetStuckJobs() { db.prepare(`UPDATE agent_jobs SET status = 'queued', started_at = NULL WHERE status = 'running'`).run(); return { ok: true } }
+function resetStuckJobs() {
+  // Jobs stuck for less than the 15-min timeout window were likely orphaned by an app crash — re-queue them.
+  // Jobs stuck longer than that will never recover on their own — mark them failed.
+  db.prepare(`UPDATE agent_jobs SET status = 'queued', started_at = NULL WHERE status = 'running' AND started_at > datetime('now', '-16 minutes')`).run()
+  db.prepare(`UPDATE agent_jobs SET status = 'failed', result = 'Job orphaned: app was restarted while this job was running and it exceeded the timeout window.', completed_at = datetime('now') WHERE status = 'running'`).run()
+  return { ok: true }
+}
 function getAutorunTasks() {
   return db.prepare(`SELECT t.* FROM tasks t WHERE t.agent_path IS NOT NULL AND t.agent_autorun = 1 AND t.status = 'active' AND (t.due_date IS NULL OR t.due_date <= date('now', 'localtime')) AND time('now', 'localtime') >= COALESCE(t.agent_autorun_time, '09:00') AND NOT EXISTS (SELECT 1 FROM agent_jobs j WHERE j.task_id = t.id)`).all()
 }
