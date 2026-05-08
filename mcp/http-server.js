@@ -13,8 +13,9 @@ import { toolDefs as briefingDefs, handlers as briefingHandlers } from './tools/
 import { toolDefs as syncDefs,     handlers as syncHandlers }     from './tools/sync.js';
 import { toolDefs as notesDefs,    handlers as notesHandlers }    from './tools/notes.js';
 import { toolDefs as agentDefs,    handlers as agentHandlers }    from './tools/agent.js';
-import { toolDefs as habitDefs,    handlers as habitHandlers }    from './tools/habits.js';
-import { toolDefs as healthDefs,   handlers as healthHandlers }   from './tools/health.js';
+import { toolDefs as habitDefs,       handlers as habitHandlers }       from './tools/habits.js';
+import { toolDefs as healthDefs,      handlers as healthHandlers }      from './tools/health.js';
+import { toolDefs as heartbeatDefs,   handlers as heartbeatHandlers }   from './tools/heartbeats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_FILE = process.env.TASKOS_SETTINGS_FILE
@@ -24,8 +25,8 @@ function loadSettings() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch { return {}; }
 }
 
-const allDefs     = [...taskDefs, ...triageDefs, ...briefingDefs, ...syncDefs, ...notesDefs, ...agentDefs, ...habitDefs, ...healthDefs];
-const allHandlers = { ...taskHandlers, ...triageHandlers, ...briefingHandlers, ...syncHandlers, ...notesHandlers, ...agentHandlers, ...habitHandlers, ...healthHandlers };
+const allDefs     = [...taskDefs, ...triageDefs, ...briefingDefs, ...syncDefs, ...notesDefs, ...agentDefs, ...habitDefs, ...healthDefs, ...heartbeatDefs];
+const allHandlers = { ...taskHandlers, ...triageHandlers, ...briefingHandlers, ...syncHandlers, ...notesHandlers, ...agentHandlers, ...habitHandlers, ...healthHandlers, ...heartbeatHandlers };
 
 function createMcpServer() {
   const server = new Server(

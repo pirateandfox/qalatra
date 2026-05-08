@@ -8,13 +8,15 @@ Qalatra is Justin's personal task management system: a local SQLite database wit
 
 ```
 ~/IdeaProjects/qalatra/
-├── electron-main.js        ← Electron main process; spawns api.js + mcp/http-server.js via utilityProcess
-├── api-entry.cjs           ← CJS shim so utilityProcess.fork() can load ESM api.js
-├── api.js                  ← HTTP backend, port 3456
+├── electron-main.js        ← Electron main process; in dev spawns MCP as child_process, in prod installs launchd service
+├── db-worker.js            ← SQLite on a Worker thread (Electron Node ABI); handles all IPC DB calls
+├── ipc-handlers.js         ← IPC handler registration; frontend talks via window.electronAPI, no HTTP server
 ├── s3.js                   ← S3/R2 attachment helpers
+├── scripts/
+│   └── install-services.mjs ← Writes/loads the com.qalatra.mcp launchd plist (macOS, prod only)
 ├── mcp/
 │   ├── http-server.js      ← MCP HTTP server, port 3457 (primary, used by Claude Code)
-│   ├── http-server-entry.cjs ← CJS shim for utilityProcess.fork()
+│   ├── http-server-entry.cjs ← CJS shim so `node` can load ESM http-server.js
 │   ├── server.js           ← Legacy stdio MCP server (kept as fallback)
 │   ├── db.js               ← SQLite helpers, schema migrations, recurrence logic
 │   └── tools/              ← MCP tool definitions (tasks, triage, briefing, notes, etc.)
@@ -40,20 +42,26 @@ Qalatra is Justin's personal task management system: a local SQLite database wit
 
 ```bash
 cd ~/IdeaProjects/qalatra
-npm run electron-dev        # starts api.js + Vite + Electron all at once
+pnpm run electron-dev        # kills stale processes, rebuilds native modules, starts Vite + Electron
 ```
 
-- Backend: `api.js` on port 3456
-- Frontend: Vite dev server on port 5173
-- Electron: wraps the Vite frontend
+- Frontend: Vite dev server on port 5173 (Electron wraps it)
+- MCP server: port 3457, spawned by Electron as a plain `child_process` (system Node) — only runs while electron-dev is active
 
-**If the MCP server pings OK but all DB calls fail** (e.g. `Cannot read properties of undefined` or `better-sqlite3` ABI errors), the native module needs to be recompiled for the current Node version:
+**Two separate native module builds:**
+
+| Module | ABI | Who uses it |
+|---|---|---|
+| `better-sqlite3` (Electron ABI) | `npm run rebuild:electron` | `db-worker.js` inside Electron |
+| `better-sqlite3` (system Node ABI) | `npm rebuild better-sqlite3` | MCP server (system Node child process) |
+
+`electron-dev` runs `rebuild:electron` automatically. After any `npm rebuild better-sqlite3` that rebuilds for system Node, run `rebuild:electron` before restarting electron-dev.
+
+**If the MCP server hangs or DB calls fail**, kill it and let Electron respawn:
 
 ```bash
-cd ~/IdeaProjects/qalatra && npm rebuild better-sqlite3
+lsof -ti :3457 | xargs kill -9
 ```
-
-This happens when the active Node version changes (e.g. after an asdf switch). The MCP server and Electron app both use `better-sqlite3` and both need it compiled against the same ABI.
 
 ---
 

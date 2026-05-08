@@ -1,5 +1,22 @@
 # Qalatra — Evolution Notes
 
+## 1.2.3 — Heartbeats: persistent interval-based background agents (2026-05-07)
+
+New **Heartbeats** feature — always-on agent runners that fire on a fixed interval (5 min – 24h) and can be paused/resumed at any time.
+
+### Architecture
+- New `heartbeats` table: `id, title, description, agent_path, prompt, interval_minutes, active, last_run_at, next_run_at`
+- `agent_jobs.heartbeat_id` column added: heartbeat jobs are regular agent jobs with `task_id = NULL` and a `heartbeat_id` FK
+- Scheduler in `ipc-handlers.startBackgroundWorkers`: runs every 60s, calls `getDueHeartbeats()`, creates an agent job + updates `next_run_at` for each due heartbeat. Skips any heartbeat that already has a queued/running job to prevent pile-up
+- MCP tools in `mcp/tools/heartbeats.js`: `list_heartbeats`, `create_heartbeat`, `update_heartbeat`, `toggle_heartbeat`, `delete_heartbeat`, `list_heartbeat_jobs`
+
+### UI
+- **⚡ Heartbeats** sidebar tab (below Habits)
+- Card-based list with pulse indicator (animated blue when running, green when active, gray when paused)
+- Play/pause toggle button per card
+- Expandable job history showing last 10 runs with status and result preview
+- Inline create and edit forms with interval picker (5min → 24h)
+
 ## 1.2.0 — Reading view, task type toggle, smart new-task form, Code view idle section (2026-05-06)
 
 ### Reading view (`task_type = 'reading'`)

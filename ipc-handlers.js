@@ -313,6 +313,14 @@ async function runAgentScan() {
   if (agents.length) await dbCall('upsertAgents', agents).catch(() => {})
 }
 
+async function runDueHeartbeats() {
+  const due = await dbCall('getDueHeartbeats')
+  for (const hb of due) {
+    await dbCall('createHeartbeatJob', hb.id)
+    await dbCall('markHeartbeatRun', hb.id, hb.interval_minutes, hb.run_at_time ?? null)
+  }
+}
+
 export function startBackgroundWorkers() {
   dbCall('resetStuckJobs').catch(() => {})
   syncPendingAttachments().catch(() => {})
@@ -320,6 +328,8 @@ export function startBackgroundWorkers() {
   setInterval(() => syncPendingAttachments().catch(() => {}), 5 * 60 * 1000)
   setInterval(() => processAgentJobs().catch(() => {}), 30_000)
   setInterval(() => autoRunAgents().catch(() => {}), 5 * 60_000)
+  setTimeout(() => runDueHeartbeats().catch(() => {}), 5_000)
+  setInterval(() => runDueHeartbeats().catch(() => {}), 60_000)
 }
 
 // ── IPC handlers ──────────────────────────────────────────────────────────────
@@ -376,6 +386,14 @@ export function setupIpcHandlers(onMcpPortChange) {
   ipcMain.handle('projects:archive', (_, name) => dbCall('archiveProject', name))
   ipcMain.handle('projects:unarchive', (_, name) => dbCall('unarchiveProject', name))
   ipcMain.handle('projects:delete', (_, name) => dbCall('deleteProject', name))
+
+  // Heartbeats
+  ipcMain.handle('heartbeats:list', () => dbCall('listHeartbeats'))
+  ipcMain.handle('heartbeats:create', (_, body) => dbCall('createHeartbeat', body))
+  ipcMain.handle('heartbeats:update', (_, id, fields) => dbCall('updateHeartbeat', id, fields))
+  ipcMain.handle('heartbeats:delete', (_, id) => dbCall('deleteHeartbeat', id))
+  ipcMain.handle('heartbeats:toggle', (_, id) => dbCall('toggleHeartbeat', id))
+  ipcMain.handle('heartbeats:jobs', (_, id, limit) => dbCall('listHeartbeatJobs', id, limit ?? 10))
 
   // Habits
   ipcMain.handle('habits:list', (_, date) => dbCall('listHabits', date))

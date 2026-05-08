@@ -1,7 +1,7 @@
 import type { ThemeMode } from '../lib/theme'
 import './Sidebar.css'
 
-export type NavSection = 'priority' | 'code' | 'reading' | 'project' | 'backlog' | 'habits'
+export type NavSection = 'priority' | 'code' | 'reading' | 'project' | 'backlog' | 'habits' | 'heartbeats'
 
 const THEME_ICONS: Record<ThemeMode, string> = { system: '◑', light: '☀', dark: '☾' }
 const THEME_CYCLE: ThemeMode[] = ['system', 'light', 'dark']
@@ -12,7 +12,8 @@ const NAV_ITEMS: { key: NavSection; icon: string; label: string }[] = [
   { key: 'reading',  icon: '📖', label: 'Reading' },
   { key: 'project',  icon: '⊞', label: 'Projects' },
   { key: 'backlog',  icon: '≡', label: 'Backlog' },
-  { key: 'habits',   icon: '◎', label: 'Habits' },
+  { key: 'habits',      icon: '◎', label: 'Habits' },
+  { key: 'heartbeats',  icon: '⚡', label: 'Heartbeats' },
 ]
 
 interface Props {

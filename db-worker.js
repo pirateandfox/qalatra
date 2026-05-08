@@ -133,6 +133,20 @@ function migrate() {
       started_at   TEXT,
       completed_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS heartbeats (
+      id               TEXT PRIMARY KEY,
+      title            TEXT NOT NULL,
+      description      TEXT,
+      agent_path       TEXT NOT NULL,
+      prompt           TEXT NOT NULL,
+      interval_minutes INTEGER NOT NULL DEFAULT 60,
+      active           INTEGER NOT NULL DEFAULT 1,
+      last_run_at      TEXT,
+      next_run_at      TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS attachments (
       id         TEXT PRIMARY KEY,
       task_id    TEXT NOT NULL REFERENCES tasks(id),
@@ -213,6 +227,9 @@ function migrate() {
   tryAlter("ALTER TABLE contexts ADD COLUMN color TEXT NOT NULL DEFAULT '#888888'")
   tryAlter('ALTER TABLE contexts ADD COLUMN sort_order INTEGER')
   tryAlter('ALTER TABLE habits ADD COLUMN recurrence_days TEXT')
+  tryAlter('ALTER TABLE agent_jobs ADD COLUMN heartbeat_id TEXT REFERENCES heartbeats(id)')
+  tryAlter('ALTER TABLE heartbeats ADD COLUMN run_at_time TEXT')
+  tryAlter('ALTER TABLE tasks ADD COLUMN assigned_agent TEXT')
   tryAlter('ALTER TABLE projects ADD COLUMN is_repo INTEGER NOT NULL DEFAULT 0')
   tryAlter('ALTER TABLE projects ADD COLUMN context TEXT')
   // Backfill projects.context from the most common task context per project
@@ -764,6 +781,119 @@ function insertAutorunJob(taskId, agentPath, prompt) {
   return { ok: true }
 }
 
+// ── Heartbeats ────────────────────────────────────────────────────────────────
+
+function addMinutesFromNow(minutes) {
+  return new Date(Date.now() + minutes * 60_000).toISOString().replace('T', ' ').slice(0, 19)
+}
+
+// Compute next run timestamp. For daily heartbeats with a specific time, schedules
+// the next occurrence of that local time (today if not yet passed, tomorrow if it has).
+function nextRunAt(intervalMinutes, runAtTime) {
+  if (runAtTime && intervalMinutes === 1440) {
+    const [h, m] = runAtTime.split(':').map(Number)
+    const target = new Date()
+    target.setHours(h, m, 0, 0)
+    if (target <= new Date()) target.setDate(target.getDate() + 1)
+    return target.toISOString().replace('T', ' ').slice(0, 19)
+  }
+  return addMinutesFromNow(intervalMinutes)
+}
+
+function listHeartbeats() {
+  return db.prepare(`
+    SELECT h.*,
+      (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status = 'done') as runs_done,
+      (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status = 'failed') as runs_failed,
+      (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status IN ('queued','running')) as runs_pending
+    FROM heartbeats h ORDER BY h.created_at DESC
+  `).all()
+}
+
+function createHeartbeat({ title, description, agent_path, prompt, interval_minutes, run_at_time } = {}) {
+  if (!title || !agent_path || !prompt) throw new Error('title, agent_path, and prompt are required')
+  const id = crypto.randomUUID()
+  const now = nowIso()
+  const mins = interval_minutes ?? 60
+  const runAt = (run_at_time && mins === 1440) ? run_at_time : null
+  const firstRun = nextRunAt(mins, runAt)
+  db.prepare(`
+    INSERT INTO heartbeats (id, title, description, agent_path, prompt, interval_minutes, run_at_time, active, next_run_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+  `).run(id, title.trim(), description ?? null, agent_path.trim(), prompt.trim(), mins, runAt, firstRun, now, now)
+  return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)
+}
+
+function updateHeartbeat(id, fields = {}) {
+  const allowed = ['title', 'description', 'agent_path', 'prompt', 'interval_minutes', 'run_at_time']
+  const sets = []
+  const vals = []
+  for (const k of allowed) {
+    if (k in fields) { sets.push(`${k} = ?`); vals.push(fields[k]) }
+  }
+  if (!sets.length) return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)
+  sets.push('updated_at = ?'); vals.push(nowIso()); vals.push(id)
+  db.prepare(`UPDATE heartbeats SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
+  return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)
+}
+
+function deleteHeartbeat(id) {
+  db.prepare(`DELETE FROM agent_jobs WHERE heartbeat_id = ?`).run(id)
+  db.prepare(`DELETE FROM heartbeats WHERE id = ?`).run(id)
+  return { ok: true }
+}
+
+function toggleHeartbeat(id) {
+  const hb = db.prepare('SELECT id, active, interval_minutes, run_at_time FROM heartbeats WHERE id = ?').get(id)
+  if (!hb) throw new Error('Heartbeat not found')
+  if (hb.active === 1) {
+    db.prepare(`UPDATE heartbeats SET active = 0, updated_at = ? WHERE id = ?`).run(nowIso(), id)
+  } else {
+    const nr = nextRunAt(hb.interval_minutes, hb.run_at_time ?? null)
+    db.prepare(`UPDATE heartbeats SET active = 1, next_run_at = ?, updated_at = ? WHERE id = ?`).run(nr, nowIso(), id)
+  }
+  return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)
+}
+
+function getDueHeartbeats() {
+  return db.prepare(`
+    SELECT h.* FROM heartbeats h
+    WHERE h.active = 1
+    AND h.next_run_at IS NOT NULL
+    AND h.next_run_at <= datetime('now')
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_jobs j
+      WHERE j.heartbeat_id = h.id AND j.status IN ('queued','running')
+    )
+  `).all()
+}
+
+function markHeartbeatRun(id, intervalMinutes, runAtTime) {
+  const now = nowIso()
+  const nr = nextRunAt(intervalMinutes, runAtTime ?? null)
+  db.prepare(`UPDATE heartbeats SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?`).run(now, nr, now, id)
+  return { ok: true }
+}
+
+function createHeartbeatJob(heartbeatId) {
+  const hb = db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(heartbeatId)
+  if (!hb) throw new Error('Heartbeat not found')
+  const id = crypto.randomUUID()
+  db.prepare(`
+    INSERT INTO agent_jobs (id, task_id, heartbeat_id, agent_path, prompt, user_message)
+    VALUES (?, NULL, ?, ?, ?, NULL)
+  `).run(id, heartbeatId, hb.agent_path, hb.prompt)
+  return { id, status: 'queued' }
+}
+
+function listHeartbeatJobs(heartbeatId, limit = 10) {
+  return db.prepare(`
+    SELECT id, status, result, created_at, started_at, completed_at
+    FROM agent_jobs WHERE heartbeat_id = ?
+    ORDER BY created_at DESC LIMIT ?
+  `).all(heartbeatId, limit)
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 const METHODS = {
@@ -785,6 +915,8 @@ const METHODS = {
   listAgentJobs, getAgentJob, createAgentJob,
   getQueuedJobs, startAgentJob, finishAgentJob, insertAgentNote,
   resetStuckJobs, getAutorunTasks, insertAutorunJob,
+  listHeartbeats, createHeartbeat, updateHeartbeat, deleteHeartbeat, toggleHeartbeat,
+  getDueHeartbeats, markHeartbeatRun, createHeartbeatJob, listHeartbeatJobs,
 }
 
 parentPort.on('message', ({ id, method, args }) => {

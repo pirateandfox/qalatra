@@ -111,6 +111,20 @@ function initSchema(db) {
       UNIQUE(habit_id, date)
     );
 
+    CREATE TABLE IF NOT EXISTS heartbeats (
+      id               TEXT PRIMARY KEY,
+      title            TEXT NOT NULL,
+      description      TEXT,
+      agent_path       TEXT NOT NULL,
+      prompt           TEXT NOT NULL,
+      interval_minutes INTEGER NOT NULL DEFAULT 60,
+      active           INTEGER NOT NULL DEFAULT 1,
+      last_run_at      TEXT,
+      next_run_at      TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS attachments (
       id           TEXT PRIMARY KEY,
       task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -166,6 +180,18 @@ function initSchema(db) {
   const habitCols = db.prepare(`PRAGMA table_info(habits)`).all().map(r => r.name);
   if (!habitCols.includes('recurrence_days')) {
     db.exec(`ALTER TABLE habits ADD COLUMN recurrence_days TEXT`);
+  }
+
+  // Migrations for heartbeats table
+  const heartbeatCols = db.prepare(`PRAGMA table_info(heartbeats)`).all().map(r => r.name);
+  if (!heartbeatCols.includes('run_at_time')) {
+    db.exec(`ALTER TABLE heartbeats ADD COLUMN run_at_time TEXT`);
+  }
+
+  // Migrations for agent_jobs table
+  const agentJobCols = db.prepare(`PRAGMA table_info(agent_jobs)`).all().map(r => r.name);
+  if (!agentJobCols.includes('heartbeat_id')) {
+    db.exec(`ALTER TABLE agent_jobs ADD COLUMN heartbeat_id TEXT REFERENCES heartbeats(id)`);
   }
 
   // Seed default contexts on first run

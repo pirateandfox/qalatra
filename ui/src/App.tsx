@@ -17,6 +17,7 @@ import Settings from './components/Settings'
 import MeetingView from './components/MeetingView'
 import CreateTask from './components/CreateTask'
 import HabitsView from './components/HabitsView'
+import HeartbeatsView from './components/HeartbeatsView'
 import EmailPreview from './components/EmailPreview'
 import MdView from './mdpdf/MdView'
 import './index.css'
@@ -162,7 +163,9 @@ function AppInner() {
 
         <div className={`layout ${selectedId ? 'panel-open' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
-            {nav === 'habits' ? (
+            {nav === 'heartbeats' ? (
+              <HeartbeatsView />
+            ) : nav === 'habits' ? (
               <HabitsView onMutate={() => load(date, true)} />
             ) : nav === 'backlog' ? (
               <BacklogView

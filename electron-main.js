@@ -1,11 +1,13 @@
-import { app, BrowserWindow, shell, nativeImage, dialog, utilityProcess, Menu, ipcMain } from 'electron'
+import { app, BrowserWindow, shell, nativeImage, dialog, Menu, ipcMain } from 'electron'
 import { createServer } from 'net'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import { execFileSync, spawn } from 'child_process'
 import pty from 'node-pty'
 import { initDbWorker, initSettings, setupIpcHandlers, startBackgroundWorkers } from './ipc-handlers.js'
+import { installMcpService } from './scripts/install-services.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 app.name = 'Qalatra'
@@ -116,34 +118,49 @@ function pipeToLog(proc, label) {
   proc.stderr.on('data', d => console.error(`[${label}]`, d.toString().trim()))
 }
 
-async function startMcpServer(dbDir) {
-  const env = {
-    ...process.env,
-    TASKOS_DB_DIR: dbDir,
-    TASKOS_SETTINGS_FILE: path.join(dbDir, 'settings.json'),
-  }
-  let mcpPort = 3457
+function readMcpPort(dbDir) {
   try {
     const s = JSON.parse(fs.readFileSync(path.join(dbDir, 'settings.json'), 'utf8'))
-    if (s.mcpPort) mcpPort = parseInt(s.mcpPort, 10)
+    if (s.mcpPort) return parseInt(s.mcpPort, 10)
   } catch {}
+  return 3457
+}
 
-  const mcpTaken = await isPortTaken(mcpPort)
-  if (mcpTaken) {
-    console.log(`mcp already running on :${mcpPort}`)
-    return
+async function clearPort(port) {
+  const taken = await isPortTaken(port)
+  if (!taken) return
+  console.log(`[mcp] port ${port} in use — killing stale process`)
+  try {
+    const pids = execFileSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8' }).trim()
+    if (pids) execFileSync('kill', ['-9', ...pids.split('\n').filter(Boolean)])
+  } catch {}
+  await new Promise(r => setTimeout(r, 500))
+}
+
+async function startMcpServer(dbDir) {
+  const mcpPort = readMcpPort(dbDir)
+  const serverPath = getEntryPath('mcp/http-server-entry.cjs')
+  const env = { ...process.env, TASKOS_DB_DIR: dbDir, TASKOS_SETTINGS_FILE: path.join(dbDir, 'settings.json') }
+
+  if (isDev) {
+    // Dev: plain child_process with system Node — no utilityProcess ABI mismatch.
+    // MCP only runs while electron-dev is active; no persistent service on dev machine.
+    await clearPort(mcpPort)
+    console.log(`[mcp] starting dev server on :${mcpPort}`)
+    mcpProcess = spawn('node', [serverPath], { stdio: 'pipe', env })
+    pipeToLog(mcpProcess, 'mcp')
+    mcpProcess.on('exit', (code, signal) => {
+      if (signal !== 'SIGTERM' && code !== 0) console.error(`[mcp] exited: code=${code} signal=${signal}`)
+      mcpProcess = null
+    })
+  } else {
+    // Prod: install as launchd service — starts on login, Electron just connects.
+    installMcpService({ serverPath, dbDir })
   }
-  console.log(`starting mcp on :${mcpPort}`)
-  mcpProcess = utilityProcess.fork(getEntryPath('mcp/http-server-entry.cjs'), [], { stdio: 'pipe', env })
-  pipeToLog(mcpProcess, 'mcp')
-  mcpProcess.on('exit', (code, signal) => {
-    if (signal !== 'SIGTERM' && code !== 0) console.error(`mcp exited: code=${code} signal=${signal}`)
-    mcpProcess = null
-  })
 }
 
 function restartMcpServer(dbDir, newPort) {
-  if (mcpProcess) { mcpProcess.kill(); mcpProcess = null }
+  if (isDev && mcpProcess) { mcpProcess.kill(); mcpProcess = null }
   startMcpServer(dbDir).catch(err => console.error('[mcp] restart failed:', err.message))
 }
 
@@ -443,7 +460,7 @@ app.whenReady().then(async () => {
   setupIpcHandlers((newPort) => restartMcpServer(dbDir, newPort))
   startBackgroundWorkers()
 
-  // MCP server (Claude integration) — always start via utilityProcess (dev and prod)
+  // MCP server: dev = child_process (system Node), prod = launchd service
   await startMcpServer(dbDir)
 
   setupMenu()
@@ -464,5 +481,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   try { ptyProcess?.kill() } catch {}
-  mcpProcess?.kill()
+  if (isDev) mcpProcess?.kill()  // prod: launchd owns the MCP process
 })
