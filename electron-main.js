@@ -4,10 +4,65 @@ import { fileURLToPath } from 'url'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { execFileSync, spawn } from 'child_process'
+import { execSync, execFileSync, spawn } from 'child_process'
 import pty from 'node-pty'
 import { initDbWorker, initSettings, setupIpcHandlers, startBackgroundWorkers } from './ipc-handlers.js'
-import { installMcpService } from './scripts/install-services.mjs'
+
+// ── launchd service installer (macOS, prod only) ──────────────────────────────
+
+const MCP_LABEL = 'com.qalatra.mcp'
+const MCP_PLIST = path.join(os.homedir(), 'Library', 'LaunchAgents', `${MCP_LABEL}.plist`)
+const MCP_LOG_DIR = path.join(os.homedir(), 'Library', 'Logs', 'Qalatra')
+
+function resolveNodePath() {
+  try {
+    return execSync('node -e "process.stdout.write(process.execPath)"', { encoding: 'utf8' }).trim()
+  } catch {
+    for (const p of ['/usr/local/bin/node', '/opt/homebrew/bin/node', '/usr/bin/node']) {
+      if (fs.existsSync(p)) return p
+    }
+    throw new Error('Cannot find node binary')
+  }
+}
+
+function installMcpService({ serverPath, dbDir }) {
+  if (process.platform !== 'darwin') return
+  fs.mkdirSync(MCP_LOG_DIR, { recursive: true })
+  fs.mkdirSync(path.dirname(MCP_PLIST), { recursive: true })
+
+  const nodePath = resolveNodePath()
+  const settingsFile = path.join(dbDir, 'settings.json')
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${MCP_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array><string>${nodePath}</string><string>${serverPath}</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TASKOS_DB_DIR</key><string>${dbDir}</string>
+    <key>TASKOS_SETTINGS_FILE</key><string>${settingsFile}</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>Crashed</key><true/></dict>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>${MCP_LOG_DIR}/mcp.log</string>
+  <key>StandardErrorPath</key><string>${MCP_LOG_DIR}/mcp-error.log</string>
+</dict>
+</plist>`
+
+  const existing = fs.existsSync(MCP_PLIST) ? fs.readFileSync(MCP_PLIST, 'utf8') : ''
+  if (existing === plist) { console.log('[services] MCP plist unchanged'); return }
+
+  const uid = process.getuid ? process.getuid() : execSync('id -u', { encoding: 'utf8' }).trim()
+  try { execFileSync('launchctl', ['bootout', `gui/${uid}/${MCP_LABEL}`]) } catch {}
+  fs.writeFileSync(MCP_PLIST, plist, 'utf8')
+  try {
+    execFileSync('launchctl', ['bootstrap', `gui/${uid}`, MCP_PLIST])
+    console.log('[services] MCP service loaded')
+  } catch (e) { console.error('[services] failed to load MCP service:', e.message) }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 app.name = 'Qalatra'
