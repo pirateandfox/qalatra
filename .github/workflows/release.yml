@@ -129,7 +129,13 @@ jobs:
           fi
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
-          gh release edit "${{ github.ref_name }}" \
-            --title "$VERSION" \
-            --notes "$NOTES" \
-            --draft=false
+          if gh release view "${{ github.ref_name }}" &>/dev/null; then
+            gh release edit "${{ github.ref_name }}" \
+              --title "$VERSION" \
+              --notes "$NOTES" \
+              --draft=false
+          else
+            gh release create "${{ github.ref_name }}" \
+              --title "$VERSION" \
+              --notes "$NOTES"
+          fi
