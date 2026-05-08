@@ -14,23 +14,14 @@ const MCP_LABEL = 'com.qalatra.mcp'
 const MCP_PLIST = path.join(os.homedir(), 'Library', 'LaunchAgents', `${MCP_LABEL}.plist`)
 const MCP_LOG_DIR = path.join(os.homedir(), 'Library', 'Logs', 'Qalatra')
 
-function resolveNodePath() {
-  try {
-    return execSync('node -e "process.stdout.write(process.execPath)"', { encoding: 'utf8' }).trim()
-  } catch {
-    for (const p of ['/usr/local/bin/node', '/opt/homebrew/bin/node', '/usr/bin/node']) {
-      if (fs.existsSync(p)) return p
-    }
-    throw new Error('Cannot find node binary')
-  }
-}
-
 function installMcpService({ serverPath, dbDir }) {
   if (process.platform !== 'darwin') return
   fs.mkdirSync(MCP_LOG_DIR, { recursive: true })
   fs.mkdirSync(path.dirname(MCP_PLIST), { recursive: true })
 
-  const nodePath = resolveNodePath()
+  // Use the Electron binary itself as the Node runtime so the ABI always matches
+  // the bundled better-sqlite3 — system Node version is irrelevant.
+  const electronBinary = process.execPath
   const settingsFile = path.join(dbDir, 'settings.json')
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,9 +29,10 @@ function installMcpService({ serverPath, dbDir }) {
 <dict>
   <key>Label</key><string>${MCP_LABEL}</string>
   <key>ProgramArguments</key>
-  <array><string>${nodePath}</string><string>${serverPath}</string></array>
+  <array><string>${electronBinary}</string><string>${serverPath}</string></array>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>ELECTRON_RUN_AS_NODE</key><string>1</string>
     <key>TASKOS_DB_DIR</key><string>${dbDir}</string>
     <key>TASKOS_SETTINGS_FILE</key><string>${settingsFile}</string>
   </dict>

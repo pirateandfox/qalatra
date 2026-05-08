@@ -1,5 +1,13 @@
 # Qalatra — Evolution Notes
 
+## 1.4.1 — Fix MCP ABI mismatch in production (2026-05-08)
+
+The launchd MCP service was using system Node to run the MCP server, but `better-sqlite3` inside the Electron bundle is compiled against Electron's Node ABI — not system Node. These diverge every time Electron or system Node is updated independently, causing all MCP calls to fail with "was compiled against a different Node.js version".
+
+Fix: the launchd plist now uses the Electron binary itself (`process.execPath`) with `ELECTRON_RUN_AS_NODE=1` as the runtime. The Electron binary's Node.js ABI permanently matches the bundled native module regardless of what system Node is installed. The app's entitlements already included `allow-unsigned-executable-memory` and `disable-library-validation`, which are required for this to work with hardened runtime.
+
+Since the plist content changed (different binary path + new env var), the service is automatically reinstalled on next app launch.
+
 ## 1.4.0 — Keyboard shortcuts + Play button for agent tasks (2026-05-08)
 
 ### Keyboard shortcuts
