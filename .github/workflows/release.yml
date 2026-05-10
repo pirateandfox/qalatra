@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # Single macOS job — electron-builder builds both arm64 and x64 on the
   # arm64 runner. It calls @electron/rebuild internally for each arch, so
