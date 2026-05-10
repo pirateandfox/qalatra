@@ -13,7 +13,7 @@ import ProjectDashboardView from './components/ProjectDashboardView'
 import DailyNote from './components/DailyNote'
 import DetailPanel from './components/DetailPanel'
 import Terminal from './components/Terminal'
-import Settings from './components/Settings'
+import SettingsView from './components/SettingsView'
 import MeetingView from './components/MeetingView'
 import CreateTask from './components/CreateTask'
 import HabitsView from './components/HabitsView'
@@ -36,6 +36,8 @@ function AppInner() {
   const [date, setDate]             = useState(todayStr())
   const [nav, setNav]               = useState<NavSection>('priority')
   const [backlogRefresh, setBacklogRefresh] = useState(0)
+  const [codeRefresh, setCodeRefresh]       = useState(0)
+  const [readingRefresh, setReadingRefresh] = useState(0)
   const [taskData, setTaskData]     = useState<TaskData | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [terminalMode, setTerminalMode] = useState<'closed' | 'docked' | 'fullscreen'>('closed')
@@ -44,8 +46,6 @@ function AppInner() {
   const [mdPath, setMdPath]             = useState<string | null>(null)
   const [dailyNoteOpen, setDailyNoteOpen] = useState(false)
   const [dailyNoteFullscreen, setDailyNoteFullscreen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsFullscreen, setSettingsFullscreen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [meetingId, setMeetingId]   = useState<string | null>(null)
@@ -156,7 +156,7 @@ function AppInner() {
           setDailyNoteOpen(o => !o)
           break
         case ',':
-          setSettingsOpen(o => !o)
+          setNav(n => n === 'settings' ? 'priority' : 'settings')
           break
         case '?':
           setShortcutsOpen(o => !o)
@@ -214,8 +214,6 @@ function AppInner() {
         onNewTask={() => setCreateOpen(true)}
         dailyNoteOpen={dailyNoteOpen}
         onDailyNoteToggle={() => setDailyNoteOpen(o => !o)}
-        settingsOpen={settingsOpen}
-        onSettingsToggle={() => setSettingsOpen(o => !o)}
         themeMode={mode}
         onThemeModeChange={setMode}
       />
@@ -230,8 +228,10 @@ function AppInner() {
         />
 
         <div className={`layout ${selectedId ? 'panel-open' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
-            {nav === 'heartbeats' ? (
+          <div style={{ flex: 1, overflowY: nav === 'settings' ? 'hidden' : 'auto', minWidth: 0 }}>
+            {nav === 'settings' ? (
+              <SettingsView />
+            ) : nav === 'heartbeats' ? (
               <HeartbeatsView />
             ) : nav === 'habits' ? (
               <HabitsView onMutate={() => load(date, true)} />
@@ -246,13 +246,15 @@ function AppInner() {
               <CodeAgentsView
                 selectedId={selectedId}
                 onSelect={id => setSelectedId(id)}
-                onMutate={() => load(date, true)}
+                onMutate={() => { setCodeRefresh(n => n + 1); load(date, true) }}
+                refreshToken={codeRefresh}
               />
             ) : nav === 'reading' ? (
               <ReadingView
                 selectedId={selectedId}
                 onSelect={id => setSelectedId(id)}
-                onMutate={() => load(date, true)}
+                onMutate={() => { setReadingRefresh(n => n + 1); load(date, true) }}
+                refreshToken={readingRefresh}
               />
             ) : nav === 'project' ? (
               <ProjectDashboardView
@@ -287,8 +289,19 @@ function AppInner() {
           <DetailPanel
             taskId={selectedId}
             onClose={() => setSelectedId(null)}
-            onMutate={() => nav === 'backlog' ? setBacklogRefresh(n => n + 1) : load(date, true)}
-            onDelete={() => { setSelectedId(null); nav === 'backlog' ? setBacklogRefresh(n => n + 1) : load(date, true) }}
+            onMutate={() => {
+              if (nav === 'backlog') setBacklogRefresh(n => n + 1)
+              else if (nav === 'code') setCodeRefresh(n => n + 1)
+              else if (nav === 'reading') setReadingRefresh(n => n + 1)
+              else load(date, true)
+            }}
+            onDelete={() => {
+              setSelectedId(null)
+              if (nav === 'backlog') setBacklogRefresh(n => n + 1)
+              else if (nav === 'code') setCodeRefresh(n => n + 1)
+              else if (nav === 'reading') setReadingRefresh(n => n + 1)
+              else load(date, true)
+            }}
             terminalOpen={terminalMode !== 'closed'}
             onPreview={path => path.endsWith('.md') ? setMdPath(path) : setPreviewPath(path)}
           />
@@ -308,12 +321,6 @@ function AppInner() {
         defaultDate={date}
         onClose={() => setCreateOpen(false)}
         onCreated={id => { load(date); setSelectedId(id) }}
-      />
-      <Settings
-        open={settingsOpen}
-        fullscreen={settingsFullscreen}
-        onClose={() => { setSettingsOpen(false); setSettingsFullscreen(false) }}
-        onToggleFullscreen={() => setSettingsFullscreen(f => !f)}
       />
       <DailyNote
         open={dailyNoteOpen}

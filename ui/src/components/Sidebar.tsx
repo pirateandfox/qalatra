@@ -1,7 +1,7 @@
 import type { ThemeMode } from '../lib/theme'
 import './Sidebar.css'
 
-export type NavSection = 'priority' | 'code' | 'reading' | 'project' | 'backlog' | 'habits' | 'heartbeats'
+export type NavSection = 'priority' | 'code' | 'reading' | 'project' | 'backlog' | 'habits' | 'heartbeats' | 'settings'
 
 const THEME_ICONS: Record<ThemeMode, string> = { system: '◑', light: '☀', dark: '☾' }
 const THEME_CYCLE: ThemeMode[] = ['system', 'light', 'dark']
@@ -23,8 +23,6 @@ interface Props {
   onNewTask: () => void
   dailyNoteOpen: boolean
   onDailyNoteToggle: () => void
-  settingsOpen: boolean
-  onSettingsToggle: () => void
   themeMode: ThemeMode
   onThemeModeChange: (m: ThemeMode) => void
 }
@@ -32,7 +30,7 @@ interface Props {
 export default function Sidebar({
   nav, onNavChange, activeAgentCount,
   onNewTask, dailyNoteOpen, onDailyNoteToggle,
-  settingsOpen, onSettingsToggle, themeMode, onThemeModeChange,
+  themeMode, onThemeModeChange,
 }: Props) {
   function cycleTheme() {
     const idx = THEME_CYCLE.indexOf(themeMode)
@@ -64,7 +62,7 @@ export default function Sidebar({
         <button className={`sidebar-action-btn${dailyNoteOpen ? ' active' : ''}`} onClick={onDailyNoteToggle} title="Daily Note">
           <span>✎</span><span>Daily Note</span>
         </button>
-        <button className={`sidebar-action-btn${settingsOpen ? ' active' : ''}`} onClick={onSettingsToggle} title="Settings">
+        <button className={`sidebar-action-btn${nav === 'settings' ? ' active' : ''}`} onClick={() => onNavChange('settings')} title="Settings">
           <span>⚙</span><span>Settings</span>
         </button>
         <button className="sidebar-action-btn" onClick={cycleTheme} title={`Theme: ${themeMode}`}>

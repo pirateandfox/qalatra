@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { api, fetchAgents, fetchProjectSummaries, type Agent, type ProjectSummary } from '../api'
 import { PRIORITY_COLORS } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
+import ComboBox, { type ComboOption } from './ComboBox'
 import './CreateTask.css'
 
 interface Props {
@@ -24,9 +25,6 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
   const [saving, setSaving] = useState(false)
   const titleRef = useRef<HTMLInputElement>(null)
 
-  // Only fetch agents/projects when the modal actually opens — not on mount.
-  // Fetching on mount triggers scanAgents() which walks the home directory
-  // on startup, causing macOS TCC to prompt for every protected folder.
   useEffect(() => {
     if (open) {
       fetchAgents().then(setAgents)
@@ -54,10 +52,9 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
 
   function handleProjectChange(newProject: string) {
     setProject(newProject)
-    // Clear agent if it no longer matches the new project filter
     if (agentPath) {
       const agent = agents.find(a => a.path === agentPath)
-      if (agent && agent.project && newProject.trim() && agent.project !== newProject.trim()) {
+      if (agent && agent.project && newProject && agent.project !== newProject) {
         setAgentPath('')
       }
     }
@@ -73,7 +70,7 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
         context,
         my_priority: priority ?? undefined,
         due_date: dueDate || undefined,
-        project: project.trim() || undefined,
+        project: project || undefined,
         agent_path: agentPath || undefined,
       } as any)
       onCreated(data.id)
@@ -87,6 +84,26 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
   }
 
   if (!open) return null
+
+  const contextOptions: ComboOption[] = contexts.map(c => ({
+    value: c.slug,
+    label: c.label,
+    color: getColor(c.slug),
+  }))
+
+  const projectOptions: ComboOption[] = projects
+    .filter(p => !p.context || p.context === context)
+    .map(p => ({ value: p.name, label: p.name }))
+
+  const filteredAgents = agents.filter(a =>
+    (!a.context || a.context === context) &&
+    (!a.project || !project || a.project === project)
+  )
+  const agentOptions: ComboOption[] = filteredAgents.map(a => ({
+    value: a.path,
+    label: a.name,
+    sublabel: (!a.context && a.folder) ? a.folder : undefined,
+  }))
 
   return (
     <div className="create-task-overlay" onClick={onClose}>
@@ -108,16 +125,11 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
 
           <div className="create-task-field">
             <span className="create-task-label">Context</span>
-            <select
-              className="ct-select"
+            <ComboBox
+              options={contextOptions}
               value={context}
-              onChange={e => handleContextChange(e.target.value)}
-              style={{ color: getColor(context) }}
-            >
-              {contexts.map(c => (
-                <option key={c.slug} value={c.slug}>{c.label}</option>
-              ))}
-            </select>
+              onChange={handleContextChange}
+            />
           </div>
 
           <div className="create-task-field">
@@ -135,32 +147,6 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
             </div>
           </div>
 
-          {agents.filter(a =>
-            (!a.context || a.context === context) &&
-            (!a.project || !project.trim() || a.project === project.trim())
-          ).length > 0 && (
-            <div className="create-task-field">
-              <span className="create-task-label">Agent</span>
-              <select
-                className="ct-select"
-                value={agentPath}
-                onChange={e => setAgentPath(e.target.value)}
-              >
-                <option value="">None</option>
-                {agents
-                  .filter(a =>
-                    (!a.context || a.context === context) &&
-                    (!a.project || !project.trim() || a.project === project.trim())
-                  )
-                  .map(a => (
-                    <option key={a.path} value={a.path} title={a.description ?? undefined}>
-                      {(!a.context && a.folder) ? `${a.folder} / ${a.name}` : a.name}
-                    </option>
-                  ))}
-              </select>
-            </div>
-          )}
-
           <div className="create-task-row">
             <div className="create-task-field">
               <span className="create-task-label">Due date</span>
@@ -173,24 +159,29 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
             </div>
             <div className="create-task-field">
               <span className="create-task-label">Project</span>
-              <input
-                type="text"
-                list="ct-project-list"
-                className="create-task-project"
+              <ComboBox
+                options={projectOptions}
                 value={project}
-                onChange={e => handleProjectChange(e.target.value)}
-                placeholder="Optional"
-                autoComplete="off"
+                onChange={handleProjectChange}
+                placeholder="None"
+                nullable
+                emptyText="No projects in this context"
               />
-              <datalist id="ct-project-list">
-                {projects
-                  .filter(p => !p.context || p.context === context)
-                  .map(p => (
-                    <option key={p.name} value={p.name} />
-                  ))}
-              </datalist>
             </div>
           </div>
+
+          {agentOptions.length > 0 && (
+            <div className="create-task-field">
+              <span className="create-task-label">Agent</span>
+              <ComboBox
+                options={agentOptions}
+                value={agentPath}
+                onChange={setAgentPath}
+                placeholder="None"
+                nullable
+              />
+            </div>
+          )}
 
           <div className="create-task-actions">
             <button type="button" className="ct-cancel" onClick={onClose}>Cancel</button>

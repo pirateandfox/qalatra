@@ -17,6 +17,12 @@ interface Props {
 function getConfigPath(filePath: string): string {
   const dotIdx = filePath.lastIndexOf('.')
   const base = dotIdx > -1 ? filePath.slice(0, dotIdx) : filePath
+  return base + '.md-style.json'
+}
+
+function getLegacyConfigPath(filePath: string): string {
+  const dotIdx = filePath.lastIndexOf('.')
+  const base = dotIdx > -1 ? filePath.slice(0, dotIdx) : filePath
   return base + '.topdf.json'
 }
 
@@ -37,13 +43,25 @@ async function fileExists(path: string): Promise<boolean> {
   return (window as any).electronAPI.invoke('file:exists', path)
 }
 
+async function findInheritedStyle(dir: string): Promise<{ foundPath: string; content: string } | null> {
+  return (window as any).electronAPI.invoke('style:find', dir)
+}
+
+async function writeUserStyle(contents: string): Promise<void> {
+  await (window as any).electronAPI.invoke('style:write-user', contents)
+}
+
+async function writeFolderStyle(dir: string, contents: string): Promise<void> {
+  await (window as any).electronAPI.invoke('style:write-folder', dir, contents)
+}
+
 export default function MdView({ filePath, onClose, terminalOpen, onTerminalToggle, onChatWithDoc }: Props) {
   const [markdown, setMarkdown] = useState('')
   const [style, setStyle] = useState<StyleConfig>(DEFAULT_STYLE)
-  const [sidebarWidth, setSidebarWidth] = useState(260)
+  const [sidebarWidth, setSidebarWidth] = useState(300)
   const [editorWidth, setEditorWidth] = useState(420)
-  const [showEditor, setShowEditor] = useState(true)
-  const [showSidebar, setShowSidebar] = useState(true)
+  const [showEditor, setShowEditor] = useState(false)
+  const [showSidebar, setShowSidebar] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
 
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -80,14 +98,29 @@ export default function MdView({ filePath, onClose, terminalOpen, onTerminalTogg
       setMarkdown(content)
 
       const configPath = getConfigPath(path)
-      const exists = await fileExists(configPath)
-      if (exists) {
-        const configRaw = await readFile(configPath)
-        const config: DocumentConfig = JSON.parse(configRaw)
-        setStyle(config.style ?? DEFAULT_STYLE)
-      } else {
-        setStyle(DEFAULT_STYLE)
+      const legacyPath = getLegacyConfigPath(path)
+      let loadedConfig = false
+      for (const cp of [configPath, legacyPath]) {
+        if (await fileExists(cp)) {
+          const configRaw = await readFile(cp)
+          const config: DocumentConfig = JSON.parse(configRaw)
+          setStyle(config.style ?? DEFAULT_STYLE)
+          loadedConfig = true
+          break
+        }
       }
+      if (!loadedConfig) {
+        const dir = path.substring(0, path.lastIndexOf('/'))
+        const inherited = await findInheritedStyle(dir)
+        if (inherited) {
+          try {
+            const parsed = JSON.parse(inherited.content)
+            setStyle(parsed.style ?? parsed ?? DEFAULT_STYLE)
+            loadedConfig = true
+          } catch { /* malformed, skip */ }
+        }
+      }
+      if (!loadedConfig) setStyle(DEFAULT_STYLE)
       setIsDirty(false)
       loadedRef.current = true
     } catch (e) {
@@ -164,7 +197,7 @@ export default function MdView({ filePath, onClose, terminalOpen, onTerminalTogg
     if (!dragging.current) return
     const delta = e.clientX - dragging.current.startX
     if (dragging.current.which === 'sidebar') {
-      setSidebarWidth(Math.max(180, Math.min(400, dragging.current.startW + delta)))
+      setSidebarWidth(Math.max(180, Math.min(500, dragging.current.startW + delta)))
     } else {
       setEditorWidth(Math.max(200, Math.min(800, dragging.current.startW + delta)))
     }
@@ -256,6 +289,35 @@ export default function MdView({ filePath, onClose, terminalOpen, onTerminalTogg
           Editor
         </button>
 
+        <button
+          className="mdview-toolbar-btn"
+          title="Save current style as default for this folder (.md-style.json)"
+          onClick={async () => {
+            const dir = filePath.substring(0, filePath.lastIndexOf('/'))
+            const config = { style }
+            await writeFolderStyle(dir, JSON.stringify(config, null, 2))
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          Folder Default
+        </button>
+
+        <button
+          className="mdview-toolbar-btn"
+          title="Save current style as your personal default (~/.md-style.json)"
+          onClick={async () => {
+            const config = { style }
+            await writeUserStyle(JSON.stringify(config, null, 2))
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+          </svg>
+          User Default
+        </button>
+
         <div className="mdview-toolbar-sep" />
 
         <button className="mdview-toolbar-btn mdview-toolbar-btn-primary" onClick={exportPDF} title="Open print dialog — use PDF › Save as PDF">
@@ -304,7 +366,7 @@ export default function MdView({ filePath, onClose, terminalOpen, onTerminalTogg
       <div className="mdview-panels" style={{ paddingBottom: terminalOpen ? 300 : 0 }}>
         {showSidebar && (
           <>
-            <div style={{ width: sidebarWidth, flexShrink: 0, overflow: 'hidden' }}>
+            <div style={{ width: sidebarWidth, flexShrink: 0, overflow: 'auto' }}>
               <StyleSidebar style={style} onChange={setStyle} />
             </div>
             <div className="mdview-resize-handle" onMouseDown={startResizeSidebar} />

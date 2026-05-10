@@ -232,6 +232,7 @@ function migrate() {
   tryAlter('ALTER TABLE tasks ADD COLUMN assigned_agent TEXT')
   tryAlter('ALTER TABLE projects ADD COLUMN is_repo INTEGER NOT NULL DEFAULT 0')
   tryAlter('ALTER TABLE projects ADD COLUMN context TEXT')
+  tryAlter('ALTER TABLE attachments ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0')
   // Backfill projects.context from the most common task context per project
   db.exec(`
     UPDATE projects SET context = (
@@ -372,7 +373,7 @@ function updateTask(id, body) {
   const MUTABLE = ['title','description','status','my_priority','energy_required','context','project','tags','source_url','due_date','start_date','surface_after','task_type','event_time','end_time','recurrence','parent_id','agent_path','agent_resume','agent_autorun','agent_autorun_time','outcome','notes','inbox']
   if (body.links !== undefined) db.prepare("UPDATE tasks SET links = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(body.links), id)
   const sets = []; const params = {}
-  for (const f of MUTABLE) { if (body[f] !== undefined) { sets.push(`${f} = @${f}`); params[f] = body[f] === '' ? null : body[f] } }
+  for (const f of MUTABLE) { if (body[f] !== undefined) { sets.push(`${f} = @${f}`); const v = body[f] === '' ? null : body[f]; params[f] = typeof v === 'boolean' ? (v ? 1 : 0) : v } }
   if (sets.length) { params.id = id; db.prepare(`UPDATE tasks SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = @id`).run(params) }
   if (body.project) db.prepare(`INSERT OR IGNORE INTO projects (name) VALUES (?)`).run(body.project)
   return { ok: true }
@@ -698,15 +699,15 @@ function updateHabit(body) {
 
 function listAttachments(taskId) { return db.prepare('SELECT * FROM attachments WHERE task_id = ? ORDER BY created_at ASC').all(taskId) }
 function insertAttachment(data) {
-  const { id, taskId, filename, mimeType, sizeBytes, bucket, key, url, localPath } = data
-  db.prepare(`INSERT INTO attachments (id, task_id, filename, mimetype, size_bytes, bucket, key, url, local_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, taskId, filename, mimeType, sizeBytes, bucket, key, url, localPath)
+  const { id, taskId, filename, mimeType, sizeBytes, bucket, key, url, localPath, encrypted } = data
+  db.prepare(`INSERT INTO attachments (id, task_id, filename, mimetype, size_bytes, bucket, key, url, local_path, encrypted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, taskId, filename, mimeType, sizeBytes, bucket, key, url, localPath, encrypted ?? 0)
   return db.prepare('SELECT * FROM attachments WHERE id = ?').get(id)
 }
 function getAttachment(id) { return db.prepare('SELECT * FROM attachments WHERE id = ?').get(id) ?? null }
 function deleteAttachment(id) { db.prepare('DELETE FROM attachments WHERE id = ?').run(id); return { ok: true } }
 function getPendingAttachments() { return db.prepare(`SELECT * FROM attachments WHERE bucket IS NULL AND local_path IS NOT NULL`).all() }
-function updateAttachmentStorage(id, bucket, key, url) {
-  db.prepare(`UPDATE attachments SET bucket = ?, key = ?, url = ? WHERE id = ?`).run(bucket, key, url, id)
+function updateAttachmentStorage(id, bucket, key, url, encrypted = 0) {
+  db.prepare(`UPDATE attachments SET bucket = ?, key = ?, url = ?, encrypted = ? WHERE id = ?`).run(bucket, key, url, encrypted, id)
   return { ok: true }
 }
 

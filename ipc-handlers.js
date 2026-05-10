@@ -1,6 +1,6 @@
 // ipc-handlers.js — IPC handler registration. All SQLite runs in db-worker.js (Worker thread).
 
-import { ipcMain, shell, BrowserWindow } from 'electron'
+import { ipcMain, shell, BrowserWindow, safeStorage } from 'electron'
 import { Worker } from 'worker_threads'
 import fs from 'fs'
 import os from 'os'
@@ -8,7 +8,10 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { spawn } from 'child_process'
 import { v4 as uuidv4 } from 'uuid'
-import { getS3Client, uploadToS3, deleteFromS3, getPresignedUrl } from './s3.js'
+import { randomBytes } from 'crypto'
+import { getS3Client, getBackupS3Client, uploadToS3, downloadFromS3, deleteFromS3, getPresignedUrl, listS3Objects } from './s3.js'
+import { encrypt, decrypt } from './crypto.js'
+import Database from 'better-sqlite3'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CLAUDE_JSON_PATH = path.join(os.homedir(), '.claude.json')
@@ -71,6 +74,82 @@ function saveSettings(data) {
   fs.writeFileSync(_settingsFile, JSON.stringify(data, null, 2))
 }
 
+// ── Encryption key management ─────────────────────────────────────────────────
+
+function keystorePath() {
+  return path.join(path.dirname(_settingsFile), 'keystore')
+}
+
+function loadEncryptionKey() {
+  try {
+    const encrypted = fs.readFileSync(keystorePath())
+    const b64 = safeStorage.decryptString(encrypted)
+    return Buffer.from(b64, 'base64')
+  } catch { return null }
+}
+
+function saveEncryptionKey(keyBuffer) {
+  const encrypted = safeStorage.encryptString(keyBuffer.toString('base64'))
+  fs.writeFileSync(keystorePath(), encrypted)
+}
+
+function generateEncryptionKey() {
+  const key = randomBytes(32)
+  saveEncryptionKey(key)
+  return key
+}
+
+// ── DB backup ─────────────────────────────────────────────────────────────────
+
+let _lastBackupTime = null
+let _lastBackupStatus = null
+
+export async function runBackup() {
+  const key = loadEncryptionKey()
+  if (!key) return { ok: false, error: 'No encryption key — generate one in Settings first' }
+  const settings = loadSettings()
+  const client = getBackupS3Client(settings)
+  if (!client) return { ok: false, error: 'Backup bucket not configured' }
+  const dbPath = path.join(path.dirname(_settingsFile), 'tasks.db')
+  const tmpPath = path.join(os.tmpdir(), `qalatra-backup-${Date.now()}.db`)
+  let backupDb
+  try {
+    backupDb = new Database(dbPath, { readonly: true })
+    await backupDb.backup(tmpPath)
+    backupDb.close(); backupDb = null
+    const plain = fs.readFileSync(tmpPath)
+    const enc = encrypt(plain, key)
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const objKey = `db/tasks-${ts}.db.enc`
+    await uploadToS3(client, settings.backupBucket, objKey, enc, 'application/octet-stream')
+    await pruneOldBackups(client, settings.backupBucket)
+    _lastBackupTime = new Date().toISOString()
+    _lastBackupStatus = 'ok'
+    console.log(`[backup] uploaded ${objKey} (${enc.length} bytes)`)
+    return { ok: true, key: objKey, size: enc.length, timestamp: _lastBackupTime }
+  } catch (e) {
+    _lastBackupStatus = 'failed'
+    console.error('[backup] failed:', e.message)
+    return { ok: false, error: e.message }
+  } finally {
+    backupDb?.close()
+    try { fs.unlinkSync(tmpPath) } catch {}
+  }
+}
+
+async function pruneOldBackups(client, bucket) {
+  try {
+    const objects = await listS3Objects(client, bucket, 'db/')
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    for (const obj of objects) {
+      if (obj.LastModified && new Date(obj.LastModified) < cutoff) {
+        await deleteFromS3(client, bucket, obj.Key).catch(() => {})
+        console.log(`[backup] pruned old backup: ${obj.Key}`)
+      }
+    }
+  } catch {}
+}
+
 // ── Attachments (non-DB) ──────────────────────────────────────────────────────
 
 const MIME_EXTENSIONS = {
@@ -93,17 +172,20 @@ async function syncPendingAttachments() {
   const client = getS3Client(settings)
   const bucket = settings.s3Bucket
   if (!client || !bucket) return { synced: 0, failed: 0 }
+  const encKey = loadEncryptionKey()
   const pending = await dbCall('getPendingAttachments')
   let synced = 0, failed = 0
   for (const att of pending) {
     if (!fs.existsSync(att.local_path)) { failed++; continue }
     try {
-      const buffer = fs.readFileSync(att.local_path)
+      let buffer = fs.readFileSync(att.local_path)
       const ext = path.extname(att.filename)
       const key = `attachments/${att.task_id}/${att.id}${ext}`
+      let encrypted = 0
+      if (encKey) { buffer = encrypt(buffer, encKey); encrypted = 1 }
       await uploadToS3(client, bucket, key, buffer, att.mimetype)
-      const url = settings.s3PublicUrl ? `${settings.s3PublicUrl.replace(/\/$/, '')}/${key}` : null
-      await dbCall('updateAttachmentStorage', att.id, bucket, key, url)
+      const url = (!encrypted && settings.s3PublicUrl) ? `${settings.s3PublicUrl.replace(/\/$/, '')}/${key}` : null
+      await dbCall('updateAttachmentStorage', att.id, bucket, key, url, encrypted)
       synced++
     } catch { failed++ }
   }
@@ -408,7 +490,8 @@ export function setupIpcHandlers(onMcpPortChange) {
     const settings = loadSettings()
     const client = getS3Client(settings)
     return Promise.all(rows.map(async a => {
-      if (!a.url && a.bucket && a.key && client) {
+      // Encrypted attachments are served via attachments:download — don't generate presigned URLs for them
+      if (!a.url && a.bucket && a.key && client && !a.encrypted) {
         try { a = { ...a, url: await getPresignedUrl(client, a.bucket, a.key) } } catch {}
       }
       return a
@@ -419,22 +502,53 @@ export function setupIpcHandlers(onMcpPortChange) {
     const cacheDir = getAttachmentCacheDir(settings)
     const client = getS3Client(settings)
     const bucket = settings.s3Bucket || null
+    const encKey = loadEncryptionKey()
     const id = uuidv4()
     const safeExt = path.extname(filename) || extFromMime(mimeType)
     const key = `attachments/${taskId}/${id}${safeExt}`
     const localPath = path.join(cacheDir, `${id}${safeExt}`)
-    const buffer = Buffer.from(bufferArray)
-    fs.writeFileSync(localPath, buffer)
-    let url = null, uploadedBucket = null, uploadedKey = null, warning = null
+    const plainBuffer = Buffer.from(bufferArray)
+    fs.writeFileSync(localPath, plainBuffer)  // local cache is always unencrypted
+    let url = null, uploadedBucket = null, uploadedKey = null, warning = null, encrypted = 0
     if (client && bucket) {
       try {
-        await uploadToS3(client, bucket, key, buffer, mimeType)
+        let uploadBuffer = plainBuffer
+        if (encKey) { uploadBuffer = encrypt(plainBuffer, encKey); encrypted = 1 }
+        await uploadToS3(client, bucket, key, uploadBuffer, mimeType)
         uploadedBucket = bucket; uploadedKey = key
-        url = settings.s3PublicUrl ? `${settings.s3PublicUrl.replace(/\/$/, '')}/${key}` : null
+        url = (!encrypted && settings.s3PublicUrl) ? `${settings.s3PublicUrl.replace(/\/$/, '')}/${key}` : null
       } catch { warning = 's3_upload_failed' }
     }
-    await dbCall('insertAttachment', { id, taskId, filename, mimeType, sizeBytes: buffer.length, bucket: uploadedBucket, key: uploadedKey, url, localPath })
+    await dbCall('insertAttachment', { id, taskId, filename, mimeType, sizeBytes: plainBuffer.length, bucket: uploadedBucket, key: uploadedKey, url, localPath, encrypted })
     return { ok: true, warning, attachment: { id, filename, url, local_path: localPath } }
+  })
+  // Download and decrypt an encrypted attachment, saving to cache then opening
+  ipcMain.handle('attachments:download', async (_, id) => {
+    const att = await dbCall('getAttachment', id)
+    if (!att) return { ok: false, error: 'Not found' }
+    // If local cache exists, open directly
+    if (att.local_path && fs.existsSync(att.local_path)) {
+      await shell.openPath(att.local_path)
+      return { ok: true }
+    }
+    if (!att.bucket || !att.key) return { ok: false, error: 'No remote copy' }
+    const settings = loadSettings()
+    const client = getS3Client(settings)
+    if (!client) return { ok: false, error: 'S3 not configured' }
+    try {
+      let buffer = await downloadFromS3(client, att.bucket, att.key)
+      if (att.encrypted) {
+        const encKey = loadEncryptionKey()
+        if (!encKey) return { ok: false, error: 'No encryption key — import your key in Settings' }
+        buffer = decrypt(buffer, encKey)
+      }
+      const cacheDir = getAttachmentCacheDir(settings)
+      const localPath = path.join(cacheDir, `${att.id}${path.extname(att.filename)}`)
+      fs.writeFileSync(localPath, buffer)
+      await dbCall('updateTask', att.task_id, {})  // no-op, just refresh
+      await shell.openPath(localPath)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
   })
   ipcMain.handle('attachments:delete', async (_, id) => {
     const att = await dbCall('getAttachment', id)
@@ -473,6 +587,69 @@ export function setupIpcHandlers(onMcpPortChange) {
   // Settings
   ipcMain.handle('settings:get', () => loadSettings())
   ipcMain.handle('settings:save', (_, data) => { saveSettings(data); return { ok: true } })
+  ipcMain.handle('settings:export', () => {
+    const s = loadSettings()
+    return { ok: true, json: JSON.stringify(s, null, 2) }
+  })
+  ipcMain.handle('settings:import', (_, json) => {
+    try {
+      const parsed = JSON.parse(json)
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: false, error: 'Invalid settings JSON' }
+      saveSettings(parsed)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  })
+
+  // Encryption key
+  ipcMain.handle('key:status', () => ({ present: !!loadEncryptionKey() }))
+  ipcMain.handle('key:generate', () => {
+    generateEncryptionKey()
+    return { ok: true }
+  })
+  ipcMain.handle('key:export', () => {
+    const key = loadEncryptionKey()
+    if (!key) return { ok: false, error: 'No key found' }
+    return { ok: true, key: key.toString('base64') }
+  })
+  ipcMain.handle('key:import', (_, base64) => {
+    try {
+      const buf = Buffer.from(base64.trim(), 'base64')
+      if (buf.length !== 32) return { ok: false, error: 'Invalid key — must be 32 bytes (256-bit)' }
+      saveEncryptionKey(buf)
+      return { ok: true }
+    } catch (e) { return { ok: false, error: e.message } }
+  })
+
+  // Backup
+  ipcMain.handle('backup:run', () => runBackup())
+  ipcMain.handle('backup:status', () => ({ lastTime: _lastBackupTime, lastStatus: _lastBackupStatus }))
+  ipcMain.handle('backup:list', async () => {
+    const settings = loadSettings()
+    const client = getBackupS3Client(settings)
+    if (!client) return { ok: false, error: 'Backup bucket not configured' }
+    try {
+      const objects = await listS3Objects(client, settings.backupBucket, 'db/')
+      const items = objects
+        .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
+        .slice(0, 20)
+        .map(o => ({ key: o.Key, size: o.Size, date: o.LastModified }))
+      return { ok: true, items }
+    } catch (e) { return { ok: false, error: e.message } }
+  })
+  ipcMain.handle('backup:restore', async (_, objKey) => {
+    const key = loadEncryptionKey()
+    if (!key) return { ok: false, error: 'No encryption key — import your key first' }
+    const settings = loadSettings()
+    const client = getBackupS3Client(settings)
+    if (!client) return { ok: false, error: 'Backup bucket not configured' }
+    try {
+      const enc = await downloadFromS3(client, settings.backupBucket, objKey)
+      const plain = decrypt(enc, key)
+      const restorePath = path.join(path.dirname(_settingsFile), 'tasks.db.restore')
+      fs.writeFileSync(restorePath, plain)
+      return { ok: true, message: 'Restore file written — restart Qalatra to apply.' }
+    } catch (e) { return { ok: false, error: e.message } }
+  })
 
   // MCP
   ipcMain.handle('mcp:status', () => {
@@ -528,6 +705,43 @@ export function setupIpcHandlers(onMcpPortChange) {
     if (!filePath.startsWith(allowed)) throw new Error('Forbidden')
     if (typeof contents !== 'string') throw new Error('contents must be string')
     fs.writeFileSync(filePath, contents, 'utf-8')
+    return { ok: true }
+  })
+
+  // md-style cascade: walk up from startDir looking for .md-style.json, then check ~/.md-style.json
+  ipcMain.handle('style:find', (_, startDir) => {
+    const home = os.homedir()
+    let dir = startDir
+    while (true) {
+      const candidate = path.join(dir, '.md-style.json')
+      if (fs.existsSync(candidate)) {
+        try { return { foundPath: candidate, content: fs.readFileSync(candidate, 'utf-8') } } catch { /* skip */ }
+      }
+      const parent = path.dirname(dir)
+      if (parent === dir || dir === home) break
+      dir = parent
+    }
+    // user-level default
+    const userDefault = path.join(home, '.md-style.json')
+    if (fs.existsSync(userDefault)) {
+      try { return { foundPath: userDefault, content: fs.readFileSync(userDefault, 'utf-8') } } catch { /* skip */ }
+    }
+    return null
+  })
+
+  // Write user-level default style (~/.md-style.json)
+  ipcMain.handle('style:write-user', (_, contents) => {
+    if (typeof contents !== 'string') throw new Error('contents must be string')
+    fs.writeFileSync(path.join(os.homedir(), '.md-style.json'), contents, 'utf-8')
+    return { ok: true }
+  })
+
+  // Write folder-level style ({dir}/.md-style.json) — restricted to IdeaProjects
+  ipcMain.handle('style:write-folder', (_, dir, contents) => {
+    const allowed = path.join(os.homedir(), 'IdeaProjects')
+    if (!dir.startsWith(allowed)) throw new Error('Forbidden')
+    if (typeof contents !== 'string') throw new Error('contents must be string')
+    fs.writeFileSync(path.join(dir, '.md-style.json'), contents, 'utf-8')
     return { ok: true }
   })
 

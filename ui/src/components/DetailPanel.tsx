@@ -2,11 +2,25 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import type { Task, Subtask } from '../types/task'
 import RecurrencePicker from './RecurrencePicker'
 import PlatformIcon from './PlatformIcon'
-import { api, updateTask, fetchTask, fetchSubtasks, fetchAttachments, fetchAgents, deleteAttachment, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, fetchProjects, createProjectExplicit, type Agent, type AgentJob, type Note } from '../api'
+import { api, updateTask, fetchTask, fetchSubtasks, fetchAttachments, fetchAgents, deleteAttachment, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, fetchProjects, createProjectExplicit, type Agent, type AgentJob, type Note, type Project } from '../api'
 import type { Attachment } from '../types/task'
 import { PRIORITY_COLORS } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
 import './DetailPanel.css'
+
+function TaskIdChip({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false)
+  function copy() {
+    navigator.clipboard.writeText(id)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <button className={`task-id-chip${copied ? ' copied' : ''}`} onClick={copy} title={`Copy task ID: ${id}`}>
+      {copied ? '✓ copied' : id.slice(0, 8)}
+    </button>
+  )
+}
 
 function TimePicker({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
   const parts = value.split(':')
@@ -64,8 +78,8 @@ import { detectPlatform } from '../lib/constants'
 const ENERGY_OPTIONS = ['high', 'medium', 'low', 'async'] as const
 const ENERGY_LABELS: Record<string, string> = { high: '🔥 High', medium: '⚡ Med', low: '🌿 Low', async: '📬 Async' }
 
-const SPECIAL_TYPES = ['coding', 'reading'] as const
-const SPECIAL_TYPE_LABELS: Record<string, string> = { coding: '⌨ Coding', reading: '📖 Reading' }
+const TASK_TYPES = ['task', 'coding', 'reading'] as const
+const TASK_TYPE_LABELS: Record<string, string> = { task: '★ Priority', coding: '⌨ Coding', reading: '📖 Reading' }
 
 export default function DetailPanel({ taskId, onClose, onMutate, onDelete, terminalOpen, onPreview }: Props) {
   const { contexts, getColor } = useContexts()
@@ -85,7 +99,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
   const [linkInput, setLinkInput]   = useState('')
   const [newSubtask, setNewSubtask] = useState('')
   const [agents, setAgents] = useState<Agent[]>([])
-  const [projects, setProjects] = useState<string[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploading, setUploading] = useState(false)
   const [creatingProject, setCreatingProject] = useState(false)
@@ -113,7 +127,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
   useEffect(() => {
     if (taskId) {
       fetchAgents().then(setAgents)
-      fetchProjects().then(ps => setProjects(ps.map(p => p.name)))
+      fetchProjects().then(setProjects)
     }
   }, [taskId])
 
@@ -201,8 +215,9 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
 
   async function runAgent(userMessage?: string) {
     if (!task) return
-    if (task.task_type !== 'coding') {
-      await patch({ task_type: 'coding' })
+    if (task.task_type === 'task') {
+      const assignedAgent = agents.find(a => a.path === task.agent_path)
+      if (assignedAgent?.coding) await patch({ task_type: 'coding' })
     }
     const job = await queueAgentJob(task.id, userMessage)
     setLatestJob(job)
@@ -297,6 +312,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
     <div className={`detail-panel ${taskId ? 'open' : ''}`}>
       <div className="detail-inner" style={{ paddingBottom: terminalOpen ? 316 : 80 }}>
         <div className="detail-header">
+          {task && <TaskIdChip id={task.id} />}
           <button className="detail-close" onClick={onClose}>✕</button>
         </div>
 
@@ -365,12 +381,12 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
               <div className="detail-field-row">
                 <span className="detail-field-label">Type</span>
                 <div className="detail-pill-group">
-                  {SPECIAL_TYPES.map(t => (
+                  {TASK_TYPES.map(t => (
                     <button
                       key={t}
                       className={`detail-pill ${task.task_type === t ? 'active' : ''}`}
-                      onClick={() => patch({ task_type: task.task_type === t ? 'task' : t })}
-                    >{SPECIAL_TYPE_LABELS[t]}</button>
+                      onClick={() => { if (task.task_type !== t) patch({ task_type: t }) }}
+                    >{TASK_TYPE_LABELS[t]}</button>
                   ))}
                 </div>
               </div>
@@ -392,7 +408,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
                         const name = newProjectName.trim()
                         await createProjectExplicit(name)
                         await patch({ project: name })
-                        setProjects(ps => [...ps, name].sort((a, b) => a.localeCompare(b)))
+                        setProjects(ps => [...ps, { name, archived: 0, created_at: new Date().toISOString(), is_repo: 0, context: null }].sort((a, b) => a.name.localeCompare(b.name)))
                         setCreatingProject(false)
                         setNewProjectName('')
                       }
@@ -419,7 +435,24 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
                   }}
                 >
                   <option value="">None</option>
-                  {projects.map(p => <option key={p} value={p}>{p}</option>)}
+                  {(() => {
+                    const repos = projects.filter(p => p.is_repo === 1).sort((a, b) => a.name.localeCompare(b.name))
+                    const regular = projects.filter(p => p.is_repo !== 1).sort((a, b) => a.name.localeCompare(b.name))
+                    return (
+                      <>
+                        {repos.length > 0 && (
+                          <optgroup label="Code Repos">
+                            {repos.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                          </optgroup>
+                        )}
+                        {regular.length > 0 && (
+                          <optgroup label="Projects">
+                            {regular.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                          </optgroup>
+                        )}
+                      </>
+                    )
+                  })()}
                   <option value="__new__">+ Create new project…</option>
                 </select>
               )}
@@ -437,13 +470,40 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
                     onChange={e => { patch({ agent_path: e.target.value || null }); setLatestJob(null) }}
                   >
                     <option value="">None</option>
-                    {agents
-                      .filter(a => (!a.context && !a.project) || (a.context === task.context && (!a.project || a.project === task.project)))
-                      .map(a => (
-                        <option key={a.path} value={a.path} title={a.description ?? undefined}>
-                          {(!a.context && a.folder) ? `${a.folder} / ${a.name}` : a.name}
-                        </option>
-                      ))}
+                    {(() => {
+                      const filtered = agents.filter(a => {
+                        if (!a.context) return true
+                        if (a.context !== task.context) return false
+                        if (!a.project) return true
+                        return a.project === task.project
+                      })
+                      const contextWide = filtered.filter(a => !a.project).sort((a, b) => a.name.localeCompare(b.name))
+                      const projectSpecific = filtered.filter(a => !!a.project).sort((a, b) => a.name.localeCompare(b.name))
+                      const contextLabel = task.context ?? 'Context'
+                      const projectLabel = task.project ?? 'Project'
+                      return (
+                        <>
+                          {contextWide.length > 0 && projectSpecific.length > 0 ? (
+                            <optgroup label={contextLabel}>
+                              {contextWide.map(a => (
+                                <option key={a.path} value={a.path} title={a.description ?? undefined}>{a.name}</option>
+                              ))}
+                            </optgroup>
+                          ) : contextWide.map(a => (
+                            <option key={a.path} value={a.path} title={a.description ?? undefined}>{a.name}</option>
+                          ))}
+                          {projectSpecific.length > 0 && contextWide.length > 0 ? (
+                            <optgroup label={projectLabel}>
+                              {projectSpecific.map(a => (
+                                <option key={a.path} value={a.path} title={a.description ?? undefined}>{a.name}</option>
+                              ))}
+                            </optgroup>
+                          ) : projectSpecific.map(a => (
+                            <option key={a.path} value={a.path} title={a.description ?? undefined}>{a.name}</option>
+                          ))}
+                        </>
+                      )
+                    })()}
                   </select>
                   {task.agent_path && (
                     <button

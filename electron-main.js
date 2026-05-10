@@ -6,7 +6,7 @@ import fs from 'fs'
 import os from 'os'
 import { execSync, execFileSync, spawn } from 'child_process'
 import pty from 'node-pty'
-import { initDbWorker, initSettings, setupIpcHandlers, startBackgroundWorkers } from './ipc-handlers.js'
+import { initDbWorker, initSettings, setupIpcHandlers, startBackgroundWorkers, runBackup } from './ipc-handlers.js'
 
 // ── launchd service installer (macOS, prod only) ──────────────────────────────
 
@@ -197,8 +197,10 @@ async function startMcpServer(dbDir) {
     mcpProcess = spawn(process.execPath, [serverPath], { stdio: 'pipe', env: { ...env, ELECTRON_RUN_AS_NODE: '1' } })
     pipeToLog(mcpProcess, 'mcp')
     mcpProcess.on('exit', (code, signal) => {
-      if (signal !== 'SIGTERM' && code !== 0) console.error(`[mcp] exited: code=${code} signal=${signal}`)
       mcpProcess = null
+      if (signal === 'SIGTERM') return
+      console.error(`[mcp] exited: code=${code} signal=${signal} — respawning in 2s`)
+      setTimeout(() => startMcpServer(dbDir).catch(err => console.error('[mcp] respawn failed:', err.message)), 2000)
     })
   } else {
     // Prod: install as launchd service — starts on login, Electron just connects.
@@ -501,6 +503,22 @@ app.whenReady().then(async () => {
     ? path.join(__dirname, 'db')
     : await ensureUserData()
 
+  // Apply any pending DB restore before opening the worker
+  const restorePending = path.join(dbDir, 'tasks.db.restore')
+  if (fs.existsSync(restorePending)) {
+    const dbPath = path.join(dbDir, 'tasks.db')
+    console.log('[restore] applying pending DB restore')
+    try {
+      fs.copyFileSync(dbPath, `${dbPath}.pre-restore`)
+      fs.renameSync(restorePending, dbPath)
+      for (const ext of ['-wal', '-shm']) {
+        const f = dbPath + ext
+        if (fs.existsSync(f)) { try { fs.unlinkSync(f) } catch {} }
+      }
+      console.log('[restore] DB restored successfully')
+    } catch (e) { console.error('[restore] failed:', e.message) }
+  }
+
   // Initialise IPC handlers
   await initDbWorker(dbDir)
   initSettings(dbDir)
@@ -517,6 +535,9 @@ app.whenReady().then(async () => {
   setupUpdaterIpc()
   setupAutoUpdater()
 
+  // Hourly backup
+  setInterval(() => runBackup().catch(e => console.error('[backup] scheduled backup failed:', e.message)), 60 * 60 * 1000)
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -526,7 +547,14 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   try { ptyProcess?.kill() } catch {}
-  if (isDev) mcpProcess?.kill()  // prod: launchd owns the MCP process
+  if (isDev) mcpProcess?.kill()
+  // Best-effort backup on quit — 10s timeout so it doesn't hang the quit
+  event.preventDefault()
+  const done = () => app.exit(0)
+  const timer = setTimeout(done, 10_000)
+  runBackup()
+    .catch(() => {})
+    .finally(() => { clearTimeout(timer); done() })
 })

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { Task } from '../types/task'
 import { PRIORITY_COLORS, ENERGY_ICONS } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
-import { api, queueAgentJob, updateTask } from '../api'
+import { api, queueAgentJob, updateTask, fetchAgents } from '../api'
 import SnoozePopover from './SnoozePopover'
 import PlatformIcon from './PlatformIcon'
 import { detectPlatform } from '../lib/constants'
@@ -178,12 +178,16 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
             {!isDone && task.agent_path && task.task_type !== 'coding' && !task.agent_job_status && (
               <button
                 className="action-btn action-btn--launch"
-                title="Launch agent — moves task to Code view"
+                title="Launch agent"
                 disabled={launching}
                 onClick={async e => {
                   e.stopPropagation()
                   setLaunching(true)
-                  await updateTask(task.id, { task_type: 'coding' })
+                  if (task.task_type === 'task') {
+                    const agents = await fetchAgents()
+                    const agent = agents.find(a => a.path === task.agent_path)
+                    if (agent?.coding) await updateTask(task.id, { task_type: 'coding' })
+                  }
                   await queueAgentJob(task.id)
                   onMutate()
                 }}

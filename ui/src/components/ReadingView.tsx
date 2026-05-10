@@ -8,9 +8,10 @@ interface Props {
   selectedId: string | null
   onSelect: (id: string) => void
   onMutate: () => void
+  refreshToken?: number
 }
 
-export default function ReadingView({ selectedId, onSelect, onMutate }: Props) {
+export default function ReadingView({ selectedId, onSelect, onMutate, refreshToken }: Props) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -25,6 +26,7 @@ export default function ReadingView({ selectedId, onSelect, onMutate }: Props) {
   }, [])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { if (refreshToken) load(true) }, [refreshToken, load])
 
   if (loading) return <div style={{ color: 'var(--muted)', padding: '40px', textAlign: 'center' }}>Loading…</div>
 

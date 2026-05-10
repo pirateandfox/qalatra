@@ -1,5 +1,64 @@
 # Qalatra — Evolution Notes
 
+## 1.5.0 — Encrypted backups, tabbed Settings, agent filtering (2026-05-10)
+
+### Encrypted cloud backups
+
+Full backup pipeline built on AES-256-GCM client-side encryption.
+
+**Encryption key management:**
+- Key is 32 random bytes stored in macOS Keychain via Electron `safeStorage` — never written to disk unencrypted
+- Export as base64 string (for 1Password / recovery drive) in Settings → Encryption & Backup
+- Import base64 key on a new machine to restore access to existing backups and attachments
+
+**DB backups to R2:**
+- Separate R2 bucket (`qalatra-backups`) from the attachment bucket
+- Backups fire hourly (setInterval), on app quit (before-quit with 10s timeout), and on demand via Settings
+- Uses better-sqlite3's online backup API — safe under concurrent writes and WAL mode
+- Wire format: 12-byte IV + 16-byte GCM auth tag + ciphertext
+- 30-day retention — prune runs automatically after every backup
+- Restore: downloads and decrypts to `tasks.db.restore`; app applies it on next launch before opening the DB worker
+- `_lastBackupTime` / `_lastBackupStatus` persist in-memory and are exposed via `backup:status` IPC
+
+**Attachment encryption:**
+- New `encrypted` column on `attachments` table
+- Upload path now encrypts with the key if present before sending to R2
+- Download path (`attachments:download`) fetches ciphertext from R2, decrypts, saves to local cache, opens with shell
+- Presigned URLs are skipped for encrypted attachments (they'd return ciphertext)
+
+**Settings export/import:**
+- Full settings JSON export for recovery kit (S3 credentials, bucket names, etc.)
+- Import restores all settings from JSON on a new machine
+
+### Settings redesign
+
+Replaced the BottomPanel slide-up overlay with a full-screen tabbed view, accessible via the ⚙ gear button in the sidebar (now navigates to `nav === 'settings'` like any other section):
+
+- **General** — appearance, color tokens, terminal/agent config, MCP server
+- **Storage** — S3 endpoint, bucket, credentials, public URL, cache dir, test + sync
+- **Encryption & Backup** — key management, backup bucket, run/history/restore, recovery kit export/import
+- **Contexts** — contexts list with add/edit/delete
+- **Agents** — discovered agents with rescan button
+
+Keyboard shortcut `,` now toggles between Settings and Priority (was toggling a panel overlay).
+
+### Agent filtering fixes
+
+- Detail view agent dropdown now filters strictly by `a.project` (explicit field in agent.config). Previous code fell back to `a.folder` (the top-level scan directory name), which caused agents in a `projects/` folder to appear as project-specific when they should have been context-wide.
+- Audited and fixed 17 coderepos agent.config files that were missing the `project` field: biztobiz, flightdesk, muzebook, nestled/nestled-forms/nestled-template/nestledforms.com/nestledjs.com, silvermouse.
+- Projects and Agents dropdowns in the detail panel now use `<optgroup>` subheadings ("Code Repos" / "Projects" and "Context-wide" / "Project-specific").
+
+### Heartbeat log expansion
+
+- Heartbeat run results are truncated to 300 chars in the history list
+- "Show more" / "Show less" toggle reveals full output inline without leaving the view
+
+### Boolean SQLite binding fix
+
+`update_task` was crashing when called with `inbox: true` (JS boolean). SQLite only accepts numbers, strings, bigints, buffers, and null. Fixed with a coercion step (`typeof v === 'boolean' ? (v ? 1 : 0) : v`) in both `db-worker.js` and `mcp/tools/tasks.js`.
+
+## 1.4.2 — Fix MCP ABI mismatch in dev + recurring task fields (2026-05-08)
+
 ## 1.4.1 — Fix MCP ABI mismatch in production (2026-05-08)
 
 The launchd MCP service was using system Node to run the MCP server, but `better-sqlite3` inside the Electron bundle is compiled against Electron's Node ABI — not system Node. These diverge every time Electron or system Node is updated independently, causing all MCP calls to fail with "was compiled against a different Node.js version".

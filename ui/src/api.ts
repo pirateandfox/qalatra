@@ -90,6 +90,8 @@ export interface Project {
   name: string
   archived: number
   created_at: string
+  is_repo: number
+  context: string | null
 }
 
 export interface ProjectSummary {
@@ -256,6 +258,21 @@ export async function getMcpStatus(): Promise<{ port: number; isHttpConfigured: 
 export async function applyMcpPort(port: number): Promise<{ ok: boolean; port: number; url: string; error?: string }> {
   return ipc('mcp:apply', port)
 }
+
+// ── Encryption / Backup / Recovery ───────────────────────────────────────────
+
+export interface BackupItem { key: string; size: number; date: string }
+
+export const getKeyStatus    = (): Promise<{ present: boolean }>                     => ipc('key:status')
+export const generateKey     = (): Promise<{ ok: boolean }>                          => ipc('key:generate')
+export const exportKey       = (): Promise<{ ok: boolean; key?: string; error?: string }> => ipc('key:export')
+export const importKey       = (base64: string): Promise<{ ok: boolean; error?: string }> => ipc('key:import', base64)
+export const runBackup       = (): Promise<{ ok: boolean; key?: string; size?: number; error?: string }> => ipc('backup:run')
+export const getBackupStatus = (): Promise<{ lastTime: string | null; lastStatus: string | null }> => ipc('backup:status')
+export const listBackups     = (): Promise<{ ok: boolean; items?: BackupItem[]; error?: string }> => ipc('backup:list')
+export const restoreBackup   = (key: string): Promise<{ ok: boolean; message?: string; error?: string }> => ipc('backup:restore', key)
+export const exportSettings  = (): Promise<{ ok: boolean; json?: string }>            => ipc('settings:export')
+export const importSettings  = (json: string): Promise<{ ok: boolean; error?: string }> => ipc('settings:import', json)
 
 export const api = {
   complete:             (taskId: string) => ipc('task:complete', taskId),

@@ -164,6 +164,7 @@ export default function HeartbeatsView({ onMutate }: Props) {
   const [creating, setCreating]     = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [jobs, setJobs]             = useState<Record<string, AgentJob[]>>({})
+  const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(new Set())
   const [form, setForm]             = useState(BLANK_FORM)
   const [editId, setEditId]         = useState<string | null>(null)
   const [editForm, setEditForm]     = useState(BLANK_FORM)
@@ -193,6 +194,14 @@ export default function HeartbeatsView({ onMutate }: Props) {
   function toggleExpand(id: string) {
     if (expandedId === id) { setExpandedId(null) }
     else { setExpandedId(id); loadJobs(id) }
+  }
+
+  function toggleJobExpand(jobId: string) {
+    setExpandedJobIds(prev => {
+      const next = new Set(prev)
+      next.has(jobId) ? next.delete(jobId) : next.add(jobId)
+      return next
+    })
   }
 
   async function handleCreate(e: React.FormEvent) {
@@ -425,17 +434,30 @@ export default function HeartbeatsView({ onMutate }: Props) {
                     <div className="hb-jobs">
                       {!jobs[hb.id] && <div className="hb-jobs-empty">Loading…</div>}
                       {jobs[hb.id]?.length === 0 && <div className="hb-jobs-empty">No runs yet.</div>}
-                      {jobs[hb.id]?.map(job => (
-                        <div key={job.id} className={`hb-job hb-job-${job.status}`}>
-                          <div className="hb-job-header">
-                            <span className="hb-job-status">{job.status}</span>
-                            <span className="hb-job-time">{relativeTime(job.completed_at ?? job.created_at)}</span>
+                      {jobs[hb.id]?.map(job => {
+                        const isJobExpanded = expandedJobIds.has(job.id)
+                        const truncated = job.result && job.result.length > 300
+                        return (
+                          <div key={job.id} className={`hb-job hb-job-${job.status}`}>
+                            <div className="hb-job-header">
+                              <span className="hb-job-status">{job.status}</span>
+                              <span className="hb-job-time">{relativeTime(job.completed_at ?? job.created_at)}</span>
+                            </div>
+                            {job.result && (
+                              <>
+                                <div className="hb-job-result">
+                                  {isJobExpanded ? job.result : job.result.slice(0, 300)}{!isJobExpanded && truncated ? '…' : ''}
+                                </div>
+                                {truncated && (
+                                  <button className="hb-job-expand-btn" onClick={() => toggleJobExpand(job.id)}>
+                                    {isJobExpanded ? 'show less' : 'show more'}
+                                  </button>
+                                )}
+                              </>
+                            )}
                           </div>
-                          {job.result && (
-                            <div className="hb-job-result">{job.result.slice(0, 300)}{job.result.length > 300 ? '…' : ''}</div>
-                          )}
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </>

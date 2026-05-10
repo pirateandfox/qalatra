@@ -8,9 +8,10 @@ interface Props {
   selectedId: string | null
   onSelect: (id: string) => void
   onMutate: () => void
+  refreshToken?: number
 }
 
-export default function CodeAgentsView({ selectedId, onSelect, onMutate }: Props) {
+export default function CodeAgentsView({ selectedId, onSelect, onMutate, refreshToken }: Props) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -25,6 +26,7 @@ export default function CodeAgentsView({ selectedId, onSelect, onMutate }: Props
   }, [])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { if (refreshToken) load(true) }, [refreshToken, load])
 
   useEffect(() => {
     const hasActive = tasks.some(t => t.agent_job_status === 'queued' || t.agent_job_status === 'running')

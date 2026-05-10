@@ -127,10 +127,11 @@
 
 /* ---- Style Sidebar ---- */
 .mdview-overlay .sidebar {
+  width: 100%;
   background: #1c1c1f;
   border-right: 1px solid #27272a;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   height: 100%;
 }
 

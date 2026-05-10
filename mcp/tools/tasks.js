@@ -86,12 +86,12 @@ export const toolDefs = [
         tags:            { type: 'string', description: 'Comma-separated tags' },
         ai_context:      { type: 'string', description: 'Initial context note' },
         status:          { type: 'string', description: 'active (default) | snoozed | backlog | archived' },
-        task_type:       { type: 'string', description: 'task (default) | event | reminder | reading. Do NOT set coding — tasks move to the Code view when the user clicks Play to launch the agent, not on creation.' },
+        task_type:       { type: 'string', description: 'task (default) | event | reminder | reading | coding. Set coding only to explicitly route to the Code view. Agents can be assigned to any task type.' },
         event_time:      { type: 'string', description: 'HH:MM start time for events (e.g. 14:30). Null = all-day.' },
         end_time:        { type: 'string', description: 'HH:MM end time for events. If omitted, defaults to 1hr after event_time.' },
         parent_id:       { type: 'string', description: 'ID of parent task (for subtasks)' },
         recurrence:      { type: 'string', description: 'daily | weekdays | weekly | monthly — auto-respawns on completion' },
-        agent_path:      { type: 'string', description: 'Absolute path to the agent folder to dispatch this task to. The task will sit in Priority/Inbox until the user clicks Play — do not also set task_type=coding.' },
+        agent_path:      { type: 'string', description: 'Absolute path to the agent folder to dispatch this task to.' },
         assigned_agent:  { type: 'string', description: 'Human-readable name of the agent assigned to this task (e.g. "Code Planner", "Research Agent"). Used to filter tasks by agent.' },
         links:           { type: 'array', items: { type: 'string' }, description: 'Array of URLs or file paths to attach to the task' },
         inbox:           { type: 'boolean', description: 'Mark as inbox item — surfaces in a separate Inbox section for human review before scheduling. Use when creating tasks on behalf of the user that need triage.' },
@@ -295,6 +295,28 @@ export const toolDefs = [
       required: ['from', 'to'],
     },
   },
+  {
+    name: 'delete_context',
+    description: 'Delete a context. Tasks referencing this context will have their context field cleared (set to null). Use list_contexts first to confirm the slug.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: 'The context slug to delete (exact match)' },
+      },
+      required: ['slug'],
+    },
+  },
+  {
+    name: 'delete_project',
+    description: 'Delete a project. Tasks referencing this project will have their project field cleared (set to null). Use list_projects first to confirm the name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'The project name to delete (exact match)' },
+      },
+      required: ['name'],
+    },
+  },
 ];
 
 export const handlers = {
@@ -368,7 +390,8 @@ export const handlers = {
 
     for (const field of mutableFields) {
       if (args[field] !== undefined) {
-        updates[field] = args[field];
+        const v = args[field];
+        updates[field] = typeof v === 'boolean' ? (v ? 1 : 0) : v;
         setClauses.push(`${field} = @${field}`);
       }
     }
@@ -657,6 +680,28 @@ export const handlers = {
       }
     })();
     return { ok: true, from, to, merged: !!existing };
+  },
+
+  delete_context(args) {
+    const db = openDb();
+    const slug = args.slug.trim();
+    const existing = db.prepare('SELECT slug, label FROM contexts WHERE slug = ?').get(slug);
+    if (!existing) throw new Error(`Context '${slug}' not found.`);
+    const { changes } = db.prepare('UPDATE tasks SET context = NULL WHERE context = ?').run(slug);
+    // Clear from agents table so rescan doesn't leave orphaned references that Claude would recreate
+    db.prepare('UPDATE agents SET context = NULL WHERE context = ?').run(slug);
+    db.prepare('DELETE FROM contexts WHERE slug = ?').run(slug);
+    return { ok: true, deleted: slug, label: existing.label, tasks_cleared: changes };
+  },
+
+  delete_project(args) {
+    const db = openDb();
+    const name = args.name.trim();
+    const existing = db.prepare('SELECT name FROM projects WHERE name = ?').get(name);
+    if (!existing) throw new Error(`Project '${name}' not found.`);
+    const { changes } = db.prepare('UPDATE tasks SET project = NULL WHERE project = ?').run(name);
+    db.prepare('DELETE FROM projects WHERE name = ?').run(name);
+    return { ok: true, deleted: name, tasks_cleared: changes };
   },
 
   archive_task(args) {

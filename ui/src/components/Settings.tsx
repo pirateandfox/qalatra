@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { fetchSettings, saveSettings, fetchAgents, syncAttachments, getMcpStatus, applyMcpPort, createContext, updateContext, deleteContext, type Agent } from '../api'
+import { fetchSettings, saveSettings, fetchAgents, syncAttachments, getMcpStatus, applyMcpPort, createContext, updateContext, deleteContext, getKeyStatus, generateKey, exportKey, importKey, runBackup, getBackupStatus, listBackups, restoreBackup, exportSettings, importSettings, type Agent, type BackupItem } from '../api'
 import { useContexts } from '../lib/ContextsProvider'
 import { useTheme } from '../lib/ThemeProvider'
 import { TOKEN_KEYS, TOKEN_LABELS, DARK_TOKENS, LIGHT_TOKENS, type ThemeMode } from '../lib/theme'
@@ -20,6 +20,22 @@ export default function Settings({ open, fullscreen, onClose, onToggleFullscreen
   const [s3TestResult, setS3TestResult] = useState<'ok' | 'fail' | null>(null)
   const [syncResult, setSyncResult] = useState<{ synced: number; failed: number; total: number } | null>(null)
   const [syncing, setSyncing] = useState(false)
+  // Encryption
+  const [keyPresent, setKeyPresent] = useState(false)
+  const [exportedKey, setExportedKey] = useState<string | null>(null)
+  const [importKeyInput, setImportKeyInput] = useState('')
+  const [keyMsg, setKeyMsg] = useState<string | null>(null)
+  // Backup
+  const [backupStatus, setBackupStatus] = useState<{ lastTime: string | null; lastStatus: string | null } | null>(null)
+  const [backupRunning, setBackupRunning] = useState(false)
+  const [backupMsg, setBackupMsg] = useState<string | null>(null)
+  const [backupList, setBackupList] = useState<BackupItem[] | null>(null)
+  const [backupListLoading, setBackupListLoading] = useState(false)
+  const [restoringKey, setRestoringKey] = useState<string | null>(null)
+  // Recovery
+  const [exportedSettings, setExportedSettings] = useState<string | null>(null)
+  const [importSettingsInput, setImportSettingsInput] = useState('')
+  const [recoveryMsg, setRecoveryMsg] = useState<string | null>(null)
   const [mcpPort, setMcpPort] = useState('3457')
   const [mcpStatus, setMcpStatus] = useState<{ isHttpConfigured: boolean } | null>(null)
   const [mcpApplying, setMcpApplying] = useState(false)
@@ -39,6 +55,8 @@ export default function Settings({ open, fullscreen, onClose, onToggleFullscreen
       fetchAgents().then(setAgents)
       getMcpStatus().then(s => { setMcpPort(String(s.port)); setMcpStatus(s) })
       refreshContexts()
+      getKeyStatus().then(s => setKeyPresent(s.present))
+      getBackupStatus().then(setBackupStatus)
     }
   }, [open])
 
@@ -254,6 +272,242 @@ export default function Settings({ open, fullscreen, onClose, onToggleFullscreen
               </span>
             )}
           </div>
+        </div>
+
+        <div className="settings-section-header">Encryption</div>
+
+        <div className="settings-row">
+          <label className="settings-label">Encryption Key</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {keyPresent
+              ? <span style={{ fontSize: 12, color: '#4ade80' }}>✓ Key present</span>
+              : <span style={{ fontSize: 12, color: 'var(--muted)' }}>No key — attachments and backups will not be encrypted</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <button
+              className="settings-save"
+              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+              onClick={async () => {
+                if (keyPresent && !window.confirm('A key already exists. Generating a new one will make existing encrypted data unreadable unless you re-encrypt it. Continue?')) return
+                const res = await generateKey()
+                if (res.ok) { setKeyPresent(true); setKeyMsg('Key generated and saved to keystore.') }
+                else setKeyMsg('Failed to generate key.')
+                setTimeout(() => setKeyMsg(null), 4000)
+              }}
+            >{keyPresent ? 'Regenerate key' : 'Generate key'}</button>
+            {keyPresent && (
+              <button
+                className="settings-save"
+                style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+                onClick={async () => {
+                  const res = await exportKey()
+                  if (res.ok && res.key) setExportedKey(res.key)
+                  else setKeyMsg(res.error ?? 'Export failed.')
+                }}
+              >Export key</button>
+            )}
+          </div>
+          {exportedKey && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Copy this key and store it in 1Password or a secure drive:</div>
+              <textarea
+                readOnly
+                value={exportedKey}
+                rows={3}
+                style={{ width: '100%', fontFamily: 'monospace', fontSize: 11, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: 6, resize: 'none' }}
+                onClick={e => (e.target as HTMLTextAreaElement).select()}
+              />
+              <button
+                className="settings-save"
+                style={{ marginTop: 4, padding: '3px 10px', fontSize: 11, background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+                onClick={() => setExportedKey(null)}
+              >Hide</button>
+            </div>
+          )}
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Import key (paste base64 key from recovery kit):</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                className="settings-input"
+                type="text"
+                value={importKeyInput}
+                onChange={e => setImportKeyInput(e.target.value)}
+                placeholder="Paste base64 key…"
+                spellCheck={false}
+                style={{ fontFamily: 'monospace', fontSize: 11 }}
+              />
+              <button
+                className="settings-save"
+                disabled={!importKeyInput.trim()}
+                onClick={async () => {
+                  const res = await importKey(importKeyInput.trim())
+                  if (res.ok) { setKeyPresent(true); setImportKeyInput(''); setKeyMsg('Key imported successfully.') }
+                  else setKeyMsg(res.error ?? 'Import failed.')
+                  setTimeout(() => setKeyMsg(null), 4000)
+                }}
+              >Import</button>
+            </div>
+          </div>
+          {keyMsg && <span style={{ fontSize: 12, color: '#4ade80', marginTop: 6, display: 'block' }}>{keyMsg}</span>}
+        </div>
+
+        <div className="settings-section-header">Backup</div>
+
+        <div className="settings-row">
+          <label className="settings-label">Backup Bucket Name</label>
+          <input
+            className="settings-input"
+            type="text"
+            value={settings.backupBucket ?? ''}
+            onChange={e => set('backupBucket', e.target.value)}
+            placeholder="qalatra-backups"
+            spellCheck={false}
+          />
+          <span className="settings-hint">Separate R2 bucket for encrypted DB backups. Uses same endpoint, access key, and secret as attachments.</span>
+        </div>
+
+        <div className="settings-row">
+          <label className="settings-label">Database Backup</label>
+          {backupStatus && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+              Last backup: {backupStatus.lastTime
+                ? <>
+                    <span style={{ color: backupStatus.lastStatus === 'ok' ? '#4ade80' : '#ef4444' }}>
+                      {backupStatus.lastStatus === 'ok' ? '✓' : '✕'}
+                    </span>
+                    {' '}{new Date(backupStatus.lastTime).toLocaleString()}
+                  </>
+                : 'Never'}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              className="settings-save"
+              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+              disabled={backupRunning}
+              onClick={async () => {
+                setBackupRunning(true)
+                setBackupMsg(null)
+                const res = await runBackup()
+                setBackupRunning(false)
+                if (res.ok) {
+                  setBackupMsg(`Backup complete${res.size ? ` (${(res.size / 1024).toFixed(0)} KB)` : ''}`)
+                  getBackupStatus().then(setBackupStatus)
+                } else {
+                  setBackupMsg(res.error ?? 'Backup failed.')
+                }
+                setTimeout(() => setBackupMsg(null), 5000)
+              }}
+            >{backupRunning ? 'Backing up…' : 'Run backup now'}</button>
+            <button
+              className="settings-save"
+              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+              disabled={backupListLoading}
+              onClick={async () => {
+                if (backupList !== null) { setBackupList(null); return }
+                setBackupListLoading(true)
+                const res = await listBackups()
+                setBackupListLoading(false)
+                setBackupList(res.items ?? [])
+              }}
+            >{backupListLoading ? 'Loading…' : backupList !== null ? 'Hide history' : 'Show backup history'}</button>
+          </div>
+          {backupMsg && <span style={{ fontSize: 12, color: '#4ade80', marginTop: 6, display: 'block' }}>{backupMsg}</span>}
+          {backupList !== null && (
+            <div style={{ marginTop: 8 }}>
+              {backupList.length === 0
+                ? <span style={{ fontSize: 12, color: 'var(--muted)' }}>No backups found.</span>
+                : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {backupList.map(item => (
+                      <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+                        <span style={{ color: 'var(--text)', fontFamily: 'monospace' }}>{item.date}</span>
+                        <span style={{ color: 'var(--muted)' }}>{(item.size / 1024).toFixed(0)} KB</span>
+                        <button
+                          className="settings-save"
+                          style={{ padding: '2px 8px', fontSize: 11, background: restoringKey === item.key ? 'var(--accent)' : 'transparent', border: '1px solid var(--border)', color: restoringKey === item.key ? '#fff' : 'var(--muted)' }}
+                          disabled={restoringKey !== null}
+                          onClick={async () => {
+                            if (!window.confirm(`Restore backup from ${item.date}? The app will need to restart to apply it.`)) return
+                            setRestoringKey(item.key)
+                            const res = await restoreBackup(item.key)
+                            setRestoringKey(null)
+                            if (res.ok) alert(res.message ?? 'Restore queued. Restart the app to apply.')
+                            else alert(res.error ?? 'Restore failed.')
+                          }}
+                        >{restoringKey === item.key ? 'Restoring…' : 'Restore'}</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          )}
+        </div>
+
+        <div className="settings-section-header">Recovery Kit</div>
+
+        <div className="settings-row">
+          <label className="settings-label">Export Settings</label>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+            Save your settings (S3 credentials, bucket names, etc.) to 1Password or a secure drive as part of your recovery kit.
+          </div>
+          <button
+            className="settings-save"
+            style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+            onClick={async () => {
+              const res = await exportSettings()
+              if (res.ok && res.json) setExportedSettings(res.json)
+            }}
+          >Export settings</button>
+          {exportedSettings && (
+            <div style={{ marginTop: 8 }}>
+              <textarea
+                readOnly
+                value={exportedSettings}
+                rows={6}
+                style={{ width: '100%', fontFamily: 'monospace', fontSize: 11, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: 6, resize: 'vertical' }}
+                onClick={e => (e.target as HTMLTextAreaElement).select()}
+              />
+              <button
+                className="settings-save"
+                style={{ marginTop: 4, padding: '3px 10px', fontSize: 11, background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+                onClick={() => setExportedSettings(null)}
+              >Hide</button>
+            </div>
+          )}
+        </div>
+
+        <div className="settings-row">
+          <label className="settings-label">Import Settings</label>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+            Paste your exported settings JSON to restore configuration on a new machine.
+          </div>
+          <textarea
+            className="settings-input"
+            value={importSettingsInput}
+            onChange={e => setImportSettingsInput(e.target.value)}
+            placeholder="Paste settings JSON…"
+            rows={4}
+            spellCheck={false}
+            style={{ fontFamily: 'monospace', fontSize: 11, resize: 'vertical' }}
+          />
+          <button
+            className="settings-save"
+            style={{ marginTop: 6, background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
+            disabled={!importSettingsInput.trim()}
+            onClick={async () => {
+              const res = await importSettings(importSettingsInput.trim())
+              if (res.ok) {
+                setImportSettingsInput('')
+                setRecoveryMsg('Settings imported. Reload to apply.')
+                fetchSettings().then(setSettings)
+              } else {
+                setRecoveryMsg(res.error ?? 'Import failed.')
+              }
+              setTimeout(() => setRecoveryMsg(null), 5000)
+            }}
+          >Import</button>
+          {recoveryMsg && <span style={{ fontSize: 12, color: '#4ade80', marginTop: 6, display: 'block' }}>{recoveryMsg}</span>}
         </div>
 
         <div className="settings-section-header">Contexts</div>

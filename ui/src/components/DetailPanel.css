@@ -6,7 +6,7 @@
   transition: width .25s, border-left-width .25s;
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: 100%;
 }
 .detail-panel.open {
   width: 50%;
@@ -20,9 +20,25 @@
 }
 .detail-header {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 12px;
 }
+
+.task-id-chip {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  letter-spacing: .03em;
+  transition: color .1s, border-color .1s;
+}
+.task-id-chip:hover { color: var(--text); border-color: var(--border); }
+.task-id-chip.copied { color: #22c55e; border-color: #22c55e40; }
 .detail-close {
   background: transparent;
   border: 1px solid var(--border);
