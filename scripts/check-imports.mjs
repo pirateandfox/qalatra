@@ -23,7 +23,7 @@ const ENTRY_POINTS = [
 // ── Parse electron-builder.yml files list ────────────────────────────────────
 
 function parseBuilderPatterns() {
-  const yml = readFileSync(join(ROOT, 'electron-builder.yml'), 'utf8')
+  const yml = readFileSync(join(ROOT, 'electron-builder.yml'), 'utf8').replace(/\r\n/g, '\n')
   const match = yml.match(/^files:\n((?:[ \t]+-[ \t]+.+\n)+)/m)
   if (!match) throw new Error('Cannot parse "files:" section from electron-builder.yml')
   return match[1]
