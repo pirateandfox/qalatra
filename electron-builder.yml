@@ -14,6 +14,7 @@ files:
   - db-worker.js
   - preload.cjs
   - s3.js
+  - crypto.js
   - mcp/**/*
   - ui/dist/**/*
   - "!ui/src/**/*"

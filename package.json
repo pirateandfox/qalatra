@@ -1,7 +1,7 @@
 {
   "name": "qalatra",
   "productName": "Qalatra",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Personal task management system with Claude AI integration",
   "author": "Justin Handley",
   "type": "module",
@@ -15,8 +15,9 @@
     "restart": "npm run kill && sleep 1 && NODE_ENV=development ./node_modules/.bin/electron electron-main.js",
     "build": "npm run build --prefix ui",
     "start": "npm run kill && sleep 1 && NODE_ENV=production ./node_modules/.bin/electron electron-main.js",
-    "dist": "npm run build && electron-builder --mac --publish never",
-    "dist:publish": "npm run build && electron-builder --mac --publish always",
+    "check-imports": "node scripts/check-imports.mjs",
+    "dist": "npm run check-imports && npm run build && electron-builder --mac --publish never",
+    "dist:publish": "npm run check-imports && npm run build && electron-builder --mac --publish always",
     "postinstall": "node node_modules/app-builder-lib/node_modules/@electron/rebuild/lib/cli.js -f -w better-sqlite3,node-pty --build-from-source || true"
   },
   "dependencies": {
