@@ -98,8 +98,8 @@ ingress:
 CONFIG
 chmod 600 "$CONFIG_FILE"
 
-info "Creating DNS route $HOSTNAME -> $TUNNEL_NAME"
-if ! ROUTE_OUTPUT="$("$CLOUDFLARED_BIN" tunnel route dns "$TUNNEL_NAME" "$HOSTNAME" 2>&1)"; then
+info "Creating DNS route $HOSTNAME -> $TUNNEL_ID"
+if ! ROUTE_OUTPUT="$("$CLOUDFLARED_BIN" tunnel route dns --overwrite-dns "$TUNNEL_ID" "$HOSTNAME" 2>&1)"; then
   if printf '%s' "$ROUTE_OUTPUT" | grep -qiE 'already exists|record exists'; then
     echo "$ROUTE_OUTPUT"
   else
