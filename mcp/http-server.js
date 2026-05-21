@@ -66,7 +66,8 @@ function createMcpServer() {
 }
 
 const settings = loadSettings();
-const PORT = parseInt(settings.mcpPort ?? '3457', 10);
+const PORT = parseInt(process.env.QALATRA_MCP_PORT || settings.mcpPort || '3457', 10);
+const HOST = process.env.QALATRA_MCP_HOST || settings.mcpHost || '127.0.0.1';
 
 const transports = {};
 
@@ -182,14 +183,14 @@ httpServer.headersTimeout   = REQUEST_TIMEOUT_MS + 1_000;
 // the MCP transport holds a connection open (SSE) but never delivers a result.
 httpServer.setTimeout(REQUEST_TIMEOUT_MS * 2);
 
-httpServer.listen(PORT, () => {
-  console.log(`[mcp-http] listening on port ${PORT}`);
+httpServer.listen(PORT, HOST, () => {
+  console.log(`[mcp-http] listening on http://${HOST}:${PORT}`);
 });
 
 httpServer.on('error', err => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`[mcp-http] Port ${PORT} in use, retrying in 30s…`);
-    setTimeout(() => httpServer.listen(PORT), 30_000);
+    console.error(`[mcp-http] ${HOST}:${PORT} in use, retrying in 30s…`);
+    setTimeout(() => httpServer.listen(PORT, HOST), 30_000);
   } else {
     console.error('[mcp-http] server error:', err);
     process.exit(1);

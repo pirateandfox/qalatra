@@ -1,5 +1,52 @@
 # Qalatra — Evolution Notes
 
+## Unreleased — Headless server foundation and remote instance switcher (2026-05-20)
+
+- Added a first `server/` runtime that can run without Electron: authenticated HTTP API, bootstrap `full_access` token, reusable `db-worker.js` client, background workers for agent jobs/autorun/heartbeats, and token list/create/revoke helpers.
+- Added stable `/api/v1` routes for the core UI data surface: tasks, notes, daily notes, contexts, projects, agents, habits, heartbeats, settings, MCP config, S3 test, key management, backups, and attachment sync.
+- Removed the temporary `/api/rpc` bridge; the UI now calls named authenticated HTTP endpoints instead of channel-based RPC.
+- Added Settings → Instances to save remote Qalatra Server URLs + tokens and switch the active UI data source between the local server and remote servers.
+- Added an Electron-managed Local Server in Settings → Instances. It starts `server/index.js` with Electron's Node runtime against the same local DB, and the UI uses this authenticated HTTP path by default.
+- Added local server lifecycle management in Settings → Instances:
+  - "Keep local server and MCP running after Electron quits" still supports detached child mode.
+  - "Start at Login" installs and controls an OS-managed service: macOS LaunchAgent (`com.qalatra.server`), Linux user systemd service (`qalatra-server.service`), or Windows logon Scheduled Task (`Qalatra Server`).
+  - Electron now detects an installed service on startup and connects to it instead of spawning its own child process.
+  - In `electron-dev`, service management is disabled by default so dev always runs the server from the current checkout. Set `QALATRA_DEV_USE_SERVICE=1` only for dedicated service testing.
+- When installing the service from Electron, Qalatra migrates any existing Electron `safeStorage` encryption key into the server keystore (`server-keystore`, `0600`) so a login service can run without storing secrets in launchd/systemd/task definitions.
+- Moved attachments onto the server path: upload, list, delete, pending sync, encrypted download/decrypt/cache, and authenticated blob opening now work through Qalatra Server.
+- Added direct binary attachment endpoints so remote uploads no longer need JSON-encoded byte arrays through compatibility RPC.
+- Added headless server encryption key management and encrypted backup run/list/restore support. Server keys are stored in the data directory as `server-keystore` with `0600` permissions, or can be supplied with `QALATRA_ENCRYPTION_KEY` / `QALATRA_KEY_FILE`.
+- When Electron starts the Local HTTP Bridge, it passes the existing Electron `safeStorage` encryption key through `QALATRA_ENCRYPTION_KEY` so current encrypted attachments/backups keep working while the UI moves to HTTP.
+- Added authenticated file APIs for remote editing and previewing: text read/write for Markdown/email editors, style read/write, and `/api/files/content` streaming with byte-range support for browser previews.
+- Changed MCP HTTP binding to localhost by default (`QALATRA_MCP_HOST` override) so it is safer to run alongside Cloudflare Tunnel for the authenticated API.
+- Hardened `scripts/install-linux-server.sh` for Linux headless/server installs: verifies Node 22+/curl/systemd user availability, rebuilds native modules for system Node, writes the user service, starts it, waits for `/health`, and prints API/MCP/token smoke commands.
+- Added `scripts/bootstrap-linux-server.sh` as the one-line Linux bootstrap entry point. It installs missing git/curl/Node 22 dependencies on Debian/Ubuntu hosts, clones or updates the repo, runs the Linux server installer, and optionally runs the Qalatra Cloudflare Tunnel installer when `QALATRA_TUNNEL_HOSTNAME` is set.
+- Added `scripts/install-cloudflare-tunnel.sh` for a Qalatra-owned Cloudflare Tunnel. It creates or reuses a named tunnel, routes a public hostname to only `http://127.0.0.1:3456`, and installs a separate `qalatra-cloudflared.service` user service so it does not clobber an existing admin/SSH tunnel.
+- Added a systemd service template for Linux headless/server installs.
+- Electron now starts Qalatra Server during app bootstrap and lets the server own MCP, agent/heartbeat workers, and scheduled backups. The legacy data IPC backend has been removed.
+- Removed `ipc-handlers.js` and the UI's Electron data fallback; Electron IPC is now reserved for desktop-native shell work such as server lifecycle, terminal, updater, menu, and file-open events.
+- `npm run kill` now clears both the API port (`3456`) and MCP port (`3457`) so dev restarts do not leave stale local server processes behind.
+- Added authenticated `/api/events` streaming. Agent job completion notifications now come from Qalatra Server, so local Electron and future remote clients share the same event path.
+- Moved periodic pending attachment sync into the server worker loop.
+- Added token management to Settings → Instances: list current tokens, create a full-access token, show the new secret once, and revoke tokens by ID.
+- Added `plan/HEADLESS_SERVER_ROADMAP.md` to separate the implemented migration slice from the longer-term backend/client architecture.
+
+## Unreleased — Full-page Daily Note editor + shared agent guidance (2026-05-18)
+
+### Shared agent guidance
+
+- Added root `AGENTS.md` as the shared source of truth for Codex and Claude.
+- Reduced `CLAUDE.md` to `@AGENTS.md` so both agents load the same project context.
+- Corrected stale database guidance: UI migrations live in `db-worker.js`; MCP migrations live in `mcp/db.js`.
+
+### Daily Note Markdown editor
+
+- Replaced the slide-up Daily Note bottom drawer with a first-class `nav === 'daily'` screen.
+- Daily Note now uses `@mdxeditor/editor`, a WYSIWYG Markdown editor backed by Markdown strings, with toolbar support for headings, bold/italic/underline, inline code, lists, links, tables, code blocks, thematic breaks, and source mode.
+- The `d` shortcut now opens Daily Note as a page, and the existing header date picker controls which date's note is loaded.
+- Autosave still writes through the existing `daily-note:get` / `daily-note:save` IPC path with debounce plus blur/date-change flushing.
+- The editor route is lazy-loaded so MDXEditor does not inflate the initial app screen bundle.
+
 ## 1.5.0 — Encrypted backups, tabbed Settings, agent filtering (2026-05-10)
 
 ### Encrypted cloud backups

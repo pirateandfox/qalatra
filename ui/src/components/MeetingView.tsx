@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { fetchTask, fetchSubtasks, fetchAttachments, api } from '../api'
+import { fetchTask, fetchSubtasks, fetchAttachments, openAttachmentFile, api } from '../api'
 import type { Task, Attachment } from '../types/task'
 import { fmtTime } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
@@ -133,15 +133,14 @@ export default function MeetingView({ taskId, onBack }: Props) {
               <div className="meeting-section-label" style={{ marginTop: 16 }}>Attachments</div>
               {attachments.map(a => (
                 <div key={a.id} className="meeting-attachment-row">
-                  <a
-                    href={a.url ?? `/api/attachment/${a.id}/local`}
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
                     className="meeting-attachment-link"
                     title={a.filename}
+                    onClick={() => openAttachmentFile(a.id)}
                   >
                     📎 {a.filename}
-                  </a>
+                  </button>
                 </div>
               ))}
             </div>

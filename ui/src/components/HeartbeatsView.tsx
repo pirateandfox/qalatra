@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchAgents, type Agent } from '../api'
+import {
+  createHeartbeat,
+  deleteHeartbeat,
+  fetchAgents,
+  listHeartbeatJobs,
+  listHeartbeats,
+  toggleHeartbeat,
+  updateHeartbeat,
+  type Agent,
+} from '../api'
 import { useContexts } from '../lib/ContextsProvider'
 import './HeartbeatsView.css'
 
@@ -187,7 +196,7 @@ export default function HeartbeatsView({ onMutate }: Props) {
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
-    const data = await (window as any).electronAPI.invoke('heartbeats:list')
+    const data = await listHeartbeats()
     setHeartbeats(data)
     if (!silent) setLoading(false)
   }, [])
@@ -203,7 +212,7 @@ export default function HeartbeatsView({ onMutate }: Props) {
   }, [load])
 
   async function loadJobs(id: string) {
-    const data = await (window as any).electronAPI.invoke('heartbeats:jobs', id, 10)
+    const data = await listHeartbeatJobs(id, 10)
     setJobs(prev => ({ ...prev, [id]: data }))
   }
 
@@ -223,7 +232,7 @@ export default function HeartbeatsView({ onMutate }: Props) {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     if (!form.title.trim() || !form.agent_path || !form.prompt.trim()) return
-    await (window as any).electronAPI.invoke('heartbeats:create', {
+    await createHeartbeat({
       title: form.title.trim(),
       agent_path: form.agent_path,
       prompt: form.prompt.trim(),
@@ -238,13 +247,13 @@ export default function HeartbeatsView({ onMutate }: Props) {
   }
 
   async function handleToggle(id: string) {
-    await (window as any).electronAPI.invoke('heartbeats:toggle', id)
+    await toggleHeartbeat(id)
     load(true)
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this heartbeat and all its job history?')) return
-    await (window as any).electronAPI.invoke('heartbeats:delete', id)
+    await deleteHeartbeat(id)
     if (expandedId === id) setExpandedId(null)
     load()
     onMutate?.()
@@ -268,7 +277,7 @@ export default function HeartbeatsView({ onMutate }: Props) {
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault()
     if (!editId) return
-    await (window as any).electronAPI.invoke('heartbeats:update', editId, {
+    await updateHeartbeat(editId, {
       title: editForm.title.trim(),
       agent_path: editForm.agent_path,
       prompt: editForm.prompt.trim(),

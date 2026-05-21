@@ -15,7 +15,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // Entry points that Electron loads directly (not through the UI bundle)
 const ENTRY_POINTS = [
   'electron-main.js',
-  'ipc-handlers.js',
+  'server/index.js',
   'db-worker.js',
   's3.js',
 ]

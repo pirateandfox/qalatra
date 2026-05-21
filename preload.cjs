@@ -22,12 +22,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('terminal:exit', handler)
     return () => ipcRenderer.removeListener('terminal:exit', handler)
   },
-  onAgentJobComplete: (callback) => {
-    const handler = (_event, data) => callback(data)
-    ipcRenderer.on('agent-job:complete', handler)
-    return () => ipcRenderer.removeListener('agent-job:complete', handler)
-  },
-
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   downloadUpdate: () => ipcRenderer.invoke('updater:download'),
   installUpdate: () => ipcRenderer.invoke('updater:install'),

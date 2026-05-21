@@ -9,6 +9,8 @@ db/tasks.db-wal
 db/tasks.db-shm
 db/settings.json
 db/keystore
+db/server-keystore
+db/admin-token.txt
 
 # macOS
 .DS_Store
@@ -20,3 +22,4 @@ assets/ElectronIcon.icon/
 
 # Secrets
 .env
+.claude/**

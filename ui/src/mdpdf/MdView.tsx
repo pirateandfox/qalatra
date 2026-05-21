@@ -4,6 +4,14 @@ import { MarkdownEditor, type MarkdownEditorHandle } from './components/Markdown
 import { PreviewPanel } from './components/PreviewPanel'
 import { type StyleConfig, type DocumentConfig, DEFAULT_STYLE } from './types'
 import { injectPrintContent } from './utils/printHTML'
+import {
+  findInheritedStyle,
+  readTextFile,
+  textFileExists,
+  writeFolderStyle,
+  writeTextFile,
+  writeUserStyle,
+} from '../api'
 import './MdView.css'
 
 interface Props {
@@ -29,30 +37,6 @@ function getLegacyConfigPath(filePath: string): string {
 function countWords(text: string): number {
   const stripped = text.replace(/(?:^|\r?\n)[ \t]*<!--\s*pagebreak\s*-->[ \t]*(?:\r?\n|$)/gim, '')
   return stripped.trim().split(/\s+/).filter(Boolean).length
-}
-
-async function readFile(path: string): Promise<string> {
-  return (window as any).electronAPI.invoke('file:read', path)
-}
-
-async function writeFile(path: string, contents: string): Promise<void> {
-  await (window as any).electronAPI.invoke('file:write', path, contents)
-}
-
-async function fileExists(path: string): Promise<boolean> {
-  return (window as any).electronAPI.invoke('file:exists', path)
-}
-
-async function findInheritedStyle(dir: string): Promise<{ foundPath: string; content: string } | null> {
-  return (window as any).electronAPI.invoke('style:find', dir)
-}
-
-async function writeUserStyle(contents: string): Promise<void> {
-  await (window as any).electronAPI.invoke('style:write-user', contents)
-}
-
-async function writeFolderStyle(dir: string, contents: string): Promise<void> {
-  await (window as any).electronAPI.invoke('style:write-folder', dir, contents)
 }
 
 export default function MdView({ filePath, onClose, terminalOpen, onTerminalToggle, onChatWithDoc }: Props) {
@@ -94,15 +78,15 @@ export default function MdView({ filePath, onClose, terminalOpen, onTerminalTogg
 
   async function loadFile(path: string) {
     try {
-      const content = await readFile(path)
+      const content = await readTextFile(path)
       setMarkdown(content)
 
       const configPath = getConfigPath(path)
       const legacyPath = getLegacyConfigPath(path)
       let loadedConfig = false
       for (const cp of [configPath, legacyPath]) {
-        if (await fileExists(cp)) {
-          const configRaw = await readFile(cp)
+        if (await textFileExists(cp)) {
+          const configRaw = await readTextFile(cp)
           const config: DocumentConfig = JSON.parse(configRaw)
           setStyle(config.style ?? DEFAULT_STYLE)
           loadedConfig = true
@@ -130,7 +114,7 @@ export default function MdView({ filePath, onClose, terminalOpen, onTerminalTogg
 
   async function saveMarkdown(path: string, content: string) {
     try {
-      await writeFile(path, content)
+      await writeTextFile(path, content)
       setIsDirty(false)
     } catch (e) {
       console.error('Failed to save file:', e)
@@ -141,7 +125,7 @@ export default function MdView({ filePath, onClose, terminalOpen, onTerminalTogg
     const config: DocumentConfig = { filePath: path, pageBreaks: [], style: s }
     const configPath = getConfigPath(path)
     try {
-      await writeFile(configPath, JSON.stringify(config, null, 2))
+      await writeTextFile(configPath, JSON.stringify(config, null, 2))
     } catch (e) {
       console.error('Failed to save config:', e)
     }

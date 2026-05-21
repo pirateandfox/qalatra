@@ -5,7 +5,7 @@ const SECTIONS = [
     title: 'Navigation',
     rows: [
       ['1 – 7', 'Jump to sidebar section (Priority → Heartbeats)'],
-      ['d', 'Toggle Daily Note'],
+      ['d', 'Open Daily Note'],
       [', (comma)', 'Toggle Settings'],
       ['t', 'Toggle terminal'],
       ['Ctrl+`', 'Toggle terminal (alternative)'],

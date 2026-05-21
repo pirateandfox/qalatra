@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { today as todayStr } from '../lib/constants'
+import { createHabit as apiCreateHabit, listHabits } from '../api'
 import HabitRow from './HabitRow'
 import './HabitsView.css'
 
@@ -39,7 +40,7 @@ export default function HabitsView({ onMutate }: Props) {
   const [newRecurrenceDays, setNewRecurrenceDays] = useState<string[]>([])
 
   const load = useCallback(async () => {
-    const data = await (window as any).electronAPI.invoke('habits:list', today)
+    const data = await listHabits(today)
     setHabits(data)
     setLoading(false)
   }, [today])
@@ -50,7 +51,7 @@ export default function HabitsView({ onMutate }: Props) {
     e.preventDefault()
     if (!newTitle.trim()) return
     const recurrence_days = newRecurrenceDays.length > 0 ? newRecurrenceDays.join(',') : null
-    await (window as any).electronAPI.invoke('habits:create', { title: newTitle.trim(), description: newDesc.trim() || null, recurrence: newRecurrence, recurrence_days })
+    await apiCreateHabit({ title: newTitle.trim(), description: newDesc.trim() || null, recurrence: newRecurrence, recurrence_days })
     setNewTitle('')
     setNewDesc('')
     setNewRecurrence('daily')

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo } from 'react'
 import { fetchTasks, fetchSettings, updateTask, api, type TaskData } from './api'
 import { today as todayStr } from './lib/constants'
 import { ContextsProvider } from './lib/ContextsProvider'
@@ -10,7 +10,6 @@ import BacklogView from './components/BacklogView'
 import CodeAgentsView from './components/CodeAgentsView'
 import ReadingView from './components/ReadingView'
 import ProjectDashboardView from './components/ProjectDashboardView'
-import DailyNote from './components/DailyNote'
 import DetailPanel from './components/DetailPanel'
 import Terminal from './components/Terminal'
 import SettingsView from './components/SettingsView'
@@ -22,6 +21,8 @@ import ShortcutsHelp from './components/ShortcutsHelp'
 import EmailPreview from './components/EmailPreview'
 import MdView from './mdpdf/MdView'
 import './index.css'
+
+const DailyNote = lazy(() => import('./components/DailyNote'))
 
 export default function App() {
   return (
@@ -38,14 +39,13 @@ function AppInner() {
   const [backlogRefresh, setBacklogRefresh] = useState(0)
   const [codeRefresh, setCodeRefresh]       = useState(0)
   const [readingRefresh, setReadingRefresh] = useState(0)
+  const [dailyNoteRefresh, setDailyNoteRefresh] = useState(0)
   const [taskData, setTaskData]     = useState<TaskData | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [terminalMode, setTerminalMode] = useState<'closed' | 'docked' | 'fullscreen'>('closed')
   const [terminalCommand, setTerminalCommand] = useState<string | null>(null)
   const [previewPath, setPreviewPath]   = useState<string | null>(null)
   const [mdPath, setMdPath]             = useState<string | null>(null)
-  const [dailyNoteOpen, setDailyNoteOpen] = useState(false)
-  const [dailyNoteFullscreen, setDailyNoteFullscreen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [meetingId, setMeetingId]   = useState<string | null>(null)
@@ -147,13 +147,16 @@ function AppInner() {
           setCreateOpen(true)
           break
         case 'r':
-          nav === 'backlog' ? setBacklogRefresh(n => n + 1) : load(date)
+          if (nav === 'backlog') setBacklogRefresh(n => n + 1)
+          else if (nav === 'daily') setDailyNoteRefresh(n => n + 1)
+          else load(date)
           break
         case 't':
           setTerminalMode(m => m === 'closed' ? 'docked' : 'closed')
           break
         case 'd':
-          setDailyNoteOpen(o => !o)
+          setNav('daily')
+          setSelectedId(null)
           break
         case ',':
           setNav(n => n === 'settings' ? 'priority' : 'settings')
@@ -212,8 +215,8 @@ function AppInner() {
         onNavChange={n => { setNav(n); setSelectedId(null) }}
         activeAgentCount={activeAgentCount}
         onNewTask={() => setCreateOpen(true)}
-        dailyNoteOpen={dailyNoteOpen}
-        onDailyNoteToggle={() => setDailyNoteOpen(o => !o)}
+        dailyNoteActive={nav === 'daily'}
+        onDailyNoteOpen={() => { setNav('daily'); setSelectedId(null) }}
         themeMode={mode}
         onThemeModeChange={setMode}
       />
@@ -224,13 +227,21 @@ function AppInner() {
           nav={nav}
           onDateChange={d => { setDate(d); setSelectedId(null) }}
           onTerminalToggle={() => setTerminalMode(m => m === 'closed' ? 'docked' : 'closed')}
-          onRefresh={() => nav === 'backlog' ? setBacklogRefresh(n => n + 1) : load(date)}
+          onRefresh={() => {
+            if (nav === 'backlog') setBacklogRefresh(n => n + 1)
+            else if (nav === 'daily') setDailyNoteRefresh(n => n + 1)
+            else load(date)
+          }}
         />
 
         <div className={`layout ${selectedId ? 'panel-open' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div style={{ flex: 1, overflowY: nav === 'settings' ? 'hidden' : 'auto', minWidth: 0 }}>
+          <div style={{ flex: 1, overflowY: nav === 'settings' || nav === 'daily' ? 'hidden' : 'auto', minWidth: 0 }}>
             {nav === 'settings' ? (
               <SettingsView />
+            ) : nav === 'daily' ? (
+              <Suspense fallback={<div style={{ color: 'var(--muted)', padding: '40px', textAlign: 'center' }}>Loading Daily Note...</div>}>
+                <DailyNote date={date} refreshToken={dailyNoteRefresh} />
+              </Suspense>
             ) : nav === 'heartbeats' ? (
               <HeartbeatsView />
             ) : nav === 'habits' ? (
@@ -322,13 +333,6 @@ function AppInner() {
         defaultDate={date}
         onClose={() => setCreateOpen(false)}
         onCreated={id => { load(date); setSelectedId(id) }}
-      />
-      <DailyNote
-        open={dailyNoteOpen}
-        fullscreen={dailyNoteFullscreen}
-        onClose={() => { setDailyNoteOpen(false); setDailyNoteFullscreen(false) }}
-        onToggleFullscreen={() => setDailyNoteFullscreen(f => !f)}
-        date={date}
       />
       {previewPath && (
         <EmailPreview

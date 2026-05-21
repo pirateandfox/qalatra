@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { HtmlEditor } from './HtmlEditor'
+import { readTextFile, writeTextFile } from '../api'
 import './EmailPreview.css'
 
 interface Props {
@@ -34,14 +35,6 @@ const VIEWPORTS = [
   { label: 'Wide', w: 900 },
 ]
 
-async function readFile(path: string): Promise<string> {
-  return (window as any).electronAPI.invoke('file:read', path)
-}
-
-async function writeFile(path: string, contents: string): Promise<void> {
-  await (window as any).electronAPI.invoke('file:write', path, contents)
-}
-
 export default function EmailPreview({ filePath, onClose, terminalOpen, onTerminalToggle, onChatWithDoc }: Props) {
   const [width, setWidth] = useState(600)
   const [html, setHtml] = useState('')
@@ -58,7 +51,7 @@ export default function EmailPreview({ filePath, onClose, terminalOpen, onTermin
     loadedRef.current = false
     setError(null)
     setIsDirty(false)
-    readFile(filePath)
+    readTextFile(filePath)
       .then(content => {
         setHtml(content)
         loadedRef.current = true
@@ -83,7 +76,7 @@ export default function EmailPreview({ filePath, onClose, terminalOpen, onTermin
     setIsDirty(true)
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current)
     autosaveTimer.current = setTimeout(() => {
-      writeFile(filePath, html).then(() => setIsDirty(false)).catch(console.error)
+      writeTextFile(filePath, html).then(() => setIsDirty(false)).catch(console.error)
     }, 1000)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [html])

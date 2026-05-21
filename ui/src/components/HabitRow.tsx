@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { logHabit, unlogHabit, updateHabit } from '../api'
 import './HabitRow.css'
 
 const DAY_LABELS: Record<string, string> = { mon: 'Mo', tue: 'Tu', wed: 'We', thu: 'Th', fri: 'Fr', sat: 'Sa', sun: 'Su' }
@@ -31,14 +32,6 @@ interface Props {
   onMutate: () => void
 }
 
-async function apiLog(habit_id: string, date: string, status: 'done' | 'skipped', notes: string | null) {
-  await (window as any).electronAPI.invoke('habits:log', habit_id, date, status, notes)
-}
-
-async function apiUnlog(habit_id: string, date: string) {
-  await (window as any).electronAPI.invoke('habits:unlog', habit_id, date)
-}
-
 export default function HabitRow({ habit, today, onMutate }: Props) {
   const log = habit.today_log
   const isDone    = log?.status === 'done'
@@ -57,9 +50,9 @@ export default function HabitRow({ habit, today, onMutate }: Props) {
 
   async function handleDone() {
     if (isDone) {
-      await apiUnlog(habit.id, today)
+      await unlogHabit(habit.id, today)
     } else {
-      await apiLog(habit.id, today, 'done', notes || null)
+      await logHabit(habit.id, today, 'done', notes || null)
       setNotesOpen(true)
     }
     onMutate()
@@ -67,23 +60,23 @@ export default function HabitRow({ habit, today, onMutate }: Props) {
 
   async function handleSkip() {
     if (isSkipped) {
-      await apiUnlog(habit.id, today)
+      await unlogHabit(habit.id, today)
     } else {
-      await apiLog(habit.id, today, 'skipped', null)
+      await logHabit(habit.id, today, 'skipped', null)
       setNotesOpen(false)
     }
     onMutate()
   }
 
   async function saveNotes() {
-    await apiLog(habit.id, today, 'done', notes || null)
+    await logHabit(habit.id, today, 'done', notes || null)
     setNotesOpen(false)
     onMutate()
   }
 
   async function saveEdit() {
     const recurrence_days = editDays.length > 0 ? editDays.join(',') : null
-    await (window as any).electronAPI.invoke('habits:update', {
+    await updateHabit({
       id: habit.id,
       title: editTitle.trim() || habit.title,
       description: editDesc.trim() || null,
@@ -96,7 +89,7 @@ export default function HabitRow({ habit, today, onMutate }: Props) {
 
   async function archiveHabit() {
     if (!confirm(`Archive "${habit.title}"?`)) return
-    await (window as any).electronAPI.invoke('habits:update', { id: habit.id, active: false })
+    await updateHabit({ id: habit.id, active: false })
     onMutate()
   }
 

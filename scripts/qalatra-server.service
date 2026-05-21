@@ -1,0 +1,21 @@
+[Unit]
+Description=Qalatra Server
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/qalatra
+Environment=NODE_ENV=production
+Environment=QALATRA_DATA_DIR=%h/.local/share/qalatra/db
+Environment=QALATRA_API_HOST=127.0.0.1
+Environment=QALATRA_API_PORT=3456
+Environment=QALATRA_MCP_HOST=127.0.0.1
+Environment=QALATRA_START_MCP=1
+Environment=QALATRA_START_WORKERS=1
+Environment=QALATRA_BOOTSTRAP_TOKEN_FILE=1
+ExecStart=/usr/bin/node /opt/qalatra/server/index.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

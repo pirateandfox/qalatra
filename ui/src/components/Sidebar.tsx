@@ -1,7 +1,7 @@
 import type { ThemeMode } from '../lib/theme'
 import './Sidebar.css'
 
-export type NavSection = 'priority' | 'code' | 'reading' | 'project' | 'backlog' | 'habits' | 'heartbeats' | 'settings'
+export type NavSection = 'priority' | 'daily' | 'code' | 'reading' | 'project' | 'backlog' | 'habits' | 'heartbeats' | 'settings'
 
 const THEME_ICONS: Record<ThemeMode, string> = { system: '◑', light: '☀', dark: '☾' }
 const THEME_CYCLE: ThemeMode[] = ['system', 'light', 'dark']
@@ -21,15 +21,15 @@ interface Props {
   onNavChange: (n: NavSection) => void
   activeAgentCount: number
   onNewTask: () => void
-  dailyNoteOpen: boolean
-  onDailyNoteToggle: () => void
+  dailyNoteActive: boolean
+  onDailyNoteOpen: () => void
   themeMode: ThemeMode
   onThemeModeChange: (m: ThemeMode) => void
 }
 
 export default function Sidebar({
   nav, onNavChange, activeAgentCount,
-  onNewTask, dailyNoteOpen, onDailyNoteToggle,
+  onNewTask, dailyNoteActive, onDailyNoteOpen,
   themeMode, onThemeModeChange,
 }: Props) {
   function cycleTheme() {
@@ -59,7 +59,7 @@ export default function Sidebar({
         <button className="sidebar-action-btn new-btn" onClick={onNewTask} title="New Task (N)">
           <span>+</span><span>New Task</span>
         </button>
-        <button className={`sidebar-action-btn${dailyNoteOpen ? ' active' : ''}`} onClick={onDailyNoteToggle} title="Daily Note">
+        <button className={`sidebar-action-btn${dailyNoteActive ? ' active' : ''}`} onClick={onDailyNoteOpen} title="Daily Note">
           <span>✎</span><span>Daily Note</span>
         </button>
         <button className={`sidebar-action-btn${nav === 'settings' ? ' active' : ''}`} onClick={() => onNavChange('settings')} title="Settings">

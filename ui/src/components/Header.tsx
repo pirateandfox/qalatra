@@ -10,7 +10,7 @@ interface Props {
   onRefresh: () => void
 }
 
-const DATE_VIEWS: NavSection[] = ['priority', 'habits']
+const DATE_VIEWS: NavSection[] = ['priority', 'daily', 'habits']
 
 export default function Header({ date, nav, onDateChange, onTerminalToggle, onRefresh }: Props) {
   const today = todayStr()

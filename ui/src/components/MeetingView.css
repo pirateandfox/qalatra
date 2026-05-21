@@ -95,6 +95,7 @@
 .meeting-attachment-row { padding: 3px 0; }
 .meeting-attachment-link {
   font-size: 13px; color: var(--accent); text-decoration: none;
+  background: none; border: 0; cursor: pointer; padding: 0; text-align: left;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; max-width: 100%;
 }
 .meeting-attachment-link:hover { text-decoration: underline; }

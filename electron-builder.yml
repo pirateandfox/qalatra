@@ -10,11 +10,11 @@ directories:
 
 files:
   - electron-main.js
-  - ipc-handlers.js
   - db-worker.js
   - preload.cjs
   - s3.js
   - crypto.js
+  - server/**/*
   - mcp/**/*
   - ui/dist/**/*
   - "!ui/src/**/*"

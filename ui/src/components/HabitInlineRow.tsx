@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { today as todayStr } from '../lib/constants'
-import { type HabitSummary } from '../api'
+import { logHabit, unlogHabit, type HabitSummary } from '../api'
 import './HabitInlineRow.css'
 
 interface Props {
@@ -18,11 +18,11 @@ export default function HabitInlineRow({ habit, onMutate }: Props) {
 
   async function toggle() {
     if (isDone) {
-      await (window as any).electronAPI.invoke('habits:unlog', habit.id, today)
+      await unlogHabit(habit.id, today)
       setNotesOpen(false)
       onMutate()
     } else {
-      await (window as any).electronAPI.invoke('habits:log', habit.id, today, 'done', null)
+      await logHabit(habit.id, today, 'done', null)
       setNotes(log?.notes ?? '')
       setNotesOpen(true)
       onMutate()
@@ -30,7 +30,7 @@ export default function HabitInlineRow({ habit, onMutate }: Props) {
   }
 
   async function saveNotes() {
-    await (window as any).electronAPI.invoke('habits:log', habit.id, today, 'done', notes || null)
+    await logHabit(habit.id, today, 'done', notes || null)
     setNotesOpen(false)
     onMutate()
   }

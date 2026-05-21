@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import type { Task, Subtask } from '../types/task'
 import RecurrencePicker from './RecurrencePicker'
 import PlatformIcon from './PlatformIcon'
-import { api, updateTask, fetchTask, fetchSubtasks, fetchAttachments, fetchAgents, deleteAttachment, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, fetchProjects, createProjectExplicit, type Agent, type AgentJob, type Note, type Project } from '../api'
+import { api, updateTask, fetchTask, fetchSubtasks, fetchAttachments, fetchAgents, deleteAttachment, uploadAttachment, openAttachmentFile, subscribeServerEvents, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, fetchProjects, createProjectExplicit, type Agent, type AgentJob, type Note, type Project } from '../api'
 import type { Attachment } from '../types/task'
 import { PRIORITY_COLORS } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
@@ -169,10 +169,10 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
 
   useEffect(() => {
     if (!taskId) return
-    const unsub = (window as any).electronAPI?.onAgentJobComplete?.((data: { taskId: string }) => {
-      if (data.taskId === taskId) load(taskId)
+    const unsub = subscribeServerEvents((event: { type?: string; taskId?: string }) => {
+      if (event.type === 'agent-job:complete' && event.taskId === taskId) load(taskId)
     })
-    return () => unsub?.()
+    return () => unsub()
   }, [taskId, load])
 
   useEffect(() => {
@@ -272,17 +272,24 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
     const file = e.target.files?.[0]
     if (!file || !task) return
     setUploading(true)
-    const buffer = await file.arrayBuffer()
-    await (window as any).electronAPI.invoke('attachments:upload', task.id, file.name, file.type, Array.from(new Uint8Array(buffer)))
-    const atts = await fetchAttachments(task.id)
-    setAttachments(atts)
-    setUploading(false)
-    e.target.value = ''
+    try {
+      const buffer = await file.arrayBuffer()
+      await uploadAttachment(task.id, file.name, file.type, Array.from(new Uint8Array(buffer)))
+      const atts = await fetchAttachments(task.id)
+      setAttachments(atts)
+      e.target.value = ''
+    } finally {
+      setUploading(false)
+    }
   }
 
   async function handleDeleteAttachment(id: string) {
     await deleteAttachment(id)
     setAttachments(a => a.filter(x => x.id !== id))
+  }
+
+  async function handleOpenAttachment(id: string) {
+    await openAttachmentFile(id)
   }
 
   function fileIcon(mime: string | null) {
@@ -705,11 +712,11 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
                       })}
                       {attachments.map(a => (
                         <div key={a.id} className="detail-attachment-row">
-                          <a
+                          <button
                             className="detail-attachment-link"
-                            href={a.url ?? `/api/attachment/${a.id}/local`}
-                            target="_blank"
-                            rel="noreferrer"
+                            type="button"
+                            onClick={() => handleOpenAttachment(a.id)}
+                            title={a.filename}
                           >
                             {fileIcon(a.mimetype)} {a.filename}
                             {a.size_bytes != null && (
@@ -718,7 +725,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
                             {!a.url && !a.bucket && (
                               <span className="detail-attachment-local" title="Local only — not uploaded to cloud">local</span>
                             )}
-                          </a>
+                          </button>
                           <button className="detail-due-clear" onClick={() => handleDeleteAttachment(a.id)}>✕</button>
                         </div>
                       ))}
