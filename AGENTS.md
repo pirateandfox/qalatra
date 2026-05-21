@@ -58,9 +58,11 @@ npm run electron-dev        # kills stale processes, rebuilds native modules, st
   - Windows: per-user logon Scheduled Task named `Qalatra Server`
 - In `electron-dev`, service management is disabled by default so dev runs the current checkout's server. Use `QALATRA_DEV_USE_SERVICE=1` only for explicit service testing.
 
-**One native module build:**
+**Native module builds:**
 
 `electron-dev` runs `rebuild:electron` automatically. That's all that's needed for local desktop dev because Qalatra Server, `db-worker.js`, and MCP all use the Electron binary's Node runtime.
+
+Linux server installs use `npm ci --ignore-scripts` and then `npm run rebuild:node` so `better-sqlite3` and `node-pty` are compiled for system Node instead of Electron.
 
 **If the API or MCP server hangs**, kill it and let Electron respawn:
 

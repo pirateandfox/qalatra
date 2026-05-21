@@ -24,6 +24,7 @@
 - Added `scripts/install-cloudflare-tunnel.sh` for a Qalatra-owned Cloudflare Tunnel. It creates or reuses a named tunnel, routes a public hostname to only `http://127.0.0.1:3456`, and installs a separate `qalatra-cloudflared.service` user service so it does not clobber an existing admin/SSH tunnel.
 - Documented the two-channel Cloudflare model: SSH/noVNC operator hostnames stay behind Cloudflare Access, while the Qalatra API hostname stays outside Access and relies on Qalatra bearer tokens for Electron/web/mobile clients.
 - Hardened Linux user systemd unit generation by writing plain literal service values, removing brittle `network-online.target` ordering from user units, and including the configured MCP port in Electron-managed Linux services.
+- Added a dedicated `rebuild:node` helper that removes stale native build output, rebuilds `better-sqlite3` and `node-pty` for system Node, and verifies they load before the Linux service starts. Linux installs now run `npm ci --ignore-scripts` to avoid Electron's postinstall ABI rebuild on headless servers.
 - Added a systemd service template for Linux headless/server installs.
 - Electron now starts Qalatra Server during app bootstrap and lets the server own MCP, agent/heartbeat workers, and scheduled backups. The legacy data IPC backend has been removed.
 - Removed `ipc-handlers.js` and the UI's Electron data fallback; Electron IPC is now reserved for desktop-native shell work such as server lifecycle, terminal, updater, menu, and file-open events.

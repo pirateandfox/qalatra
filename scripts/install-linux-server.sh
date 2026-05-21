@@ -62,12 +62,12 @@ echo "MCP:  http://$MCP_HOST:$MCP_PORT/mcp"
 
 if [ ! -d "$ROOT_DIR/node_modules" ]; then
   info "Installing npm dependencies"
-  (cd "$ROOT_DIR" && npm ci)
+  (cd "$ROOT_DIR" && npm ci --ignore-scripts)
 fi
 
 # The desktop app rebuilds native modules for Electron's Node ABI. A pure
-# headless Linux server runs under system Node, so make sure native modules
-# match system Node after install.
+# headless Linux server runs under system Node, so force native modules back
+# to the current Node ABI before starting the service.
 info "Rebuilding native modules for system Node"
 (cd "$ROOT_DIR" && npm run rebuild:node)
 

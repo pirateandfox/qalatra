@@ -9,7 +9,7 @@
   "scripts": {
     "kill": "pkill -9 -f 'Electron.app/Contents/MacOS/Electron' 2>/dev/null; pkill -9 -f 'electron electron-main.js' 2>/dev/null; launchctl bootout gui/$(id -u)/com.qalatra.server 2>/dev/null; launchctl bootout gui/$(id -u)/com.qalatra.mcp 2>/dev/null; lsof -ti :3456 | xargs kill -9 2>/dev/null; lsof -ti :3457 | xargs kill -9 2>/dev/null; true",
     "rebuild:electron": "node node_modules/app-builder-lib/node_modules/@electron/rebuild/lib/cli.js -f -w better-sqlite3,node-pty --build-from-source",
-    "rebuild:node": "npm rebuild",
+    "rebuild:node": "node scripts/rebuild-node-native.mjs",
     "mcp": "echo '⚠️  Standalone MCP (system Node). Do NOT use while Electron app is running — run npm run electron-dev instead, which manages MCP automatically. Run npm run rebuild:electron before restarting the app after this.' && npm run rebuild:node && node mcp/http-server.js",
     "server": "node server/index.js",
     "server:electron": "ELECTRON_RUN_AS_NODE=1 electron server/index.js",
