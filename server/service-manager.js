@@ -32,8 +32,12 @@ function xmlEscape(value) {
     .replaceAll("'", '&apos;')
 }
 
-function quoteSystemd(value) {
-  return `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
+function systemdLiteral(value) {
+  const str = String(value)
+  if (/[ \t\r\n"\\]/.test(str)) {
+    throw new Error(`Linux service values cannot contain whitespace, quotes, or backslashes: ${str}`)
+  }
+  return str
 }
 
 function quotePowerShell(value) {
@@ -48,6 +52,7 @@ function serviceEnv(options) {
     QALATRA_API_HOST: options.apiHost || '127.0.0.1',
     QALATRA_API_PORT: String(options.apiPort || 3456),
     QALATRA_MCP_HOST: options.mcpHost || '127.0.0.1',
+    QALATRA_MCP_PORT: String(options.mcpPort || 3457),
     QALATRA_START_MCP: options.startMcp === false ? '0' : '1',
     QALATRA_START_WORKERS: options.startWorkers === false ? '0' : '1',
     QALATRA_BOOTSTRAP_TOKEN_FILE: '1',
@@ -116,17 +121,16 @@ function linuxServicePath() {
 function linuxUnit(options) {
   const command = serviceCommand(options)
   const envLines = Object.entries(command.env)
-    .map(([key, value]) => `Environment=${quoteSystemd(`${key}=${value}`)}`)
+    .map(([key, value]) => `Environment=${systemdLiteral(`${key}=${value}`)}`)
     .join('\n')
-  const execStart = [command.runtime, ...command.args].map(quoteSystemd).join(' ')
+  const execStart = [command.runtime, ...command.args].map(systemdLiteral).join(' ')
 
   return `[Unit]
 Description=Qalatra Server
-After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=${quoteSystemd(command.cwd)}
+WorkingDirectory=${systemdLiteral(command.cwd)}
 ${envLines}
 ExecStart=${execStart}
 Restart=on-failure

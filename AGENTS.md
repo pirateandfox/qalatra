@@ -77,6 +77,13 @@ curl -fsSL https://raw.githubusercontent.com/pirateandfox/qalatra/develop/script
 
 Set `QALATRA_TUNNEL_HOSTNAME=qalatra.example.com` on that command to install the Qalatra Cloudflare tunnel during bootstrap. The tunnel script creates a separate `qalatra-cloudflared.service` user service so it does not overwrite an existing server-admin tunnel. It exposes only the Qalatra API origin (`127.0.0.1:3456` by default); never publish MCP port `3457`.
 
+Qalatra servers use two separate Cloudflare trust channels:
+
+- Operator access hostnames for SSH/noVNC belong behind Cloudflare Access, SSH keys, and any VPN/email policies needed for Justin or an ops user.
+- The Qalatra API hostname must not be added to that Access application. It should be reachable through Cloudflare Tunnel without an Access login wall, because Qalatra's bearer tokens are the product auth layer used by Electron, web, and mobile clients.
+
+It is fine for `~/.cloudflared/cert.pem` to already exist from the operator setup. `install-cloudflare-tunnel.sh` reuses that account login, creates or reuses the separate `qalatra-api` tunnel, and writes separate Qalatra-only service/config files.
+
 ---
 
 ## Database

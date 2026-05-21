@@ -20,11 +20,12 @@ info() {
   echo "==> $*"
 }
 
-systemd_quote() {
+systemd_literal() {
   local value="$1"
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  printf '"%s"' "$value"
+  if [[ "$value" =~ [[:space:]\"\\] ]]; then
+    fail "systemd user service values cannot contain whitespace, quotes, or backslashes: $value"
+  fi
+  printf '%s' "$value"
 }
 
 wait_for_url() {
@@ -49,6 +50,10 @@ NODE_MAJOR="$("$NODE_BIN" -p "Number(process.versions.node.split('.')[0])")"
 
 systemctl --user show-environment >/dev/null 2>&1 || fail "systemd --user is not available in this shell. SSH in as the target user without sudo, or enable a user session first."
 
+systemd_literal "$ROOT_DIR" >/dev/null
+systemd_literal "$DATA_DIR" >/dev/null
+systemd_literal "$NODE_BIN" >/dev/null
+
 info "Installing Qalatra Server"
 echo "Root: $ROOT_DIR"
 echo "Data: $DATA_DIR"
@@ -69,21 +74,20 @@ info "Rebuilding native modules for system Node"
 cat > "$SERVICE_FILE" <<SERVICE
 [Unit]
 Description=Qalatra Server
-After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=$(systemd_quote "$ROOT_DIR")
-Environment=$(systemd_quote "NODE_ENV=production")
-Environment=$(systemd_quote "QALATRA_DATA_DIR=$DATA_DIR")
-Environment=$(systemd_quote "QALATRA_API_HOST=$API_HOST")
-Environment=$(systemd_quote "QALATRA_API_PORT=$API_PORT")
-Environment=$(systemd_quote "QALATRA_MCP_HOST=$MCP_HOST")
-Environment=$(systemd_quote "QALATRA_MCP_PORT=$MCP_PORT")
-Environment=$(systemd_quote "QALATRA_START_MCP=1")
-Environment=$(systemd_quote "QALATRA_START_WORKERS=1")
-Environment=$(systemd_quote "QALATRA_BOOTSTRAP_TOKEN_FILE=1")
-ExecStart=$(systemd_quote "$NODE_BIN") $(systemd_quote "$ROOT_DIR/server/index.js")
+WorkingDirectory=$(systemd_literal "$ROOT_DIR")
+Environment=NODE_ENV=production
+Environment=QALATRA_DATA_DIR=$(systemd_literal "$DATA_DIR")
+Environment=QALATRA_API_HOST=$(systemd_literal "$API_HOST")
+Environment=QALATRA_API_PORT=$(systemd_literal "$API_PORT")
+Environment=QALATRA_MCP_HOST=$(systemd_literal "$MCP_HOST")
+Environment=QALATRA_MCP_PORT=$(systemd_literal "$MCP_PORT")
+Environment=QALATRA_START_MCP=1
+Environment=QALATRA_START_WORKERS=1
+Environment=QALATRA_BOOTSTRAP_TOKEN_FILE=1
+ExecStart=$(systemd_literal "$NODE_BIN") $(systemd_literal "$ROOT_DIR/server/index.js")
 Restart=on-failure
 RestartSec=5
 

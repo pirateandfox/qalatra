@@ -23,11 +23,12 @@ info() {
   echo "==> $*"
 }
 
-systemd_quote() {
+systemd_literal() {
   local value="$1"
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  printf '"%s"' "$value"
+  if [[ "$value" =~ [[:space:]\"\\] ]]; then
+    fail "systemd user service values cannot contain whitespace, quotes, or backslashes: $value"
+  fi
+  printf '%s' "$value"
 }
 
 tunnel_id_for_name() {
@@ -62,6 +63,8 @@ wait_for_url() {
 command -v node >/dev/null 2>&1 || fail "node is required."
 command -v curl >/dev/null 2>&1 || fail "curl is required."
 systemctl --user show-environment >/dev/null 2>&1 || fail "systemd --user is not available in this shell. SSH in as the target user without sudo, or enable a user session first."
+systemd_literal "$CLOUDFLARED_BIN" >/dev/null
+systemd_literal "$CONFIG_FILE" >/dev/null
 
 mkdir -p "$CLOUDFLARED_HOME" "$CONFIG_DIR" "$SERVICE_DIR"
 
@@ -107,11 +110,11 @@ fi
 cat > "$SERVICE_FILE" <<SERVICE
 [Unit]
 Description=Qalatra Cloudflare Tunnel
-After=network-online.target qalatra-server.service
+After=qalatra-server.service
 
 [Service]
 Type=simple
-ExecStart=$(systemd_quote "$CLOUDFLARED_BIN") --config $(systemd_quote "$CONFIG_FILE") tunnel run $(systemd_quote "$TUNNEL_ID")
+ExecStart=$(systemd_literal "$CLOUDFLARED_BIN") --config $(systemd_literal "$CONFIG_FILE") tunnel run $(systemd_literal "$TUNNEL_ID")
 Restart=on-failure
 RestartSec=5
 
@@ -148,3 +151,4 @@ echo "  TOKEN=\$(cat $(printf '%q' "${QALATRA_DATA_DIR:-$HOME/.local/share/qalat
 echo "  curl -fsS -H \"Authorization: Bearer \$TOKEN\" https://$HOSTNAME/api/instance"
 echo
 echo "This tunnel exposes only the Qalatra API origin. Do not publish MCP port 3457."
+echo "Do not add $HOSTNAME to the operator Cloudflare Access app; Qalatra clients authenticate with bearer tokens."

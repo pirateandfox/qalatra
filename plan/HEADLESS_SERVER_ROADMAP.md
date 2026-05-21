@@ -123,3 +123,10 @@ QALATRA_TUNNEL_HOSTNAME=qalatra.example.com ./scripts/install-cloudflare-tunnel.
 ```
 
 This creates a separate `qalatra-cloudflared.service`, so it can coexist with an admin SSH tunnel. It points only at `127.0.0.1:3456`; do not expose the MCP port publicly.
+
+Keep the Cloudflare trust channels separate:
+
+- SSH/noVNC/operator hostnames should stay behind Cloudflare Access policies.
+- The Qalatra API hostname should not be added to the operator Access app. Electron, web, and mobile clients need to reach the API directly and authenticate with Qalatra bearer tokens.
+
+If `~/.cloudflared/cert.pem` already exists from the operator setup, the Qalatra tunnel installer uses it and skips `cloudflared tunnel login`.
