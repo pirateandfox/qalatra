@@ -1,73 +1,31 @@
-# React + TypeScript + Vite
+# Qalatra UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript frontend for Qalatra Desktop and future web clients.
 
-Currently, two official plugins are available:
+The UI talks to Qalatra Server over the authenticated HTTP API. In desktop dev, Electron starts a local server automatically. In remote mode, Settings -> Instances selects another Qalatra Server URL and bearer token.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Commands
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install --prefix ui
+npm run dev --prefix ui
+npm run build --prefix ui
+npm run lint --prefix ui
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+For normal desktop development, run from the repo root instead:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run electron-dev
 ```
+
+That starts Vite, Electron, the local Qalatra API, MCP, and the terminal bridge together.
+
+## File Map
+
+- `src/apiRuntime.ts` stores server selection, token-authenticated HTTP helpers, local Electron server control, and server event streaming.
+- `src/api.ts` exports product-level API functions for tasks, settings, files, attachments, habits, heartbeats, backups, and MCP config.
+- `src/components/settings/` keeps each Settings tab in its own component.
+- `src/mdpdf/` contains the Markdown/editor/PDF preview surface.
+
+Keep new UI data access on the HTTP API path. Electron IPC should stay limited to desktop shell capabilities such as terminal, updater, file-open events, and local server/service management.

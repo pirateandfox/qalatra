@@ -40,6 +40,9 @@
 - Added `plan/HEADLESS_SERVER_ROADMAP.md` to separate the implemented migration slice from the longer-term backend/client architecture.
 - Added `docs/linux-remote-install.md` and CI coverage for dependency audits, Linux install script syntax, system-Node native rebuilds, packaging import checks, UI build, and a headless server smoke test.
 - Updated root and UI dependency locks to clear npm audit findings, including Electron 41.7, Electron Builder 26.8, AWS SDK 3.1052, MCP SDK 1.29, better-sqlite3 12.10, uuid 14, and UI transitive security fixes.
+- Split the frontend API layer into `ui/src/apiRuntime.ts` for server selection, authenticated HTTP, local Electron server controls, and event streaming, leaving `ui/src/api.ts` focused on product-level API operations.
+- Split the large Settings screen into per-tab components under `ui/src/components/settings/` so Instances, General, Storage, Encryption/Backup, Contexts, and Agents can be edited independently.
+- Replaced the default Vite UI README with Qalatra-specific frontend architecture notes and calibrated UI lint so `npm run lint --prefix ui` exits cleanly in local and CI verification while existing `any` and hook dependency debt remain visible as warnings.
 
 ## Unreleased — Full-page Daily Note editor + shared agent guidance (2026-05-18)
 

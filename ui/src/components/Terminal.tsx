@@ -60,7 +60,9 @@ export default function Terminal({ mode, onClose, onToggleFullscreen, pendingCom
       if (autoRun) {
         setTimeout(() => { eAPI().terminalInput(autoRun + '\r') }, 300)
       }
-    } catch {}
+    } catch {
+      // Terminal auto-run settings are optional.
+    }
   }, [])
 
   // Initialize xterm DOM once

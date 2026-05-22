@@ -73,7 +73,6 @@ export default function MdView({ filePath, onClose, terminalOpen, onTerminalTogg
   useEffect(() => {
     if (!loadedRef.current) return
     saveConfig(filePath, style)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [style, filePath])
 
   async function loadFile(path: string) {

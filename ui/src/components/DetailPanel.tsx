@@ -155,7 +155,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
       if (t.agent_path) {
         fetchAgentJobs(id).then(jobs => setLatestJob(jobs[0] ?? null))
       }
-    } catch (_) {
+    } catch {
       // backend unreachable — panel will just be empty
     } finally {
       setLoading(false)

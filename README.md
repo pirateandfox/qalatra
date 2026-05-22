@@ -6,7 +6,7 @@ Give your AI agent full read/write access to your tasks, daily notes, and habit 
 
 Built for Claude Code via MCP. Works with any command-line AI agent.
 
-Your data lives in a local SQLite database on your machine. Nothing goes to a server. The app is free and open source.
+Your data lives in a SQLite database owned by Qalatra Server. By default that server runs locally inside the desktop app; it can also run headlessly on a Linux machine and accept token-authenticated remote clients. There is no Qalatra-hosted SaaS backend. The app is free and open source.
 
 ---
 
@@ -157,7 +157,7 @@ Qalatra runs an MCP server on `http://localhost:3457`. Add it to `~/.claude.json
 }
 ```
 
-Restart Claude Code. The app must be running for the tools to be available.
+Restart Claude Code. The local Qalatra Server must be running for the tools to be available; the Electron app can manage that server, or you can keep it running with the OS service option in Settings -> Instances.
 
 You can also change the port and auto-update `~/.claude.json` from **Settings → MCP Server** inside the app.
 
@@ -268,7 +268,7 @@ Linked `.md` files open in a markdown editor with PDF export. Linked `.html` and
 ## Tech stack
 
 - **Electron** + **Vite** + **React** + **TypeScript**
-- **SQLite** via `better-sqlite3` (local, no server required)
+- **SQLite** via `better-sqlite3` owned by Qalatra Server
 - **MCP** via `@modelcontextprotocol/sdk` (StreamableHTTP, port 3457)
 - **xterm.js** for the terminal
 - **S3-compatible** storage for attachments (optional)

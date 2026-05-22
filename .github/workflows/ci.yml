@@ -35,6 +35,9 @@ jobs:
       - name: Audit UI dependencies
         run: npm audit --audit-level=moderate --prefix ui
 
+      - name: Lint UI
+        run: npm run lint --prefix ui
+
       - name: Build UI
         run: npm run build --prefix ui
 

@@ -183,14 +183,16 @@ function AppInner() {
           if (selectedId) {
             await api.complete(selectedId)
             setSelectedId(null)
-            nav === 'backlog' ? setBacklogRefresh(n => n + 1) : load(date, true)
+            if (nav === 'backlog') setBacklogRefresh(n => n + 1)
+            else load(date, true)
           }
           break
         case 'b':
           if (selectedId) {
             await updateTask(selectedId, { status: 'backlog' })
             setSelectedId(null)
-            nav === 'backlog' ? setBacklogRefresh(n => n + 1) : load(date, true)
+            if (nav === 'backlog') setBacklogRefresh(n => n + 1)
+            else load(date, true)
           }
           break
       }

@@ -224,7 +224,8 @@ export default function HeartbeatsView({ onMutate }: Props) {
   function toggleJobExpand(jobId: string) {
     setExpandedJobIds(prev => {
       const next = new Set(prev)
-      next.has(jobId) ? next.delete(jobId) : next.add(jobId)
+      if (next.has(jobId)) next.delete(jobId)
+      else next.add(jobId)
       return next
     })
   }
@@ -396,7 +397,7 @@ export default function HeartbeatsView({ onMutate }: Props) {
                     agentPath={editForm.agent_path}
                     onContextChange={ctx => setEditForm(f => ({ ...f, context: ctx, project: '', agent_path: '' }))}
                     onProjectChange={proj => setEditForm(f => ({ ...f, project: proj, agent_path: '' }))}
-                    onAgentChange={(path, _desc) => setEditForm(f => ({ ...f, agent_path: path }))}
+                    onAgentChange={path => setEditForm(f => ({ ...f, agent_path: path }))}
                   />
 
                   <textarea className="hb-textarea" value={editForm.prompt} onChange={e => setEditForm(f => ({ ...f, prompt: e.target.value }))} rows={4} required />
