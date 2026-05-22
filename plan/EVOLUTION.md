@@ -26,6 +26,7 @@
 - Hardened Linux user systemd unit generation by writing plain literal service values, removing brittle `network-online.target` ordering from user units, and including the configured MCP port in Electron-managed Linux services.
 - Added a dedicated `rebuild:node` helper that removes stale native build output, rebuilds `better-sqlite3` and `node-pty` for system Node, and verifies they load before the Linux service starts. Linux installs now run `npm ci --ignore-scripts` to avoid Electron's postinstall ABI rebuild on headless servers.
 - Changed Qalatra Cloudflare DNS routing to target the tunnel UUID with `--overwrite-dns`, so an existing operator/wildcard DNS record cannot silently keep the API hostname on the wrong tunnel.
+- Verified the first real Linux headless install on `qalatra-dev-01`: local `/health`, local authenticated `/api/instance`, and public Cloudflare Tunnel access through `https://api-test.qalatra.com/api/instance` all returned successfully. The install surfaced and fixed two production-readiness issues: systemd user-unit generation and Electron-vs-system-Node native module ABI rebuilds.
 - Added a systemd service template for Linux headless/server installs.
 - Electron now starts Qalatra Server during app bootstrap and lets the server own MCP, agent/heartbeat workers, and scheduled backups. The legacy data IPC backend has been removed.
 - Removed `ipc-handlers.js` and the UI's Electron data fallback; Electron IPC is now reserved for desktop-native shell work such as server lifecycle, terminal, updater, menu, and file-open events.

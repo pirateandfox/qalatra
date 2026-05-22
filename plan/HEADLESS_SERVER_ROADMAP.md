@@ -130,3 +130,19 @@ Keep the Cloudflare trust channels separate:
 - The Qalatra API hostname should not be added to the operator Access app. Electron, web, and mobile clients need to reach the API directly and authenticate with Qalatra bearer tokens.
 
 If `~/.cloudflared/cert.pem` already exists from the operator setup, the Qalatra tunnel installer uses it and skips `cloudflared tunnel login`.
+
+### First Linux install verification
+
+Validated on `qalatra-dev-01` with:
+
+- Qalatra Server running as `qalatra-server.service`
+- Qalatra Cloudflare Tunnel running as `qalatra-cloudflared.service`
+- local health check passing at `http://127.0.0.1:3456/health`
+- local authenticated API check passing at `http://127.0.0.1:3456/api/instance`
+- remote authenticated API check passing through `https://api-test.qalatra.com/api/instance`
+
+Follow-up issues discovered during the first install and fixed on `develop`:
+
+- Linux systemd user units should use plain literal values and avoid brittle `network-online.target` ordering.
+- Linux server installs must skip Electron postinstall native rebuilds and explicitly rebuild `better-sqlite3`/`node-pty` for system Node.
+- Cloudflare DNS routing should target the tunnel UUID and use `--overwrite-dns` so operator-tunnel DNS cannot accidentally capture the Qalatra API hostname.
