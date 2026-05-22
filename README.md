@@ -115,11 +115,22 @@ Download the latest release from the [Releases page](https://github.com/piratean
 
 > **Windows note:** The installer is unsigned — Windows SmartScreen will warn you. Click "More info" → "Run anyway". If Claude Code fails on Windows, install it via npm: `npm install -g @anthropic-ai/claude-code`
 
+### Linux headless server
+
+Qalatra can also run as a headless Linux service with a token-authenticated API for remote Electron, web, or mobile clients:
+
+```bash
+export QALATRA_TUNNEL_HOSTNAME=api-test.qalatra.com
+curl -fsSL https://raw.githubusercontent.com/pirateandfox/qalatra/develop/scripts/bootstrap-linux-server.sh | bash
+```
+
+See [Linux Headless Server and Remote Access](docs/linux-remote-install.md) for Cloudflare setup, smoke tests, and MCP configuration.
+
 ---
 
 ## Run from source
 
-Requires Node.js 20+.
+Requires Node.js 22+.
 
 ```bash
 git clone https://github.com/pirateandfox/qalatra.git
@@ -271,10 +282,10 @@ git checkout -b feature/my-feature
 # make changes
 git commit -m "feat: what you did"
 git push -u origin feature/my-feature
-gh pr create --base main
+gh pr create --base develop
 ```
 
-Releases are cut by pushing a version tag: `git tag v1.0.x && git push origin v1.0.x`. This triggers the GitHub Actions build — macOS DMG (signed + notarized), Windows EXE, Linux AppImage — and publishes to GitHub Releases. The app auto-updates.
+Releases are cut from `develop` by pushing a version tag: `git tag v1.0.x && git push origin v1.0.x`. This triggers the GitHub Actions build — macOS DMG (signed + notarized), Windows EXE, Linux AppImage — and publishes to GitHub Releases. The app auto-updates.
 
 See [`CLAUDE.md`](CLAUDE.md) for architecture, schema, and development notes.
 

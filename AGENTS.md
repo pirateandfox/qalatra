@@ -12,8 +12,11 @@ Qalatra is Justin's personal task management system: a local SQLite database own
 ~/IdeaProjects/qalatra/
 ├── electron-main.js        ← Electron main process; starts Qalatra Server, terminal pty, updater, app menu
 ├── server/                 ← Authenticated headless HTTP API; owns /api/v1, DB access, MCP child, workers, backups, tokens, service management
+│   └── http.js             ← Shared HTTP response, CORS, body parsing, and file streaming helpers
 ├── db-worker.js            ← SQLite worker used by Qalatra Server; handles DB calls off the server event loop
 ├── s3.js                   ← S3/R2 attachment helpers
+├── docs/
+│   └── linux-remote-install.md ← Verified Linux headless install, Cloudflare tunnel, smoke tests, and MCP setup
 ├── scripts/
 │   ├── install-linux-server.sh ← Installs Qalatra Server as a Linux user systemd service
 │   └── install-cloudflare-tunnel.sh ← Installs a Qalatra-only cloudflared user service for the API
@@ -117,7 +120,7 @@ The MCP tools are the primary interface for Claude to interact with Qalatra duri
 
 **Repo:** `github.com/pirateandfox/qalatra`
 
-**Branch strategy:** single `main` branch — commit directly, tag to release.
+**Branch strategy:** single `develop` branch — commit directly, tag to release when ready.
 
 **Cutting a release:**
 ```bash
@@ -125,7 +128,7 @@ The MCP tools are the primary interface for Claude to interact with Qalatra duri
 #    (version in package.json = what shows in the app and on the release)
 # 2. Commit and push
 git add package.json && git commit -m "Bump version to 1.0.x"
-git push origin main
+git push origin develop
 # 3. Tag and push — this triggers the CI build
 git tag v1.0.x && git push origin v1.0.x
 ```

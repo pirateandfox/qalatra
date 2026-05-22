@@ -34,7 +34,12 @@
 - Added authenticated `/api/events` streaming. Agent job completion notifications now come from Qalatra Server, so local Electron and future remote clients share the same event path.
 - Moved periodic pending attachment sync into the server worker loop.
 - Added token management to Settings → Instances: list current tokens, create a full-access token, show the new secret once, and revoke tokens by ID.
+- Added token expiration support. Tokens now store optional `expires_at`, expired tokens are rejected during authentication, and Settings → Instances can create expiring client tokens.
+- Added public API body-size limits for JSON and raw upload endpoints to keep the token-authenticated server from accepting unbounded request bodies.
+- Added `server/http.js` for shared HTTP/CORS/body/stream helpers so `server/index.js` stays focused on lifecycle and route dispatch.
 - Added `plan/HEADLESS_SERVER_ROADMAP.md` to separate the implemented migration slice from the longer-term backend/client architecture.
+- Added `docs/linux-remote-install.md` and CI coverage for dependency audits, Linux install script syntax, system-Node native rebuilds, packaging import checks, UI build, and a headless server smoke test.
+- Updated root and UI dependency locks to clear npm audit findings, including Electron 41.7, Electron Builder 26.8, AWS SDK 3.1052, MCP SDK 1.29, better-sqlite3 12.10, uuid 14, and UI transitive security fixes.
 
 ## Unreleased — Full-page Daily Note editor + shared agent guidance (2026-05-18)
 

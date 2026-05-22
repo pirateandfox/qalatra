@@ -222,6 +222,7 @@ export interface AccessToken {
   created_at: string
   last_used_at: string | null
   revoked_at: string | null
+  expires_at: string | null
 }
 
 export async function listAccessTokens(): Promise<AccessToken[]> {
@@ -230,11 +231,11 @@ export async function listAccessTokens(): Promise<AccessToken[]> {
   return data.tokens ?? []
 }
 
-export async function createAccessToken(label: string, scopes = 'full_access'): Promise<{ id: string; token: string; label: string; scopes: string }> {
+export async function createAccessToken(label: string, scopes = 'full_access', expiresInDays?: number | null): Promise<{ id: string; token: string; label: string; scopes: string; expires_at: string | null }> {
   const active = await currentServerInstance()
   const data = await httpJson(active, '/api/tokens', {
     method: 'POST',
-    body: JSON.stringify({ label, scopes }),
+    body: JSON.stringify({ label, scopes, expiresInDays }),
   })
   return data.token
 }

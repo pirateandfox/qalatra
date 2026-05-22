@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import http from 'http'
-import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
@@ -10,7 +9,8 @@ import { initSettings, loadSettings, saveSettings } from './settings.js'
 import { authenticate, createToken, ensureBootstrapToken, initAuth, listTokens, requireScope, revokeToken } from './auth.js'
 import { deleteAttachment, listAttachments, readAttachmentContent, uploadAttachment } from './attachments.js'
 import { runBackup } from './backups.js'
-import { fileExists, findInheritedStyle, mimeTypeForPath, readTextFile, resolveAllowedPath, writeFolderStyle, writeTextFile, writeUserStyle } from './files.js'
+import { fileExists, findInheritedStyle, readTextFile, resolveAllowedPath, writeFolderStyle, writeTextFile, writeUserStyle } from './files.js'
+import { applyCors, parseBody, parseRawBody, sendBinary, sendJson, streamFile } from './http.js'
 import { handleV1 } from './v1.js'
 import { startBackgroundWorkers } from './workers.js'
 
@@ -30,88 +30,11 @@ let mcpProcess = null
 let backupTimer = null
 const eventClients = new Set()
 
-function sendJson(res, status, body) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  })
-  res.end(JSON.stringify(body))
-}
-
-function sendBinary(res, status, buffer, mimeType, filename) {
-  const headers = {
-    'Content-Type': mimeType || 'application/octet-stream',
-    'Content-Length': buffer.length,
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  }
-  if (filename) headers['Content-Disposition'] = `inline; filename*=UTF-8''${encodeURIComponent(filename)}`
-  res.writeHead(status, headers)
-  res.end(buffer)
-}
-
-function streamFile(req, res, filePath) {
-  const stat = fs.statSync(filePath)
-  const mimeType = mimeTypeForPath(filePath)
-  const baseHeaders = {
-    'Content-Type': mimeType,
-    'Accept-Ranges': 'bytes',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(path.basename(filePath))}`,
-  }
-  const range = req.headers.range
-  if (range) {
-    const match = /^bytes=(\d*)-(\d*)$/.exec(range)
-    if (match) {
-      const start = match[1] ? parseInt(match[1], 10) : 0
-      const end = match[2] ? parseInt(match[2], 10) : stat.size - 1
-      if (start <= end && end < stat.size) {
-        res.writeHead(206, {
-          ...baseHeaders,
-          'Content-Length': end - start + 1,
-          'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-        })
-        fs.createReadStream(filePath, { start, end }).pipe(res)
-        return
-      }
-    }
-  }
-
-  res.writeHead(200, { ...baseHeaders, 'Content-Length': stat.size })
-  fs.createReadStream(filePath).pipe(res)
-}
-
 function publishEvent(event) {
   const payload = `data: ${JSON.stringify(event)}\n\n`
   for (const res of eventClients) {
     try { res.write(payload) } catch {}
   }
-}
-
-async function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    req.on('data', chunk => { data += chunk })
-    req.on('end', () => {
-      if (!data.trim()) return resolve({})
-      try { resolve(JSON.parse(data)) } catch (e) { reject(e) }
-    })
-    req.on('error', reject)
-  })
-}
-
-async function parseRawBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = []
-    req.on('data', chunk => { chunks.push(chunk) })
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', reject)
-  })
 }
 
 function startMcpServer() {
@@ -151,9 +74,7 @@ async function main() {
   startMcpServer()
 
   const server = http.createServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    applyCors(res)
     if (req.method === 'OPTIONS') {
       res.writeHead(200)
       res.end()
@@ -305,7 +226,7 @@ async function main() {
 
       sendJson(res, 404, { error: 'Not found' })
     } catch (e) {
-      sendJson(res, 500, { error: e.message })
+      sendJson(res, e.status || e.statusCode || 500, { error: e.message })
     }
   })
 

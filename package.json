@@ -8,7 +8,7 @@
   "main": "electron-main.js",
   "scripts": {
     "kill": "pkill -9 -f 'Electron.app/Contents/MacOS/Electron' 2>/dev/null; pkill -9 -f 'electron electron-main.js' 2>/dev/null; launchctl bootout gui/$(id -u)/com.qalatra.server 2>/dev/null; launchctl bootout gui/$(id -u)/com.qalatra.mcp 2>/dev/null; lsof -ti :3456 | xargs kill -9 2>/dev/null; lsof -ti :3457 | xargs kill -9 2>/dev/null; true",
-    "rebuild:electron": "node node_modules/app-builder-lib/node_modules/@electron/rebuild/lib/cli.js -f -w better-sqlite3,node-pty --build-from-source",
+    "rebuild:electron": "node node_modules/@electron/rebuild/lib/cli.js -f -w better-sqlite3,node-pty --build-from-source",
     "rebuild:node": "node scripts/rebuild-node-native.mjs",
     "mcp": "echo '⚠️  Standalone MCP (system Node). Do NOT use while Electron app is running — run npm run electron-dev instead, which manages MCP automatically. Run npm run rebuild:electron before restarting the app after this.' && npm run rebuild:node && node mcp/http-server.js",
     "server": "node server/index.js",
@@ -18,25 +18,27 @@
     "build": "npm run build --prefix ui",
     "start": "npm run kill && sleep 1 && NODE_ENV=production ./node_modules/.bin/electron electron-main.js",
     "check-imports": "node scripts/check-imports.mjs",
+    "smoke:server": "node scripts/smoke-server.mjs",
+    "ci:server": "bash -n scripts/bootstrap-linux-server.sh scripts/install-linux-server.sh scripts/install-cloudflare-tunnel.sh && node --check server/index.js && node --check server/service-manager.js && node --check scripts/rebuild-node-native.mjs && node --check scripts/smoke-server.mjs && npm run rebuild:node && npm run smoke:server",
     "dist": "npm run check-imports && npm run build && electron-builder --mac --publish never",
     "dist:publish": "npm run check-imports && npm run build && electron-builder --mac --publish always",
-    "postinstall": "node node_modules/app-builder-lib/node_modules/@electron/rebuild/lib/cli.js -f -w better-sqlite3,node-pty --build-from-source || true"
+    "postinstall": "node node_modules/@electron/rebuild/lib/cli.js -f -w better-sqlite3,node-pty --build-from-source || true"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1009.0",
-    "@aws-sdk/s3-request-presigner": "^3.1009.0",
-    "@modelcontextprotocol/sdk": "latest",
-    "better-sqlite3": "^12.8.0",
+    "@aws-sdk/client-s3": "^3.1052.0",
+    "@aws-sdk/s3-request-presigner": "^3.1052.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.10.0",
     "electron-updater": "^6.8.3",
     "node-pty": "^1.1.0",
     "rrule": "^2.8.1",
-    "uuid": "latest"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@electron/notarize": "^2.5.0",
     "concurrently": "^9.2.1",
-    "electron": "^41.0.2",
-    "electron-builder": "^25.1.8",
+    "electron": "^41.7.0",
+    "electron-builder": "^26.8.1",
     "sharp": "^0.34.5"
   }
 }

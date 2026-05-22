@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install root dependencies for system Node
+        run: npm ci --ignore-scripts
+
+      - name: Audit root dependencies
+        run: npm audit --audit-level=moderate
+
+      - name: Install UI dependencies
+        run: npm ci --prefix ui
+
+      - name: Audit UI dependencies
+        run: npm audit --audit-level=moderate --prefix ui
+
+      - name: Build UI
+        run: npm run build --prefix ui
+
+      - name: Check Electron packaging imports
+        run: npm run check-imports
+
+      - name: Smoke headless server
+        run: npm run ci:server

@@ -28,6 +28,33 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'agents',     label: 'Agents' },
 ]
 
+const TOKEN_EXPIRY_OPTIONS = [
+  { label: '30 days', value: '30' },
+  { label: '90 days', value: '90' },
+  { label: '1 year', value: '365' },
+  { label: 'No expiry', value: '' },
+]
+
+function parseServerDate(value: string | null) {
+  if (!value) return null
+  const iso = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function tokenIsExpired(token: AccessToken) {
+  const expiresAt = parseServerDate(token.expires_at)
+  return !!expiresAt && expiresAt.getTime() <= Date.now()
+}
+
+function tokenExpiryLabel(token: AccessToken) {
+  const expiresAt = parseServerDate(token.expires_at)
+  if (!expiresAt) return 'No expiry'
+  return expiresAt.getTime() <= Date.now()
+    ? `Expired ${token.expires_at}`
+    : `Expires ${token.expires_at}`
+}
+
 export default function SettingsView() {
   const [tab, setTab] = useState<Tab>('general')
   const [settings, setSettings] = useState<Record<string, string>>({})
@@ -85,6 +112,7 @@ export default function SettingsView() {
   const [localServiceMsg, setLocalServiceMsg] = useState<string | null>(null)
   const [accessTokens, setAccessTokens] = useState<AccessToken[]>([])
   const [tokenLabel, setTokenLabel] = useState('Desktop client')
+  const [tokenExpiryDays, setTokenExpiryDays] = useState('90')
   const [createdToken, setCreatedToken] = useState<string | null>(null)
   const [tokenBusy, setTokenBusy] = useState(false)
   const [tokenMsg, setTokenMsg] = useState<string | null>(null)
@@ -500,6 +528,13 @@ export default function SettingsView() {
             <input className="settings-input" type="text" value={tokenLabel}
               onChange={e => setTokenLabel(e.target.value)}
               placeholder="Linux worker, iPhone, web app" spellCheck={false} />
+            <select className="settings-input" value={tokenExpiryDays}
+              onChange={e => setTokenExpiryDays(e.target.value)}
+              style={{ marginTop: 8 }}>
+              {TOKEN_EXPIRY_OPTIONS.map(option => (
+                <option key={option.value || 'none'} value={option.value}>{option.label}</option>
+              ))}
+            </select>
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <button
                 className="settings-save"
@@ -508,7 +543,8 @@ export default function SettingsView() {
                   setTokenBusy(true)
                   setCreatedToken(null)
                   try {
-                    const created = await createAccessToken(tokenLabel.trim(), 'full_access')
+                    const expiresInDays = tokenExpiryDays ? Number(tokenExpiryDays) : null
+                    const created = await createAccessToken(tokenLabel.trim(), 'full_access', expiresInDays)
                     setCreatedToken(created.token)
                     await refreshAccessTokens()
                   } catch (e: any) {
@@ -530,7 +566,7 @@ export default function SettingsView() {
             </div>
             {createdToken && (
               <div style={{ marginTop: 8, padding: 10, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', fontSize: 12 }}>
-                <div style={{ color: 'var(--muted)', marginBottom: 6 }}>New token. It is shown once.</div>
+                <div style={{ color: 'var(--muted)', marginBottom: 6 }}>New token. It is shown once; store it before leaving this screen.</div>
                 <code style={{ color: 'var(--text)', wordBreak: 'break-all' }}>{createdToken}</code>
               </div>
             )}
@@ -541,25 +577,29 @@ export default function SettingsView() {
             <div className="settings-row">
               <label className="settings-label">Existing Tokens</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {accessTokens.map(token => (
-                  <div key={token.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, 1fr) minmax(110px, auto) minmax(140px, auto) auto', gap: 8, alignItems: 'center', fontSize: 12 }}>
-                    <strong style={{ color: token.revoked_at ? 'var(--muted)' : 'var(--text)', textDecoration: token.revoked_at ? 'line-through' : 'none' }}>{token.label}</strong>
-                    <span style={{ color: 'var(--muted)', fontFamily: 'monospace' }}>{token.scopes}</span>
-                    <span style={{ color: 'var(--muted)' }}>{token.last_used_at ? `Used ${token.last_used_at}` : 'Never used'}</span>
-                    <button
-                      className="settings-save"
-                      disabled={!!token.revoked_at}
-                      style={{ background: 'transparent', border: '1px solid var(--border)', color: token.revoked_at ? 'var(--muted)' : '#ef4444', padding: '3px 8px', fontSize: 11 }}
-                      onClick={async () => {
-                        if (!confirm(`Revoke ${token.label}?`)) return
-                        await revokeAccessToken(token.id)
-                        await refreshAccessTokens()
-                      }}
-                    >
-                      {token.revoked_at ? 'Revoked' : 'Revoke'}
-                    </button>
-                  </div>
-                ))}
+                {accessTokens.map(token => {
+                  const inactive = !!token.revoked_at || tokenIsExpired(token)
+                  return (
+                    <div key={token.id} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                      <strong style={{ color: inactive ? 'var(--muted)' : 'var(--text)', textDecoration: inactive ? 'line-through' : 'none' }}>{token.label}</strong>
+                      <span style={{ color: 'var(--muted)', fontFamily: 'monospace' }}>{token.scopes}</span>
+                      <span style={{ color: 'var(--muted)' }}>{tokenExpiryLabel(token)}</span>
+                      <span style={{ color: 'var(--muted)' }}>{token.last_used_at ? `Used ${token.last_used_at}` : 'Never used'}</span>
+                      <button
+                        className="settings-save"
+                        disabled={!!token.revoked_at}
+                        style={{ background: 'transparent', border: '1px solid var(--border)', color: token.revoked_at ? 'var(--muted)' : '#ef4444', padding: '3px 8px', fontSize: 11 }}
+                        onClick={async () => {
+                          if (!confirm(`Revoke ${token.label}?`)) return
+                          await revokeAccessToken(token.id)
+                          await refreshAccessTokens()
+                        }}
+                      >
+                        {token.revoked_at ? 'Revoked' : 'Revoke'}
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
