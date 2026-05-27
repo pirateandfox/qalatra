@@ -23,6 +23,8 @@ import MdView from './mdpdf/MdView'
 import './index.css'
 
 const DailyNote = lazy(() => import('./components/DailyNote'))
+const TerminalManagerView = lazy(() => import('./components/TerminalManagerView'))
+const WorkspaceFilesView = lazy(() => import('./components/WorkspaceFilesView'))
 
 export default function App() {
   return (
@@ -113,8 +115,8 @@ function AppInner() {
   // Keyboard shortcuts
   useEffect(() => {
     const NAV_KEYS: Record<string, NavSection> = {
-      '1': 'priority', '2': 'code', '3': 'reading',
-      '4': 'project',  '5': 'backlog', '6': 'habits', '7': 'heartbeats',
+      '1': 'priority', '2': 'code', '3': 'terminals', '4': 'files', '5': 'reading',
+      '6': 'project',  '7': 'backlog', '8': 'habits', '9': 'heartbeats',
     }
 
     const handler = async (e: KeyboardEvent) => {
@@ -237,7 +239,7 @@ function AppInner() {
         />
 
         <div className={`layout ${selectedId ? 'panel-open' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div style={{ flex: 1, overflowY: nav === 'settings' || nav === 'daily' ? 'hidden' : 'auto', minWidth: 0 }}>
+          <div style={{ flex: 1, overflowY: nav === 'settings' || nav === 'daily' || nav === 'terminals' || nav === 'files' ? 'hidden' : 'auto', minWidth: 0 }}>
             {nav === 'settings' ? (
               <SettingsView />
             ) : nav === 'daily' ? (
@@ -246,6 +248,14 @@ function AppInner() {
               </Suspense>
             ) : nav === 'heartbeats' ? (
               <HeartbeatsView />
+            ) : nav === 'terminals' ? (
+              <Suspense fallback={<div style={{ color: 'var(--muted)', padding: '40px', textAlign: 'center' }}>Loading terminals...</div>}>
+                <TerminalManagerView />
+              </Suspense>
+            ) : nav === 'files' ? (
+              <Suspense fallback={<div style={{ color: 'var(--muted)', padding: '40px', textAlign: 'center' }}>Loading files...</div>}>
+                <WorkspaceFilesView />
+              </Suspense>
             ) : nav === 'habits' ? (
               <HabitsView onMutate={() => load(date, true)} />
             ) : nav === 'backlog' ? (
@@ -315,6 +325,7 @@ function AppInner() {
               else if (nav === 'reading') setReadingRefresh(n => n + 1)
               else load(date, true)
             }}
+            onSelectTask={id => setSelectedId(id)}
             terminalOpen={terminalMode !== 'closed'}
             onPreview={path => path.endsWith('.md') ? setMdPath(path) : setPreviewPath(path)}
             onRunInTerminal={cmd => { setTerminalCommand(cmd); setTerminalMode(m => m === 'closed' ? 'docked' : m) }}

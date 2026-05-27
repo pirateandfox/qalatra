@@ -25,7 +25,7 @@ Required:
 
 - Debian/Ubuntu or another Linux with user systemd
 - Node.js 22+
-- `git`, `curl`, and `npm`
+- `git`, `curl`, `tmux`, and `npm`
 - `cloudflared` if installing the public API tunnel
 - a Cloudflare zone that contains the API hostname parent domain
 
@@ -46,12 +46,21 @@ Replace `api-test.qalatra.com` with the hostname for this machine.
 The bootstrap script:
 
 - clones or updates Qalatra in `~/qalatra`
+- creates a normal-user workspace at `~/workspaces` unless `QALATRA_WORKSPACE_ROOT` is set
 - installs npm dependencies
 - rebuilds native modules for system Node
 - installs and starts `qalatra-server.service`
 - creates or reuses the Cloudflare tunnel `qalatra-api`
 - routes the API hostname to `127.0.0.1:3456`
 - installs and starts `qalatra-cloudflared.service`
+
+For a dedicated agent box, keep the workspace under the normal service user, not `/root`:
+
+```bash
+export QALATRA_WORKSPACE_ROOT=$HOME/workspaces
+```
+
+That workspace is used as the default Agent IDE root, terminal working directory, and agent scan root on first install.
 
 If you want to install the server first and add the tunnel later:
 
@@ -74,6 +83,46 @@ Check the services:
 
 ```bash
 systemctl --user status qalatra-server.service --no-pager -l
+systemctl --user status qalatra-cloudflared.service --no-pager -l
+```
+
+## Updating an Existing Headless Install
+
+Run the update as the normal Qalatra service user, not with `sudo`.
+
+```bash
+cd ~/qalatra
+git fetch origin develop --tags
+git checkout develop
+git pull --ff-only origin develop
+./scripts/install-linux-server.sh
+systemctl --user restart qalatra-server.service
+```
+
+The installer is safe to rerun. It refreshes npm dependencies, rebuilds native modules for system Node, rewrites the user service, and starts the server. This matters when a release adds server-side dependencies such as the persistent terminal session runtime.
+
+If this is the first update to the Agent IDE build, verify `tmux` exists and keep the workspace under the normal user account:
+
+```bash
+command -v tmux
+mkdir -p ~/workspaces
+```
+
+Smoke test after the restart:
+
+```bash
+curl -fsS http://127.0.0.1:3456/health
+
+TOKEN=$(cat ~/.local/share/qalatra/db/admin-token.txt)
+
+curl -fsS \
+  -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:3456/api/instance
+```
+
+If the machine uses a public API tunnel, check that service too:
+
+```bash
 systemctl --user status qalatra-cloudflared.service --no-pager -l
 ```
 

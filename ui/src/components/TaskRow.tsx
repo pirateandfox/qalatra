@@ -39,18 +39,20 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
 
   const subtasks: Task[] = (task as any).subtasks ?? []
   const incompleteSubtasks = subtasks.filter(s => s.status !== 'done').length
-  const blocked = !isDone && subtasks.length > 0 && incompleteSubtasks > 0
-
-  const allLinks: string[] = [
-    ...(task.source_url ? [task.source_url] : []),
-    ...(() => { try { return JSON.parse(task.links ?? '[]') } catch { return [] } })(),
-  ]
+  const subtaskBlocked = !isDone && subtasks.length > 0 && incompleteSubtasks > 0
+  const dependencyBlocked = !isDone && !!task.blocked
+  const hardDeadline = task.hard_deadline === true || task.hard_deadline === 1
+  const stale = !isDone && !!task.stale
+  const blockedByCount = task.blocked_by?.filter(t => t.status !== 'done').length ?? 0
+  const externalSourceUrl = task.source && task.source !== 'manual' ? task.source_url : null
+  const externalSource = externalSourceUrl ? detectPlatform(externalSourceUrl) : null
+  const externalSourceLabel = externalSource?.key === 'link' ? task.source : externalSource?.label
 
   async function handleCheck(e: React.MouseEvent) {
     e.preventDefault()
     if (isDone) {
       await api.uncomplete(task.id)
-    } else if (blocked) {
+    } else if (subtaskBlocked) {
       const yes = window.confirm(`Complete all ${incompleteSubtasks} subtask${incompleteSubtasks > 1 ? 's' : ''} and mark this done?`)
       if (!yes) return
       await api.completeWithSubtasks(task.id)
@@ -92,7 +94,7 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
   return (
     <>
       <div
-        className={`task-row ${isDone ? 'done' : ''} ${selected ? 'selected' : ''}`}
+        className={`task-row ${isDone ? 'done' : ''} ${selected ? 'selected' : ''} ${dependencyBlocked ? 'dependency-blocked' : ''} ${stale ? 'stale' : ''}`}
         data-id={task.id}
         draggable={draggable && !isDone}
         onDragStart={handleDragStart}
@@ -101,9 +103,9 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
         {draggable && !isDone && <span className="drag-handle">⋮⋮</span>}
 
         <button
-          className={`checkbox ${isDone ? 'checked' : ''} ${blocked ? 'blocked' : ''}`}
+          className={`checkbox ${isDone ? 'checked' : ''} ${subtaskBlocked ? 'blocked' : ''}`}
           onClick={handleCheck}
-          title={blocked ? `${incompleteSubtasks} subtask${incompleteSubtasks > 1 ? 's' : ''} remaining` : undefined}
+          title={subtaskBlocked ? `${incompleteSubtasks} subtask${incompleteSubtasks > 1 ? 's' : ''} remaining` : undefined}
         >
           {isDone ? '✓' : ''}
         </button>
@@ -121,6 +123,11 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
               </span>
             )}
             {task.project && <span className="project">{task.project}</span>}
+            {externalSourceUrl && externalSource && (
+              <span className="source-indicator" title={`Source: ${externalSourceLabel}`}>
+                <PlatformIcon url={externalSourceUrl} size={14} />
+              </span>
+            )}
             {task.my_priority && (
               <span className="priority" style={{ color: PRIORITY_COLORS[task.my_priority] ?? '#6b7280' }}>
                 P{task.my_priority}
@@ -134,9 +141,22 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
                 💤 {new Date(task.surface_after).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
               </span>
             )}
+            {dependencyBlocked && (
+              <span className="blocked-chip" title={`Blocked by ${blockedByCount} incomplete task${blockedByCount === 1 ? '' : 's'}`}>
+                Blocked
+              </span>
+            )}
             {task.due_date && !isDone && (
-              <span className={`due-date due-date--${urgency}`}>
-                {urgency === 'overdue' ? '⚠ ' : urgency === 'imminent' ? '● ' : ''}{task.due_date}
+              <span
+                className={`due-date due-date--${urgency} ${hardDeadline ? 'due-date--hard' : ''}`}
+                title={hardDeadline ? 'Hard deadline' : 'Soft target'}
+              >
+                {hardDeadline ? '🔒 ' : urgency === 'overdue' ? '⚠ ' : urgency === 'imminent' ? '● ' : ''}{task.due_date}
+              </span>
+            )}
+            {stale && (
+              <span className="review-stale" title={`Last reviewed ${task.stale_days ?? '?'} days ago`}>
+                ◷ {task.stale_days ?? ''}d
               </span>
             )}
             {task.description && <span className="has-notes" title="Has description">●</span>}
@@ -214,29 +234,6 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
               <button className="action-btn" title="Activate" onClick={handleActivate}>▶</button>
             )}
           </div>
-          {allLinks.length > 0 && (
-            <div className="task-links">
-              {allLinks.map((url, i) => {
-                const platform = detectPlatform(url)
-                const label = platform.key === 'link'
-                  ? (() => { try { return new URL(url).hostname.replace(/^www\./, '') } catch { return 'Link' } })()
-                  : platform.label
-                return (
-                  <a
-                    key={i}
-                    className="platform-icon-link"
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <PlatformIcon url={url} size={13} />
-                    <span className="platform-link-label">{label}</span>
-                  </a>
-                )
-              })}
-            </div>
-          )}
         </div>
       </div>
 

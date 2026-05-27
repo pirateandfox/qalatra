@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import type { Task, Subtask } from '../types/task'
+import type { RelatedTask, Task, Subtask } from '../types/task'
 import RecurrencePicker from './RecurrencePicker'
 import PlatformIcon from './PlatformIcon'
-import { api, updateTask, fetchTask, fetchSubtasks, fetchAttachments, fetchAgents, deleteAttachment, uploadAttachment, openAttachmentFile, subscribeServerEvents, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, fetchProjects, createProjectExplicit, type Agent, type AgentJob, type Note, type Project } from '../api'
+import { api, updateTask, fetchTask, fetchSubtasks, fetchAttachments, fetchAgents, deleteAttachment, uploadAttachment, openAttachmentFile, subscribeServerEvents, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, fetchProjects, createProjectExplicit, markReviewed, type Agent, type AgentJob, type Note, type Project } from '../api'
 import type { Attachment } from '../types/task'
 import { PRIORITY_COLORS } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
@@ -53,11 +53,33 @@ function TimePicker({ value, onChange, disabled }: { value: string; onChange: (v
   )
 }
 
+function RelatedTaskList({ label, tasks, onOpen }: { label: string; tasks: RelatedTask[]; onOpen: (id: string) => void }) {
+  if (!tasks.length) return null
+  return (
+    <div className="detail-related-row">
+      <span className="detail-field-label">{label}</span>
+      <div className="detail-related-list">
+        {tasks.map(t => (
+          <button
+            key={t.id}
+            className={`detail-related-chip ${t.status === 'done' ? 'done' : ''}`}
+            onClick={() => onOpen(t.id)}
+            title={t.id}
+          >
+            {t.title}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 interface Props {
   taskId: string | null
   onClose: () => void
   onMutate?: () => void
   onDelete?: () => void
+  onSelectTask?: (id: string) => void
   terminalOpen?: boolean
   onPreview?: (filePath: string) => void
   onRunInTerminal?: (cmd: string) => void
@@ -82,7 +104,7 @@ const ENERGY_LABELS: Record<string, string> = { high: '🔥 High', medium: '⚡ 
 const TASK_TYPES = ['task', 'coding', 'reading'] as const
 const TASK_TYPE_LABELS: Record<string, string> = { task: '★ Priority', coding: '⌨ Coding', reading: '📖 Reading' }
 
-export default function DetailPanel({ taskId, onClose, onMutate, onDelete, terminalOpen, onPreview, onRunInTerminal }: Props) {
+export default function DetailPanel({ taskId, onClose, onMutate, onDelete, onSelectTask, terminalOpen, onPreview, onRunInTerminal }: Props) {
   const { contexts, getColor } = useContexts()
   const [task, setTask]       = useState<Task | null>(null)
   const [subtasks, setSubtasks] = useState<Subtask[]>([])
@@ -166,6 +188,13 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
     if (taskId) load(taskId)
     else setTask(null)
   }, [taskId, load])
+
+  async function handleMarkReviewed() {
+    if (!task) return
+    await markReviewed(task.id)
+    await load(task.id)
+    onMutate?.()
+  }
 
   useEffect(() => {
     if (!taskId) return
@@ -313,6 +342,8 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
       return (raw as unknown[]).map(l => typeof l === 'string' ? { url: l } : l as Link)
     } catch { return [] }
   })()
+  const hardDeadline = task?.hard_deadline === true || task?.hard_deadline === 1
+  const activeBlockers = task?.blocked_by?.filter(t => t.status !== 'done') ?? []
 
   if (!taskId) return null
 
@@ -611,7 +642,7 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
             </div>
             <div className="detail-field-row">
               <span className="detail-field-label">Due</span>
-              <div className="detail-meta-item">
+              <div className="detail-meta-item detail-date-controls">
                 <input
                   type="date"
                   className="detail-due-input"
@@ -621,8 +652,33 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, termi
                 {task.due_date && (
                   <button className="detail-due-clear" onClick={() => updateDueDate('')}>✕</button>
                 )}
+                <label className={`detail-hard-deadline-toggle ${hardDeadline ? 'active' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={hardDeadline}
+                    onChange={e => patch({ hard_deadline: e.target.checked ? 1 : 0 })}
+                  />
+                  Hard deadline
+                </label>
               </div>
             </div>
+            <div className="detail-field-row">
+              <span className="detail-field-label">Reviewed</span>
+              <div className="detail-meta-item">
+                <span className={`detail-review-chip ${task.stale ? 'stale' : ''}`}>
+                  {task.last_reviewed_at ? task.last_reviewed_at.slice(0, 10) : 'Never'}
+                  {task.stale && task.stale_days != null ? ` · ${task.stale_days}d` : ''}
+                </span>
+                <button className="detail-reviewed-btn" onClick={handleMarkReviewed}>Mark reviewed</button>
+              </div>
+            </div>
+
+            {((task.blocked_by?.length ?? 0) > 0 || (task.blocks?.length ?? 0) > 0) && (
+              <div className={`detail-dependencies ${activeBlockers.length > 0 ? 'blocked' : ''}`}>
+                <RelatedTaskList label="Blocked by" tasks={task.blocked_by ?? []} onOpen={id => onSelectTask?.(id)} />
+                <RelatedTaskList label="Blocking" tasks={task.blocks ?? []} onOpen={id => onSelectTask?.(id)} />
+              </div>
+            )}
 
             {/* Links section */}
             {(() => {

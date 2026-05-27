@@ -110,6 +110,30 @@ export function GeneralSettings({ settings, setSetting, saved, onSave }: General
       <div className="settings-section-header">Terminal &amp; Agents</div>
 
       <div className="settings-row">
+        <label className="settings-label">Workspace root</label>
+        <input
+          className="settings-input"
+          type="text"
+          value={settings.workspaceRoot ?? ''}
+          onChange={e => setSetting('workspaceRoot', e.target.value)}
+          placeholder="e.g. /home/qalatra/workspaces"
+          spellCheck={false}
+        />
+        <span className="settings-hint">Primary root for Agent IDE terminals and file browsing.</span>
+      </div>
+      <div className="settings-row">
+        <label className="settings-label">Additional file roots</label>
+        <input
+          className="settings-input"
+          type="text"
+          value={settings.fileRoots ?? ''}
+          onChange={e => setSetting('fileRoots', e.target.value)}
+          placeholder="Comma-separated absolute paths"
+          spellCheck={false}
+        />
+        <span className="settings-hint">Allowed roots for remote file browsing/editing. Keep this narrower than the whole machine.</span>
+      </div>
+      <div className="settings-row">
         <label className="settings-label">Terminal working directory</label>
         <input
           className="settings-input"

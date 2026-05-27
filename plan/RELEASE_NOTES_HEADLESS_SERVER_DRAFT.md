@@ -1,6 +1,6 @@
-# Draft Release Notes: Headless Server and Remote Instances
+# Historical Draft: v1.6.0 Headless Server and Remote Instances
 
-Status: draft for the next release. Written from `develop` at `7704b00`.
+Status: superseded by the curated release notes in `plan/releases/v1.6.0.md`. This file is retained as the detailed implementation draft for the headless-server portion of the release.
 
 This release turns Qalatra from an Electron app with local backend behavior into a real server/client system. Desktop still feels like one app, but the backend is now Qalatra Server: an authenticated HTTP API that owns SQLite, MCP, background workers, agents, attachments, encryption keys, backups, and access tokens.
 
@@ -244,7 +244,6 @@ Notes:
 - Confirm Linux headless reinstall/update path on a clean box.
 - Confirm remote Electron -> Linux API instance switching with a non-bootstrap expiring token.
 - Confirm attachments, Markdown preview/edit, encrypted backup, and restore against a remote instance.
-- Decide whether this release should be versioned as a larger architectural release, likely `1.6.0`, rather than a patch.
 
 ## Commit Trail
 

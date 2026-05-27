@@ -18,6 +18,7 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
   const [context, setContext] = useState('personal')
   const [priority, setPriority] = useState<number | null>(null)
   const [dueDate, setDueDate] = useState('')
+  const [hardDeadline, setHardDeadline] = useState(false)
   const [project, setProject] = useState('')
   const [agentPath, setAgentPath] = useState('')
   const [agents, setAgents] = useState<Agent[]>([])
@@ -38,6 +39,7 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
       setContext('personal')
       setPriority(null)
       setDueDate(defaultDate ?? '')
+      setHardDeadline(false)
       setProject('')
       setAgentPath('')
       setTimeout(() => titleRef.current?.focus(), 50)
@@ -70,6 +72,7 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
         context,
         my_priority: priority ?? undefined,
         due_date: dueDate || undefined,
+        hard_deadline: hardDeadline || undefined,
         project: project || undefined,
         agent_path: agentPath || undefined,
       } as any)
@@ -156,6 +159,14 @@ export default function CreateTask({ open, defaultDate, onClose, onCreated }: Pr
                 value={dueDate}
                 onChange={e => setDueDate(e.target.value)}
               />
+              <label className={`ct-checkbox ${hardDeadline ? 'active' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={hardDeadline}
+                  onChange={e => setHardDeadline(e.target.checked)}
+                />
+                Hard deadline
+              </label>
             </div>
             <div className="create-task-field">
               <span className="create-task-label">Project</span>

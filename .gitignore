@@ -4,13 +4,7 @@ ui/dist/
 dist/
 
 # Database and settings — stay local, never commit
-db/tasks.db
-db/tasks.db-wal
-db/tasks.db-shm
-db/settings.json
-db/keystore
-db/server-keystore
-db/admin-token.txt
+db/
 
 # macOS
 .DS_Store

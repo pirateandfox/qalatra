@@ -32,9 +32,9 @@ need_sudo() {
 install_basic_deps_debian() {
   local sudo_cmd
   sudo_cmd="$(need_sudo)"
-  info "Installing git/curl prerequisites with apt"
+  info "Installing git/curl/tmux prerequisites with apt"
   $sudo_cmd apt-get update
-  $sudo_cmd apt-get install -y ca-certificates curl git
+  $sudo_cmd apt-get install -y ca-certificates curl git tmux
 }
 
 install_node_debian() {
@@ -50,11 +50,11 @@ node_major() {
 }
 
 ensure_dependencies() {
-  if ! have git || ! have curl; then
+  if ! have git || ! have curl || ! have tmux; then
     if [ "$AUTO_INSTALL_DEPS" = "1" ] && have apt-get; then
       install_basic_deps_debian
     else
-      fail "git and curl are required. Install them first, or run on a Debian/Ubuntu host with QALATRA_AUTO_INSTALL_DEPS=1."
+      fail "git, curl, and tmux are required. Install them first, or run on a Debian/Ubuntu host with QALATRA_AUTO_INSTALL_DEPS=1."
     fi
   fi
 

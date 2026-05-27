@@ -16,6 +16,8 @@ Qalatra is Justin's personal task management system: a local SQLite database own
 ├── db-worker.js            ← SQLite worker used by Qalatra Server; handles DB calls off the server event loop
 ├── s3.js                   ← S3/R2 attachment helpers
 ├── docs/
+│   ├── capabilities.md     ← Capability registry guide: agent.config metadata, permissions, delegation, MCP/API usage
+│   ├── executive-agent-rollout.md ← Handoff guide for enriching real agents and using Qalatra as an executive-assistant layer
 │   └── linux-remote-install.md ← Verified Linux headless install, Cloudflare tunnel, smoke tests, and MCP setup
 ├── scripts/
 │   ├── install-linux-server.sh ← Installs Qalatra Server as a Linux user systemd service
@@ -33,6 +35,7 @@ Qalatra is Justin's personal task management system: a local SQLite database own
 │       ├── mdpdf/          ← Markdown editor/PDF export overlay
 │       └── api.ts          ← frontend API client; talks to Qalatra Server by token-authenticated HTTP
 ├── plan/                   ← Planning docs
+│   ├── AGENT_OPERATING_LAYER_ROADMAP.md ← Strategic plan for personal vs agent-node roles, external intake, handoffs, and Qalatra-to-Qalatra messaging
 │   ├── EVOLUTION.md        ← Running log of shipped features and known gaps
 │   ├── ARCHITECTURE.md     ← v2 vision (Automerge, Tauri, sync relay)
 │   └── FUTURE_IDEAS.md     ← Deferred ideas

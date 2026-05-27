@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { buildCapabilityFromAgentConfig } from './capability-registry.js'
 
 export async function scanAgents(root, excludeFolders = []) {
   const results = []
@@ -16,9 +17,10 @@ export async function scanAgents(root, excludeFolders = []) {
     if (entries.some(e => e.isFile() && e.name === 'agent.config')) {
       try {
         const configPath = path.join(dir, 'agent.config')
-        const cfg = JSON.parse(await fs.promises.readFile(configPath, 'utf8'))
+        const configText = await fs.promises.readFile(configPath, 'utf8')
+        const cfg = JSON.parse(configText)
         const rel = path.relative(root, dir)
-        results.push({
+        const agent = {
           path: dir,
           name: cfg.name || path.basename(dir),
           context: cfg.context || null,
@@ -28,7 +30,16 @@ export async function scanAgents(root, excludeFolders = []) {
           coding: !!cfg.coding,
           relativePath: rel,
           folder: topFolder,
+        }
+        agent.capability = buildCapabilityFromAgentConfig({
+          agentDir: dir,
+          config: cfg,
+          configText,
+          root,
+          relativePath: rel,
+          folder: topFolder,
         })
+        results.push(agent)
       } catch {}
     }
 

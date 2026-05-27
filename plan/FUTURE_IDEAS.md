@@ -2,6 +2,8 @@
 
 Low-priority or speculative ideas that aren't worth building yet but shouldn't be forgotten.
 
+The agent operating layer is no longer just a future idea. Personal vs agent-node modes, external intake, action logs, handoffs, and Qalatra-to-Qalatra messaging are now captured as strategic product direction in `plan/AGENT_OPERATING_LAYER_ROADMAP.md`.
+
 ---
 
 ## Multi-runtime agent support
@@ -46,7 +48,9 @@ The agent system is currently hardwired to Claude Code (`claude` CLI). The right
 
 ## Inbound webhooks
 
-Accept signed webhook payloads from external services (GitHub, Stripe, Missive, Zapier, etc.) and convert them into Qalatra tasks or trigger MCP tool calls.
+Accept signed webhook payloads from external services (GitHub, Stripe, Missive, Zapier, etc.) and feed them into Qalatra's durable external intake layer.
+
+Update: this should now feed the agent operating layer. Webhooks should normally create durable `external_items` first, then let the executive agent classify, route, act, or create a human task/handoff. Direct "webhook to personal task" should be a rule, not the default.
 
 **Architecture:**
 - Add a `/webhook/:source` POST endpoint to the existing MCP HTTP server (port 3457)
@@ -82,7 +86,9 @@ Accept signed webhook payloads from external services (GitHub, Stripe, Missive, 
 
 ## Sync layer (Asana / Linear / Notion)
 
-Automated two-way state sync: pull tasks in, push completions back. Originally planned but made redundant by having Asana/Linear/Notion MCP connections available in chat. Current workflow (triage in chat → create task with source_url → complete both in same conversation) covers the need without the complexity of webhooks, polling, and token storage. Only worth revisiting if closing tasks in two places becomes consistently annoying in practice.
+Automated two-way state sync: pull tasks in, push completions back. For personal/manual use, existing Asana/Linear/Notion MCP connections in chat can still be enough: triage in chat, create a Qalatra task with `source_url`, then complete both in the same conversation.
+
+For autonomous agent-node use, this is no longer just a convenience sync feature. It belongs to the agent operating layer: connectors should create durable `external_items`, agent actions should be logged, and only explicit handoffs should reach the human personal task list.
 
 ---
 
@@ -161,6 +167,8 @@ Fields:
 
 ## Terminal improvements (xterm.js / Warp-like experience)
 
+Status note, 2026-05-27: the first Terminals slice shipped the remote/headless terminal path using xterm.js over WebSocket with `tmux` as the durable session owner. Local terminal splits/WebGL polish remain future improvements.
+
 Qalatra already uses xterm.js + node-pty — the same stack as VS Code. Current setup only uses FitAddon (canvas renderer). Three tiers of improvement, each independent:
 
 ### Tier 1: WebGL renderer (1–2 hours, high ROI)
@@ -197,6 +205,8 @@ This is the enabling piece for headless admin use — without it, the Electron U
 
 ## Embedded file editor (Monaco)
 
+Status note, 2026-05-27: the first Monaco file editor shipped in the Files view for authenticated workspace file reads/writes. LSP, diff views, and deeper IDE behavior remain future work.
+
 VS Code's editor — Monaco Editor — is fully open source, embeddable via npm, and brings syntax highlighting, search, keybindings, and multi-language support for free. VS Code itself is Electron + TypeScript, same stack as Qalatra. Monaco is the extractable core.
 
 **Goal:** Quick file review without leaving Qalatra. Primary use case: agent finishes a task, links an output file, you want to glance at the diff or read the result without opening an IDE. Light editing (tweak a config, fix a line) is a bonus, not the core. Deep coding work still happens in a real IDE.
@@ -224,6 +234,8 @@ npm install @monaco-editor/react
 ---
 
 ## File browser + workspace view
+
+Status note, 2026-05-27: a one-level lazy file tree shipped in the Files view, rooted at Qalatra's configured workspace/file roots.
 
 A file tree panel rooted at `agentsRoot`, combined with the Monaco viewer, turns Qalatra into a self-contained workspace. The vision: tasks reference agent folders → you open the folder in the tree → read or edit the CLAUDE.md → the agent runs better next time. Everything is text files. Qalatra already knows where they all live.
 
@@ -253,6 +265,8 @@ Everything Qalatra manages (tasks, agents, projects) lives in folders it already
 ---
 
 ## Agent IDE (terminal + editor + file browser as a unit)
+
+Status note, 2026-05-27: the initial implementation shipped as separate Files and Terminals sidebar views. Agent-specific launchers, run history, and richer ops panels remain future layers.
 
 The terminal improvements, Monaco editor, file browser, and agent editor are individually useful but together form something more coherent: an Agent IDE panel. Open an agent from the agent list and get:
 

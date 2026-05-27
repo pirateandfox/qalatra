@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate } from '../db.js';
+import { enrichTaskRows, getTaskDependencies, staleWhereClause } from './trust-signals.js';
 
 const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 86400000)
 const offsetDate = (dateStr, days) => { const d = new Date(dateStr + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10) }
@@ -21,12 +22,12 @@ function spawnNextOccurrence(db, task, now) {
   db.prepare(`
     INSERT INTO tasks (
       id, title, description, status, my_priority, energy_required, context, project,
-      tags, source, source_url, created_at, updated_at, start_date, due_date,
+      tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline,
       task_type, recurrence, ai_context,
       agent_path, agent_resume, agent_autorun, agent_autorun_time
     ) VALUES (
       @id, @title, @description, 'active', @my_priority, @energy_required, @context, @project,
-      @tags, @source, @source_url, @created_at, @updated_at, @start_date, @due_date,
+      @tags, @source, @source_url, @created_at, @updated_at, @last_reviewed_at, @start_date, @due_date, @hard_deadline,
       @task_type, @recurrence, @ai_context,
       @agent_path, @agent_resume, @agent_autorun, @agent_autorun_time
     )
@@ -43,8 +44,10 @@ function spawnNextOccurrence(db, task, now) {
     source_url:        task.source_url,
     created_at:        now,
     updated_at:        now,
+    last_reviewed_at:  now,
     start_date:        task.start_date && task.due_date ? offsetDate(nextDate, -daysBetween(task.start_date, task.due_date)) : (task.start_date && !task.due_date ? nextDate : null),
     due_date:          task.start_date && !task.due_date ? null : nextDate,
+    hard_deadline:     task.hard_deadline ? 1 : 0,
     task_type:         task.task_type,
     recurrence:        task.recurrence,
     ai_context:        appendAiContext(null, `Recurred from task ${task.id}`),
@@ -77,6 +80,7 @@ export const toolDefs = [
         my_priority:     { type: 'integer', description: '1 (highest) to 5 (lowest)' },
         energy_required: { type: 'string', description: 'high | medium | low | async' },
         due_date:        { type: 'string', description: 'ISO date YYYY-MM-DD' },
+        hard_deadline:   { type: 'boolean', description: 'True when due_date is a non-slippable drop-dead deadline.' },
         start_date:      { type: 'string', description: 'Do not surface before this date' },
         surface_after:   { type: 'string', description: 'Snooze/defer: surface on or after this date' },
         source:          { type: 'string', description: 'asana | notion | linear | github | manual' },
@@ -115,6 +119,7 @@ export const toolDefs = [
         my_priority:     { type: 'integer' },
         energy_required: { type: 'string' },
         due_date:        { type: 'string' },
+        hard_deadline:   { type: 'boolean', description: 'True when due_date is a non-slippable drop-dead deadline.' },
         start_date:      { type: 'string' },
         surface_after:   { type: 'string' },
         source_url:      { type: 'string' },
@@ -138,6 +143,62 @@ export const toolDefs = [
   {
     name: 'get_task',
     description: 'Get full details for a single task by ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'mark_reviewed',
+    description: 'Mark a task as reviewed without changing any other task fields.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'get_stale_tasks',
+    description: 'Return active/backlog non-recurring tasks whose last_reviewed_at is older than the review threshold. Defaults to 14 days for active tasks and 30 days for backlog; pass days to override both.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days: { type: 'integer', description: 'Optional override threshold in days.' },
+      },
+    },
+  },
+  {
+    name: 'add_dependency',
+    description: 'Mark task_id as blocked by blocked_by_task_id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string' },
+        blocked_by_task_id: { type: 'string' },
+      },
+      required: ['task_id', 'blocked_by_task_id'],
+    },
+  },
+  {
+    name: 'remove_dependency',
+    description: 'Remove a blocking relationship between task_id and blocked_by_task_id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string' },
+        blocked_by_task_id: { type: 'string' },
+      },
+      required: ['task_id', 'blocked_by_task_id'],
+    },
+  },
+  {
+    name: 'get_dependencies',
+    description: 'Return tasks this task blocks and tasks this task is blocked by.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -327,13 +388,13 @@ export const handlers = {
     db.prepare(`
       INSERT INTO tasks (
         id, title, description, status, my_priority, energy_required, context, project, tags,
-        source, source_id, source_url, source_priority, due_date, start_date, surface_after,
-        created_at, updated_at, ai_context, task_type, event_time, end_time, parent_id, recurrence,
+        source, source_id, source_url, source_priority, due_date, hard_deadline, start_date, surface_after,
+        created_at, updated_at, last_reviewed_at, ai_context, task_type, event_time, end_time, parent_id, recurrence,
         agent_path, assigned_agent, links, inbox
       ) VALUES (
         @id, @title, @description, @status, @my_priority, @energy_required, @context, @project, @tags,
-        @source, @source_id, @source_url, @source_priority, @due_date, @start_date, @surface_after,
-        @created_at, @updated_at, @ai_context, @task_type, @event_time, @end_time, @parent_id, @recurrence,
+        @source, @source_id, @source_url, @source_priority, @due_date, @hard_deadline, @start_date, @surface_after,
+        @created_at, @updated_at, @last_reviewed_at, @ai_context, @task_type, @event_time, @end_time, @parent_id, @recurrence,
         @agent_path, @assigned_agent, @links, @inbox
       )
     `).run({
@@ -351,10 +412,12 @@ export const handlers = {
       source_url:      args.source_url      ?? null,
       source_priority: args.source_priority ?? null,
       due_date:        args.due_date        ?? null,
+      hard_deadline:   args.hard_deadline   ? 1 : 0,
       start_date:      args.start_date      ?? null,
       surface_after:   args.surface_after   ?? null,
       created_at:      now,
       updated_at:      now,
+      last_reviewed_at: now,
       ai_context:      args.ai_context ? appendAiContext(null, args.ai_context) : null,
       task_type:       args.task_type       ?? 'task',
       event_time:      args.event_time      ?? null,
@@ -380,7 +443,7 @@ export const handlers = {
 
     const mutableFields = [
       'title', 'description', 'status', 'my_priority', 'energy_required',
-      'context', 'project', 'tags', 'source_url', 'due_date', 'start_date', 'surface_after',
+      'context', 'project', 'tags', 'source_url', 'due_date', 'hard_deadline', 'start_date', 'surface_after',
       'task_type', 'event_time', 'end_time', 'recurrence', 'parent_id', 'agent_path',
       'assigned_agent', 'agent_autorun', 'agent_autorun_time', 'inbox',
     ];
@@ -410,11 +473,18 @@ export const handlers = {
       setClauses.push('links = @links');
     }
 
-    updates.last_touched_ai = nowIso();
+    const didReviewRelevantChange = setClauses.length > 0;
+    const now = nowIso();
+    if (didReviewRelevantChange) {
+      updates.last_reviewed_at = now;
+      setClauses.push('last_reviewed_at = @last_reviewed_at');
+    }
+
+    updates.last_touched_ai = now;
     setClauses.push('last_touched_ai = @last_touched_ai');
 
     if (args.status === 'done' && task.status !== 'done') {
-      updates.last_touched_human = nowIso();
+      updates.last_touched_human = now;
       setClauses.push('last_touched_human = @last_touched_human');
     }
 
@@ -428,7 +498,76 @@ export const handlers = {
     const db = openDb();
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(args.task_id);
     if (!task) throw new Error(`Task not found: ${args.task_id}`);
-    return task;
+    return enrichTaskRows(db, [task])[0];
+  },
+
+  mark_reviewed(args) {
+    const db = openDb();
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(args.task_id);
+    if (!task) throw new Error(`Task not found: ${args.task_id}`);
+    const now = nowIso();
+    db.prepare('UPDATE tasks SET last_reviewed_at = ?, last_touched_human = ? WHERE id = ?')
+      .run(now, now, args.task_id);
+    return { task_id: args.task_id, last_reviewed_at: now };
+  },
+
+  get_stale_tasks(args) {
+    const db = openDb();
+    const days = args.days == null ? null : Number(args.days);
+    const where = staleWhereClause(days);
+    const stmt = db.prepare(`
+      SELECT * FROM tasks
+      WHERE status IN ('active', 'backlog')
+        AND task_type != 'event'
+        AND recurrence IS NULL
+        AND ${where.sql}
+      ORDER BY date(COALESCE(last_reviewed_at, created_at)) ASC,
+               my_priority ASC NULLS LAST,
+               due_date ASC NULLS LAST
+    `);
+    const rows = Number.isFinite(days) ? stmt.all(where.params) : stmt.all();
+    return enrichTaskRows(db, rows, { daysOverride: Number.isFinite(days) ? days : undefined });
+  },
+
+  add_dependency(args) {
+    const db = openDb();
+    if (args.task_id === args.blocked_by_task_id) throw new Error('A task cannot depend on itself');
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(args.task_id);
+    if (!task) throw new Error(`Task not found: ${args.task_id}`);
+    const blocker = db.prepare('SELECT id FROM tasks WHERE id = ?').get(args.blocked_by_task_id);
+    if (!blocker) throw new Error(`Blocking task not found: ${args.blocked_by_task_id}`);
+    const cycle = db.prepare(`
+      WITH RECURSIVE chain(id) AS (
+        SELECT blocked_by_task_id FROM task_dependencies WHERE task_id = @blocked_by_task_id
+        UNION
+        SELECT d.blocked_by_task_id
+        FROM task_dependencies d
+        JOIN chain c ON d.task_id = c.id
+      )
+      SELECT 1 FROM chain WHERE id = @task_id LIMIT 1
+    `).get(args);
+    if (cycle) throw new Error('Dependency would create a cycle');
+    db.prepare('INSERT OR IGNORE INTO task_dependencies (task_id, blocked_by_task_id) VALUES (?, ?)')
+      .run(args.task_id, args.blocked_by_task_id);
+    const now = nowIso();
+    db.prepare('UPDATE tasks SET last_reviewed_at = ?, last_touched_human = ? WHERE id = ?').run(now, now, args.task_id);
+    return { task_id: args.task_id, blocked_by_task_id: args.blocked_by_task_id, ...getTaskDependencies(db, args.task_id) };
+  },
+
+  remove_dependency(args) {
+    const db = openDb();
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(args.task_id);
+    if (!task) throw new Error(`Task not found: ${args.task_id}`);
+    db.prepare('DELETE FROM task_dependencies WHERE task_id = ? AND blocked_by_task_id = ?')
+      .run(args.task_id, args.blocked_by_task_id);
+    const now = nowIso();
+    db.prepare('UPDATE tasks SET last_reviewed_at = ?, last_touched_human = ? WHERE id = ?').run(now, now, args.task_id);
+    return { task_id: args.task_id, blocked_by_task_id: args.blocked_by_task_id, ...getTaskDependencies(db, args.task_id) };
+  },
+
+  get_dependencies(args) {
+    const db = openDb();
+    return getTaskDependencies(db, args.task_id);
   },
 
   search_tasks(args) {
@@ -533,7 +672,7 @@ export const handlers = {
     const ai_context = appendAiContext(task.ai_context, note);
 
     db.prepare(`
-      UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = @now, ai_context = @ai_context
+      UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = @now, last_reviewed_at = @now, ai_context = @ai_context
       WHERE id = @id
     `).run({ now, ai_context, id: args.task_id });
 
@@ -555,7 +694,7 @@ export const handlers = {
     const ai_context = appendAiContext(task.ai_context, 'Skipped.');
 
     db.prepare(`
-      UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = @now, ai_context = @ai_context
+      UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = @now, last_reviewed_at = @now, ai_context = @ai_context
       WHERE id = @id
     `).run({ now, ai_context, id: args.task_id });
 
@@ -571,10 +710,11 @@ export const handlers = {
     const reason = args.reason ?? 'No reason given.';
     const ai_context = appendAiContext(task.ai_context, `Snoozed until ${args.surface_after}: ${reason}`);
 
+    const now = nowIso();
     db.prepare(`
       UPDATE tasks SET status = 'snoozed', surface_after = @surface_after,
-      ai_context = @ai_context, last_touched_human = @now WHERE id = @id
-    `).run({ surface_after: args.surface_after, ai_context, now: nowIso(), id: args.task_id });
+      ai_context = @ai_context, last_touched_human = @now, last_reviewed_at = @now WHERE id = @id
+    `).run({ surface_after: args.surface_after, ai_context, now, id: args.task_id });
 
     return { task_id: args.task_id, surface_after: args.surface_after };
   },
@@ -603,6 +743,7 @@ export const handlers = {
     const subtaskIds = db.prepare('SELECT id FROM tasks WHERE parent_id = ?').all(args.task_id).map(r => r.id);
     const allIds = [args.task_id, ...subtaskIds];
     const ph = allIds.map(() => '?').join(',');
+    db.prepare(`DELETE FROM task_dependencies WHERE task_id IN (${ph}) OR blocked_by_task_id IN (${ph})`).run(...allIds, ...allIds);
     db.prepare(`DELETE FROM notes       WHERE task_id IN (${ph})`).run(...allIds);
     db.prepare(`DELETE FROM agent_jobs  WHERE task_id IN (${ph})`).run(...allIds);
     db.prepare(`DELETE FROM attachments WHERE task_id IN (${ph})`).run(...allIds);
@@ -718,10 +859,11 @@ export const handlers = {
     const resurfaceNote = args.surface_after ? ` Will resurface ${args.surface_after}.` : '';
     const ai_context = appendAiContext(task.ai_context, `Archived: ${reason}${resurfaceNote}`);
 
+    const now = nowIso();
     db.prepare(`
       UPDATE tasks SET status = 'archived', surface_after = @surface_after,
-      ai_context = @ai_context, last_touched_human = @now WHERE id = @id
-    `).run({ surface_after: args.surface_after ?? null, ai_context, now: nowIso(), id: args.task_id });
+      ai_context = @ai_context, last_touched_human = @now, last_reviewed_at = @now WHERE id = @id
+    `).run({ surface_after: args.surface_after ?? null, ai_context, now, id: args.task_id });
 
     return { task_id: args.task_id, archived_until: args.surface_after ?? null };
   },

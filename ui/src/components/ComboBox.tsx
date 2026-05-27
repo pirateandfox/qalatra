@@ -14,11 +14,12 @@ interface Props {
   onChange: (value: string) => void
   placeholder?: string
   nullable?: boolean   // allows clearing back to ""
+  nullableLabel?: string
   emptyText?: string   // shown when no options match filter
   disabled?: boolean
 }
 
-export default function ComboBox({ options, value, onChange, placeholder = 'Select…', nullable = false, emptyText = 'No matches', disabled = false }: Props) {
+export default function ComboBox({ options, value, onChange, placeholder = 'Select…', nullable = false, nullableLabel = 'None', emptyText = 'No matches', disabled = false }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [highlighted, setHighlighted] = useState(0)
@@ -27,11 +28,15 @@ export default function ComboBox({ options, value, onChange, placeholder = 'Sele
 
   const selected = options.find(o => o.value === value)
 
+  function matchesQuery(option: ComboOption, rawQuery: string) {
+    const terms = rawQuery.toLowerCase().trim().split(/\s+/).filter(Boolean)
+    if (terms.length === 0) return true
+    const haystack = `${option.label} ${option.sublabel ?? ''}`.toLowerCase()
+    return terms.every(term => haystack.includes(term))
+  }
+
   const filtered = query.trim()
-    ? options.filter(o =>
-        o.label.toLowerCase().includes(query.toLowerCase()) ||
-        (o.sublabel ?? '').toLowerCase().includes(query.toLowerCase())
-      )
+    ? options.filter(o => matchesQuery(o, query))
     : options
 
   useEffect(() => {
@@ -114,7 +119,7 @@ export default function ComboBox({ options, value, onChange, placeholder = 'Sele
                 className={`combobox-option combobox-option--none${!value ? ' active' : ''}`}
                 onMouseDown={() => select('')}
               >
-                None
+                {nullableLabel}
               </button>
             )}
             {filtered.length === 0 && (

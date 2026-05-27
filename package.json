@@ -1,7 +1,7 @@
 {
   "name": "qalatra",
   "productName": "Qalatra",
-  "version": "1.5.4",
+  "version": "1.6.0",
   "description": "Personal task management system with Claude AI integration",
   "author": "Justin Handley",
   "type": "module",
@@ -32,7 +32,8 @@
     "electron-updater": "^6.8.3",
     "node-pty": "^1.1.0",
     "rrule": "^2.8.1",
-    "uuid": "^14.0.0"
+    "uuid": "^14.0.0",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@electron/notarize": "^2.5.0",

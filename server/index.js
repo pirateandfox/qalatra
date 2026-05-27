@@ -3,16 +3,18 @@ import http from 'http'
 import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
+import { WebSocketServer } from 'ws'
 import { dbCall, initDbWorker, closeDbWorker } from './db-client.js'
 import { defaultDataDir, ensureDataDir, settingsPath } from './paths.js'
 import { initSettings, loadSettings, saveSettings } from './settings.js'
 import { authenticate, createToken, ensureBootstrapToken, initAuth, listTokens, requireScope, revokeToken } from './auth.js'
 import { deleteAttachment, listAttachments, readAttachmentContent, uploadAttachment } from './attachments.js'
 import { runBackup } from './backups.js'
-import { fileExists, findInheritedStyle, readTextFile, resolveAllowedPath, writeFolderStyle, writeTextFile, writeUserStyle } from './files.js'
+import { fileExists, findInheritedStyle, listDirectory, listWorkspaceRoots, readTextFile, resolveAllowedPath, writeFolderStyle, writeTextFile, writeUserStyle } from './files.js'
 import { applyCors, parseBody, parseRawBody, sendBinary, sendJson, streamFile } from './http.js'
 import { handleV1 } from './v1.js'
 import { startBackgroundWorkers } from './workers.js'
+import { createTerminalManager } from './terminal-sessions.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
@@ -65,6 +67,7 @@ async function main() {
   }
 
   const ctx = { dbCall, loadSettings, saveSettings, dataDir: DATA_DIR, notify: publishEvent }
+  const terminalManager = createTerminalManager({ dataDir: DATA_DIR, loadSettings })
   if (START_WORKERS) {
     startBackgroundWorkers(ctx)
     backupTimer = setInterval(() => {
@@ -165,6 +168,49 @@ async function main() {
         return
       }
 
+      if (url.pathname === '/api/files/list' && req.method === 'GET') {
+        sendJson(res, 200, { ok: true, ...listDirectory(url.searchParams.get('path'), loadSettings()) })
+        return
+      }
+
+      if (url.pathname === '/api/workspace/roots' && req.method === 'GET') {
+        sendJson(res, 200, { ok: true, roots: listWorkspaceRoots(loadSettings()) })
+        return
+      }
+
+      if (url.pathname === '/api/terminal/status' && req.method === 'GET') {
+        sendJson(res, 200, { ok: true, tmux: terminalManager.status() })
+        return
+      }
+
+      if (url.pathname === '/api/terminal/sessions' && req.method === 'GET') {
+        sendJson(res, 200, { ok: true, ...terminalManager.listSessions() })
+        return
+      }
+
+      if (url.pathname === '/api/terminal/sessions' && req.method === 'POST') {
+        sendJson(res, 200, { ok: true, session: terminalManager.createSession(await parseBody(req)) })
+        return
+      }
+
+      const terminalSessionMatch = url.pathname.match(/^\/api\/terminal\/sessions\/([^/]+)(?:\/([^/]+))?$/)
+      if (terminalSessionMatch) {
+        const id = decodeURIComponent(terminalSessionMatch[1])
+        const action = terminalSessionMatch[2]
+        if (!action && req.method === 'PATCH') {
+          sendJson(res, 200, { ok: true, session: terminalManager.updateSession(id, await parseBody(req)) })
+          return
+        }
+        if (!action && req.method === 'DELETE') {
+          sendJson(res, 200, terminalManager.killSession(id, { remove: true }))
+          return
+        }
+        if (action === 'kill' && req.method === 'POST') {
+          sendJson(res, 200, terminalManager.killSession(id))
+          return
+        }
+      }
+
       if (url.pathname === '/api/attachments' && req.method === 'GET') {
         sendJson(res, 200, { ok: true, attachments: await listAttachments(ctx, url.searchParams.get('taskId')) })
         return
@@ -230,6 +276,34 @@ async function main() {
     }
   })
 
+  const terminalWss = new WebSocketServer({ noServer: true })
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url, `http://${req.headers.host || `${API_HOST}:${API_PORT}`}`)
+    const match = url.pathname.match(/^\/api\/terminal\/sessions\/([^/]+)\/socket$/)
+    if (!match) {
+      socket.destroy()
+      return
+    }
+
+    const token = url.searchParams.get('token') || ''
+    req.headers.authorization = `Bearer ${token}`
+    const user = authenticate(authDb, req)
+    if (!user || !requireScope(user, 'full_access')) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+      socket.destroy()
+      return
+    }
+
+    terminalWss.handleUpgrade(req, socket, head, ws => {
+      try {
+        terminalManager.attachWebSocket(ws, decodeURIComponent(match[1]), url.searchParams)
+      } catch (e) {
+        try { ws.send(JSON.stringify({ type: 'error', error: e.message })) } catch {}
+        ws.close()
+      }
+    })
+  })
+
   server.listen(API_PORT, API_HOST, () => {
     console.log(`[server] API listening on http://${API_HOST}:${API_PORT}`)
     console.log(`[server] data dir: ${DATA_DIR}`)
@@ -244,6 +318,7 @@ async function main() {
       ])
     }
     if (mcpProcess) mcpProcess.kill('SIGTERM')
+    terminalManager.close()
     server.close()
     await closeDbWorker()
     process.exit(0)

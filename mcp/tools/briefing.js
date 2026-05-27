@@ -28,12 +28,12 @@ function autoRolloverRecurring(db) {
       db.prepare(`
         INSERT INTO tasks (
           id, title, description, status, my_priority, energy_required, context, project,
-          tags, source, source_url, created_at, updated_at, start_date, due_date, task_type, recurrence, ai_context
-        ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context
+        ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         uuidv4(), task.title, task.description, task.my_priority, task.energy_required,
         task.context, task.project, task.tags, task.source ?? 'manual', task.source_url,
-        now, now, nextDate, nextDate, task.task_type, task.recurrence,
+        now, now, now, nextDate, nextDate, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence,
         appendAiContext(null, `Auto-recurred from task ${task.id}`)
       );
     }

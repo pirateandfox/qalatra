@@ -6,6 +6,8 @@ Qalatra is a battle-tested personal task management system: SQLite database, MCP
 
 **Core principle: evolve, don't rewrite.**
 
+The newer agent operating layer roadmap extends this architecture with clearer product roles: personal instances, agent-node instances, external intake, action logs, human handoffs, and Qalatra-to-Qalatra messaging. See `plan/AGENT_OPERATING_LAYER_ROADMAP.md`.
+
 ---
 
 ## Core Philosophy
@@ -31,6 +33,8 @@ Qalatra is a battle-tested personal task management system: SQLite database, MCP
 - Accepts work from multiple people via `inbox_write` capability tokens
 - Runs agent jobs autonomously, pushes status back to the assigning instance
 - No personal task management — just inbox, active jobs, status
+
+This is now better described as an **agent node**. An agent node may own external identities such as email, Slack, Notion, and PM-tool accounts. Raw external intake belongs in dedicated intake/action/handoff tables, not in the personal task list by default.
 
 ---
 
@@ -359,11 +363,12 @@ The sidecar approach is the fallback, not the default. Try native module first.
 - Connection status indicator
 - `cloudflared` setup documented and included in `setup-server.sh`
 
-### Step 8 — Digital employee mode
-- Config flag: `employee_mode: true`
-- Employee Dashboard: Inbox + Active Jobs + Recent Output (simplified view)
-- Acceptance rules: optional allowlist of contact NodeIds that can push tasks
-- Employee identity configured in Settings → Identity
+### Step 8 — Agent node mode
+- Config flag: `instance_role: "agent_node"`
+- Agent Ops surface: External Inbox, Active Jobs, Action Log, Handoffs, Recent Output, connector health, and retry/replay tools
+- Acceptance rules: optional allowlist of contact NodeIds or API tokens that can push work
+- Agent-node identity configured in Settings → Identity
+- Raw external intake stays out of a human personal task list unless an explicit handoff or task conversion happens
 
 ### Step 9 — Hetzner snapshot + deployment docs
 - Perfect a CX32 instance, take snapshot

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url';
 import os from 'os';
 import fs from 'fs';
 import pkg from 'rrule';
+import { ensureAgentSchema, ensureCapabilitySchema } from '../server/capability-registry.js';
+import { ensureDailyNoteSearchSchema } from '../server/daily-note-search.js';
 const { rrulestr } = pkg;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,8 +32,10 @@ function initSchema(db) {
       created_at          TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
       due_date            TEXT,
+      hard_deadline       INTEGER NOT NULL DEFAULT 0,
       start_date          TEXT,
       surface_after       TEXT,
+      last_reviewed_at    TEXT,
       last_touched_human  TEXT,
       last_touched_ai     TEXT,
       last_surfaced       TEXT,
@@ -49,6 +53,16 @@ function initSchema(db) {
       agent_autorun       INTEGER NOT NULL DEFAULT 0,
       agent_autorun_time  TEXT DEFAULT '09:00'
     );
+
+    CREATE TABLE IF NOT EXISTS task_dependencies (
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      blocked_by_task_id TEXT NOT NULL REFERENCES tasks(id),
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (task_id, blocked_by_task_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocked_by
+      ON task_dependencies(blocked_by_task_id);
 
     CREATE TABLE IF NOT EXISTS sync_log (
       id            TEXT PRIMARY KEY,
@@ -89,6 +103,15 @@ function initSchema(db) {
       created_at   TEXT NOT NULL DEFAULT (datetime('now')),
       started_at   TEXT,
       completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS notes (
+      id           TEXT PRIMARY KEY,
+      task_id      TEXT NOT NULL REFERENCES tasks(id),
+      body         TEXT NOT NULL,
+      author       TEXT NOT NULL DEFAULT 'user',
+      agent_job_id TEXT REFERENCES agent_jobs(id),
+      created_at   TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
     );
 
     CREATE TABLE IF NOT EXISTS habits (
@@ -135,6 +158,7 @@ function initSchema(db) {
       key          TEXT,
       url          TEXT,
       local_path   TEXT,
+      encrypted    INTEGER NOT NULL DEFAULT 0,
       created_at   TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -145,6 +169,9 @@ function initSchema(db) {
       UPDATE tasks SET updated_at = datetime('now') WHERE id = OLD.id;
     END;
   `);
+  ensureAgentSchema(db);
+  ensureCapabilitySchema(db);
+  ensureDailyNoteSearchSchema(db);
 
   // Migrations — add columns that may not exist in older DBs
   const tryAlter = sql => { try { db.exec(sql); } catch (_) {} };
@@ -163,6 +190,9 @@ function initSchema(db) {
   if (!existingCols.includes('description'))        db.exec('ALTER TABLE tasks ADD COLUMN description TEXT');
   if (!existingCols.includes('inbox'))              db.exec('ALTER TABLE tasks ADD COLUMN inbox INTEGER NOT NULL DEFAULT 0');
   if (!existingCols.includes('assigned_agent'))     db.exec('ALTER TABLE tasks ADD COLUMN assigned_agent TEXT');
+  if (!existingCols.includes('hard_deadline'))      db.exec('ALTER TABLE tasks ADD COLUMN hard_deadline INTEGER NOT NULL DEFAULT 0');
+  if (!existingCols.includes('last_reviewed_at'))   db.exec('ALTER TABLE tasks ADD COLUMN last_reviewed_at TEXT');
+  db.exec(`UPDATE tasks SET last_reviewed_at = COALESCE(last_touched_human, created_at, datetime('now')) WHERE last_reviewed_at IS NULL`);
 
   // Migrations for contexts table columns added after initial schema
   const contextCols = db.prepare(`PRAGMA table_info(contexts)`).all().map(r => r.name);
@@ -192,6 +222,12 @@ function initSchema(db) {
   const agentJobCols = db.prepare(`PRAGMA table_info(agent_jobs)`).all().map(r => r.name);
   if (!agentJobCols.includes('heartbeat_id')) {
     db.exec(`ALTER TABLE agent_jobs ADD COLUMN heartbeat_id TEXT REFERENCES heartbeats(id)`);
+  }
+
+  // Migrations for attachments table
+  const attachmentCols = db.prepare(`PRAGMA table_info(attachments)`).all().map(r => r.name);
+  if (!attachmentCols.includes('encrypted')) {
+    db.exec(`ALTER TABLE attachments ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0`);
   }
 
   // Seed default contexts on first run

@@ -129,6 +129,26 @@
 .create-task-project:focus { border-color: var(--accent); }
 .create-task-project::placeholder { color: var(--muted); }
 
+.ct-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ct-checkbox input { accent-color: #ef4444; }
+.ct-checkbox.active {
+  color: #ef4444;
+  border-color: #ef444460;
+  background: #ef444414;
+  font-weight: 600;
+}
+
 .create-task-actions {
   display: flex;
   justify-content: flex-end;

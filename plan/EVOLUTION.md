@@ -1,6 +1,47 @@
 # Qalatra — Evolution Notes
 
-## Unreleased — Headless server foundation and remote instance switcher (2026-05-20)
+## 1.6.0 — Agent IDE and persistent remote terminals (2026-05-27)
+
+- Added first-class Files and Terminals surfaces in the main sidebar. Files handles server-backed workspace browsing plus Monaco file editing/saving; Terminals handles persistent terminal sessions with a full xterm pane.
+- Added authenticated workspace APIs for allowed roots and one-level directory listing. The allowed root set now includes `workspaceRoot`, `fileRoots`, `agentsRoot`, `terminalCwd`, attachment cache, `~/workspaces`, and `~/IdeaProjects`; file browsing/editing stays behind existing `full_access` API tokens.
+- Added persistent server-side terminal session management backed by `tmux`. Qalatra stores terminal metadata in the server data directory, can list/create/update/kill/remove sessions, and exposes a WebSocket attach endpoint so browser/Electron clients can disconnect and reconnect without killing the underlying shell.
+- Added remote terminal UI transport using xterm.js over the new WebSocket endpoint. The existing local bottom terminal remains available, while the Terminals view attaches to the active Qalatra server instance.
+- Added Monaco as the general-purpose code editor for workspace files, with syntax highlighting by extension, dirty tracking, and authenticated save through the existing file write API.
+- Added a registered-agent picker to terminal session creation so Qalatra can start a shell or Claude session directly in a known agent folder.
+- Added Settings fields for `workspaceRoot` and additional `fileRoots` so headless boxes can keep Agent IDE access scoped to a normal-user workspace instead of the whole machine.
+- Updated the Linux bootstrap/server install path to require `tmux`, create a normal-user workspace at `~/workspaces` by default, and seed first-install settings for `workspaceRoot`, `agentsRoot`, and `terminalCwd`.
+
+## 1.6.0 — Trust signal improvements (2026-05-25)
+
+- Added task-level trust signals: `hard_deadline`, `last_reviewed_at`, and `task_dependencies`, with idempotent migrations in both the Electron/server worker and MCP DB paths.
+- Extended MCP task tools so `create_task`/`update_task` accept `hard_deadline`, `get_task` and `get_todays_tasks` include `blocked`, `blocked_by`, and dependency summaries, and new tools cover `mark_reviewed`, `get_stale_tasks`, `add_dependency`, `remove_dependency`, and `get_dependencies`.
+- Added authenticated API support for stale task listing, marking a task reviewed, and adding/removing/listing dependencies through `/api/v1/tasks`.
+- Updated the desktop UI so hard deadlines use a red locked due-date chip, stale tasks show a review-age indicator with a detail-panel “Mark reviewed” action, and dependency-blocked tasks are de-emphasized and grouped under “Waiting” in the priority view.
+- Added detail-panel dependency links for both “Blocked by” and “Blocking” relationships, plus hard-deadline editing during task creation and in the detail panel.
+- Added automatic attachment recovery for agent comments: when a background agent result or non-user MCP task note mentions an existing local file path, Qalatra now creates a local attachment row for that task and deduplicates by task/path. Relative paths are resolved against the task/agent folder, and oversized or missing files are ignored.
+- Removed arbitrary attachment/link chips from task rows so large link sets no longer distort the overview list. Rows now show only a single compact non-clickable source icon when the task has a real external `source` and `source_url`; all attached files and reference links remain available in the detail panel.
+
+## 1.6.0 — Agent operating layer product roadmap (2026-05-25)
+
+- Added `plan/AGENT_OPERATING_LAYER_ROADMAP.md` to capture the larger product direction beyond the initial MVP: Qalatra as one engine with personal and agent-node instance roles, separate UI surfaces, durable external intake, agent action logs, handoff requests, and Qalatra-to-Qalatra messaging.
+- Documented the core boundary that raw email/Slack/Notion/PM intake should become `external_items`, not automatic personal tasks. Personal Qalatra stays human-first; agent-node Qalatra gets the External Inbox, Agent Runs, Action Log, Approval Queue, Handoffs, connector health, prompt/session history, and retry/replay tools.
+- Captured the first-class handoff model so remote agents can ask Justin or another Qalatra instance for decisions, approvals, missing context, or review without using email or Slack as the coordination layer.
+- Captured the Qalatra-to-Qalatra messaging direction: API-to-API delivery first, Iroh peer transport later, with a transport-independent `instance_messages` model for questions, answers, approvals, task pushes, status updates, and agent results.
+- Added the strategic build sequence: instance roles and UI surfaces, handoff requests, external intake core, agent actions and approvals, first real connector, inter-instance messaging, Agent Ops console, Iroh transport, and policy engine.
+
+## 1.6.0 — Capability Registry MVP (2026-05-23)
+
+- Added the Phase 1 capability registry for Qalatra's agent operating layer: scanned `agent.config` folders now also upsert structured `capabilities` and `capability_files` rows while preserving the existing `agents` table and dispatch behavior.
+- Extended the agent scanner to parse an optional `capability` block with kind, aliases, trigger phrases, provider support, delegation target, permissions, and owned files. Existing `agent.config` files require no changes; Qalatra infers default capability metadata and instruction/knowledge files from the folder.
+- Added capability registry schema initialization to both DB access paths (`db-worker.js` and `mcp/db.js`) so Electron/server APIs and MCP tools see the same registry tables.
+- Added MCP tools `list_capabilities`, `get_capability`, `search_capabilities`, and `rescan_capabilities` so a top-level assistant can discover what agents/skills exist, what they are for, where they live, and how they can be delegated.
+- Added minimal authenticated HTTP endpoints under `/api/v1/capabilities` for listing, search, detail, and rescan.
+- Added `docs/capabilities.md` as the authoring and usage guide for capability metadata: agents vs capabilities, field meanings, permission conventions, examples, MCP/API usage, and current Phase 1 limits.
+- Added `docs/executive-agent-rollout.md` as the handoff for enriching real Project-folder agents and building the single Qalatra executive-assistant workflow around `search_capabilities`, `search_daily_notes`, task search, and careful entity boundaries.
+- Added FTS-backed daily-note memory search via MCP `search_daily_notes` and authenticated `/api/v1/daily-notes` search routes. Search returns compact excerpts by default; `get_daily_note` remains the full-note loader.
+- Kept embeddings, memory document/chunk indexing, and context bundles out of this phase. Those remain later implementation slices after the registry and daily-note search prove useful.
+
+## 1.6.0 — Headless server foundation and remote instance switcher (2026-05-20)
 
 - Added a first `server/` runtime that can run without Electron: authenticated HTTP API, bootstrap `full_access` token, reusable `db-worker.js` client, background workers for agent jobs/autorun/heartbeats, and token list/create/revoke helpers.
 - Added stable `/api/v1` routes for the core UI data surface: tasks, notes, daily notes, contexts, projects, agents, habits, heartbeats, settings, MCP config, S3 test, key management, backups, and attachment sync.
@@ -581,4 +622,4 @@ _Add notes here after real sessions — what felt clunky, what was missing, what
 - **`assigned_to`** — Justin vs. Valentin vs. Dillon. Only relevant once other people's tasks are in the system (via Asana sync or manual entry). Depends on sync layer landing first.
 - **Weekly review** — `week_in_review` MCP tool or just a prompt pattern: what was completed, what slipped, what's been in backlog too long. Probably just a good system prompt, not a code change.
 
-_Sync layer, Reflect integration, Slack/Missive intake — moved to FUTURE_IDEAS.md. All superseded by existing MCP connections._
+_Sync layer, Reflect integration, and Slack/Missive intake were originally deferred to FUTURE_IDEAS.md. The newer agent operating layer roadmap supersedes the "MCP is enough" assumption for high-volume autonomous intake: external systems should feed durable intake records, actions, and handoffs instead of polluting the personal task list._

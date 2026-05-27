@@ -94,6 +94,8 @@ function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: O
   const scheduledIds = new Set(scheduledTasks.map(t => t.id))
   // Coding tasks live in the Code view, not Priority
   const allTasks = allRaw.filter(t => !scheduledIds.has(t.id) && t.task_type !== 'coding')
+  const waitingTasks = allTasks.filter(t => !!t.blocked)
+  const actionableTasks = allTasks.filter(t => !t.blocked)
 
   async function clearInbox(id: string) {
     await api.clearInbox(id)
@@ -125,9 +127,12 @@ function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: O
           {data.habits!.map(h => <HabitInlineRow key={h.id} habit={h} onMutate={onMutate} />)}
         </section>
       )}
-      {allTasks.length > 0 && (
-        <TaskSection title="Tasks" icon="📋" tasks={allTasks} draggable groupKey="priority" selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
+      {actionableTasks.length > 0 && (
+        <TaskSection title="Tasks" icon="📋" tasks={actionableTasks} draggable groupKey="priority" selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
       )}
+      <DeferredSection title="Waiting" icon="⏸" count={waitingTasks.length} storageKey="section-waiting">
+        <TaskSection title="" icon="" tasks={waitingTasks} hideHeader selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
+      </DeferredSection>
       <DeferredSection title="Snoozed" icon="💤" count={data.timeSnoozed?.length ?? 0} storageKey="section-snoozed">
         <TaskSection title="" icon="" tasks={data.timeSnoozed ?? []} hideHeader selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
       </DeferredSection>

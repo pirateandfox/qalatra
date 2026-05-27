@@ -133,21 +133,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -z "$PREV_TAG" ]; then
-            NOTES=$(git log --pretty=format:"- %s" --no-merges)
-          else
-            NOTES=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges)
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          NOTES_FILE="plan/releases/${TAG}.md"
+          if [ ! -f "$NOTES_FILE" ]; then
+            NOTES_FILE="$(mktemp)"
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -z "$PREV_TAG" ]; then
+              git log --pretty=format:"- %s" --no-merges > "$NOTES_FILE"
+            else
+              git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges > "$NOTES_FILE"
+            fi
           fi
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-          if gh release view "${{ github.ref_name }}" &>/dev/null; then
-            gh release edit "${{ github.ref_name }}" \
-              --title "$VERSION" \
-              --notes "$NOTES" \
+          if gh release view "$TAG" &>/dev/null; then
+            gh release edit "$TAG" \
+              --title "Qalatra $VERSION" \
+              --notes-file "$NOTES_FILE" \
               --draft=false
           else
-            gh release create "${{ github.ref_name }}" \
-              --title "$VERSION" \
-              --notes "$NOTES"
+            gh release create "$TAG" \
+              --title "Qalatra $VERSION" \
+              --notes-file "$NOTES_FILE"
           fi

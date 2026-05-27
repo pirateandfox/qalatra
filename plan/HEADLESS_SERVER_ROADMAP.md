@@ -10,6 +10,8 @@ Qalatra becomes one backend with multiple clients:
 
 The product can still feel like one app on desktop: the installer includes the UI and the server. The runtime boundary is still real so Linux headless installs do not need Electron.
 
+The strategic product layer above this server/client split is documented in `plan/AGENT_OPERATING_LAYER_ROADMAP.md`: personal instances, agent-node instances, external intake, agent actions, handoff requests, and Qalatra-to-Qalatra messaging.
+
 ## Security Model
 
 All API requests require `Authorization: Bearer <token>` except `/health`.
@@ -84,7 +86,14 @@ Implemented first:
    - Token creation UI in Settings → Instances/Security.
    - Connection health indicators and active instance switcher.
 
-6. **True web/mobile clients**
+6. **Agent-node operating layer**
+   - Add an `instance_role` setting so a server can present as `personal` or `agent_node`.
+   - Keep raw email/Slack/Notion/PM intake out of the personal task list by storing it as external intake records first.
+   - Add handoff requests so remote agents can ask the human for decisions or approval without using email/Slack as the coordination channel.
+   - Add agent action logs and an Agent Ops surface for prompts, runs, actions, approvals, connector health, failures, and retries.
+   - Add Qalatra-to-Qalatra messaging over authenticated API delivery first, with Iroh peer transport later.
+
+7. **True web/mobile clients**
    - Reuse the same API and token model.
    - Add a browser-safe file/attachment model and remote terminal transport before promising full remote administration.
 

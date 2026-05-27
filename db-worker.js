@@ -5,6 +5,15 @@ import { workerData, parentPort } from 'worker_threads'
 import Database from 'better-sqlite3'
 import crypto from 'crypto'
 import pkg from 'rrule'
+import {
+  ensureCapabilitySchema,
+  getCapability,
+  listCapabilities,
+  searchCapabilities,
+  upsertScannedCapabilities,
+} from './server/capability-registry.js'
+import { ensureDailyNoteSearchSchema, searchDailyNotes } from './server/daily-note-search.js'
+import { autoAttachMentionedFiles } from './server/mentioned-files.js'
 const { rrulestr } = pkg
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -87,8 +96,10 @@ function migrate() {
       created_at          TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
       due_date            TEXT,
+      hard_deadline       INTEGER NOT NULL DEFAULT 0,
       start_date          TEXT,
       surface_after       TEXT,
+      last_reviewed_at    TEXT,
       last_touched_human  TEXT,
       last_touched_ai     TEXT,
       last_surfaced       TEXT,
@@ -106,6 +117,13 @@ function migrate() {
       agent_autorun       INTEGER NOT NULL DEFAULT 0,
       agent_autorun_time  TEXT DEFAULT '09:00'
     );
+    CREATE TABLE IF NOT EXISTS task_dependencies (
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      blocked_by_task_id TEXT NOT NULL REFERENCES tasks(id),
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (task_id, blocked_by_task_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocked_by ON task_dependencies(blocked_by_task_id);
     CREATE TABLE IF NOT EXISTS daily_notes (
       date       TEXT PRIMARY KEY,
       content    TEXT NOT NULL DEFAULT '',
@@ -203,6 +221,8 @@ function migrate() {
       UNIQUE(habit_id, date)
     );
   `)
+  ensureCapabilitySchema(db)
+  ensureDailyNoteSearchSchema(db)
 
   const tryAlter = sql => { try { db.exec(sql) } catch {} }
   tryAlter('ALTER TABLE tasks RENAME COLUMN notes TO description')
@@ -221,6 +241,8 @@ function migrate() {
   tryAlter('ALTER TABLE tasks ADD COLUMN agent_autorun INTEGER NOT NULL DEFAULT 0')
   tryAlter("ALTER TABLE tasks ADD COLUMN agent_autorun_time TEXT DEFAULT '09:00'")
   tryAlter('ALTER TABLE tasks ADD COLUMN inbox INTEGER NOT NULL DEFAULT 0')
+  tryAlter('ALTER TABLE tasks ADD COLUMN hard_deadline INTEGER NOT NULL DEFAULT 0')
+  tryAlter('ALTER TABLE tasks ADD COLUMN last_reviewed_at TEXT')
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN session_id TEXT')
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN user_message TEXT')
   tryAlter('ALTER TABLE contexts ADD COLUMN label TEXT')
@@ -234,6 +256,7 @@ function migrate() {
   tryAlter('ALTER TABLE projects ADD COLUMN is_repo INTEGER NOT NULL DEFAULT 0')
   tryAlter('ALTER TABLE projects ADD COLUMN context TEXT')
   tryAlter('ALTER TABLE attachments ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0')
+  db.prepare(`UPDATE tasks SET last_reviewed_at = COALESCE(last_touched_human, created_at, datetime('now')) WHERE last_reviewed_at IS NULL`).run()
   // Backfill projects.context from the most common task context per project
   db.exec(`
     UPDATE projects SET context = (
@@ -254,6 +277,98 @@ function migrate() {
 // ── Query helpers ─────────────────────────────────────────────────────────────
 
 const ORDER = 'sort_order ASC NULLS LAST, my_priority ASC NULLS LAST, created_at ASC'
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+const DEFAULT_ACTIVE_REVIEW_DAYS = 14
+const DEFAULT_BACKLOG_REVIEW_DAYS = 30
+
+function datePart(value) {
+  if (!value) return null
+  const match = String(value).match(/^\d{4}-\d{2}-\d{2}/)
+  return match ? match[0] : null
+}
+
+function daysSince(value) {
+  const date = datePart(value)
+  if (!date) return null
+  const now = new Date()
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  const thenUtc = new Date(`${date}T00:00:00Z`).getTime()
+  if (Number.isNaN(thenUtc)) return null
+  return Math.floor((todayUtc - thenUtc) / MS_PER_DAY)
+}
+
+function reviewSignal(task) {
+  const eligible = (task.status === 'active' || task.status === 'backlog') && task.task_type !== 'event' && !task.recurrence
+  if (!eligible) return { stale: false, stale_days: null, review_threshold_days: null }
+  const threshold = task.status === 'backlog' ? DEFAULT_BACKLOG_REVIEW_DAYS : DEFAULT_ACTIVE_REVIEW_DAYS
+  const age = daysSince(task.last_reviewed_at ?? task.created_at)
+  return {
+    stale: age != null && age > threshold,
+    stale_days: age,
+    review_threshold_days: threshold,
+  }
+}
+
+function dependencySummary(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    context: row.context,
+    project: row.project,
+    due_date: row.due_date,
+    hard_deadline: row.hard_deadline === 1 || row.hard_deadline === true,
+    completed: row.status === 'done',
+    dependency_created_at: row.dependency_created_at ?? null,
+  }
+}
+
+function attachTrustSignals(tasks) {
+  if (!tasks.length) return tasks
+  const ids = tasks.map(t => t.id)
+  const placeholders = ids.map(() => '?').join(',')
+  const blockedByRows = db.prepare(`
+    SELECT
+      d.task_id AS relation_task_id,
+      d.created_at AS dependency_created_at,
+      b.id, b.title, b.status, b.context, b.project, b.due_date, b.hard_deadline
+    FROM task_dependencies d
+    JOIN tasks b ON b.id = d.blocked_by_task_id
+    WHERE d.task_id IN (${placeholders})
+    ORDER BY b.title COLLATE NOCASE
+  `).all(...ids)
+  const blocksRows = db.prepare(`
+    SELECT
+      d.blocked_by_task_id AS relation_task_id,
+      d.created_at AS dependency_created_at,
+      t.id, t.title, t.status, t.context, t.project, t.due_date, t.hard_deadline
+    FROM task_dependencies d
+    JOIN tasks t ON t.id = d.task_id
+    WHERE d.blocked_by_task_id IN (${placeholders})
+    ORDER BY t.title COLLATE NOCASE
+  `).all(...ids)
+  const blockedBy = {}
+  for (const row of blockedByRows) {
+    if (!blockedBy[row.relation_task_id]) blockedBy[row.relation_task_id] = []
+    blockedBy[row.relation_task_id].push(dependencySummary(row))
+  }
+  const blocks = {}
+  for (const row of blocksRows) {
+    if (!blocks[row.relation_task_id]) blocks[row.relation_task_id] = []
+    blocks[row.relation_task_id].push(dependencySummary(row))
+  }
+  return tasks.map(task => {
+    const blocked_by = blockedBy[task.id] ?? []
+    return {
+      ...task,
+      hard_deadline: task.hard_deadline === 1 || task.hard_deadline === true,
+      ...reviewSignal(task),
+      blocked: blocked_by.some(dep => !dep.completed),
+      blocked_by,
+      blocks: blocks[task.id] ?? [],
+    }
+  })
+}
 
 function attachSubtasks(tasks) {
   if (!tasks.length) return tasks
@@ -264,7 +379,7 @@ function attachSubtasks(tasks) {
   const attCounts = db.prepare(`SELECT task_id, COUNT(*) as cnt FROM attachments WHERE task_id IN (${ids}) GROUP BY task_id`).all()
   const attByTask = {}
   for (const r of attCounts) attByTask[r.task_id] = r.cnt
-  return tasks.map(t => ({ ...t, subtasks: byParent[t.id] ?? [], attachment_count: attByTask[t.id] ?? 0 }))
+  return attachTrustSignals(tasks.map(t => ({ ...t, subtasks: byParent[t.id] ?? [], attachment_count: attByTask[t.id] ?? 0 })))
 }
 
 function stampAgentJobs(...arrays) {
@@ -304,8 +419,8 @@ function spawnRecurrence(task, nextDate, now, reason) {
     spawnedStart = nextDate
     spawnedDue = null
   }
-  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, start_date, due_date, task_type, recurrence, ai_context, agent_path, agent_resume, agent_autorun, agent_autorun_time) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(crypto.randomUUID(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, spawnedStart, spawnedDue, task.task_type, task.recurrence, appendAiContext(null, reason), task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00')
+  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context, agent_path, agent_resume, agent_autorun, agent_autorun_time) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(crypto.randomUUID(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, now, spawnedStart, spawnedDue, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence, appendAiContext(null, reason), task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00')
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -347,9 +462,12 @@ function getTasksForDate(date) {
   }
 }
 
-function getTask(id) { return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) ?? null }
-function getSubtasks(id) { return db.prepare(`SELECT * FROM tasks WHERE parent_id = ? ORDER BY sort_order ASC NULLS LAST, created_at ASC`).all(id) }
-function getBacklog() { return db.prepare(`SELECT * FROM tasks WHERE status = 'backlog' AND parent_id IS NULL ORDER BY context ASC, project ASC NULLS LAST, sort_order ASC NULLS LAST, created_at ASC`).all() }
+function getTask(id) {
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
+  return row ? attachTrustSignals([row])[0] : null
+}
+function getSubtasks(id) { return attachTrustSignals(db.prepare(`SELECT * FROM tasks WHERE parent_id = ? ORDER BY sort_order ASC NULLS LAST, created_at ASC`).all(id)) }
+function getBacklog() { return attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'backlog' AND parent_id IS NULL ORDER BY context ASC, project ASC NULLS LAST, sort_order ASC NULLS LAST, created_at ASC`).all()) }
 
 function getCodingTasks() {
   const tasks = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE task_type = 'coding' AND status NOT IN ('done','archived') AND parent_id IS NULL ORDER BY created_at DESC`).all())
@@ -364,18 +482,23 @@ function getReadingTasks() {
 function createTask(body) {
   if (!body.title) throw new Error('title required')
   const id = crypto.randomUUID(); const now = nowIso()
-  db.prepare(`INSERT INTO tasks (id, title, status, context, project, my_priority, due_date, agent_path, task_type, source, ai_context, created_at, updated_at) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, 'task', 'manual', ?, ?, ?)`)
-    .run(id, body.title, body.context ?? 'personal', body.project ?? null, body.my_priority ?? null, body.due_date || null, body.agent_path || null, body.ai_context ? `[${now.slice(0, 10)}] ${body.ai_context}` : null, now, now)
+  db.prepare(`INSERT INTO tasks (id, title, status, context, project, my_priority, due_date, hard_deadline, agent_path, task_type, source, ai_context, created_at, updated_at, last_reviewed_at) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, 'task', 'manual', ?, ?, ?, ?)`)
+    .run(id, body.title, body.context ?? 'personal', body.project ?? null, body.my_priority ?? null, body.due_date || null, body.hard_deadline ? 1 : 0, body.agent_path || null, body.ai_context ? `[${now.slice(0, 10)}] ${body.ai_context}` : null, now, now, now)
   if (body.project) db.prepare(`INSERT OR IGNORE INTO projects (name) VALUES (?)`).run(body.project)
-  return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
+  return getTask(id)
 }
 
 function updateTask(id, body) {
-  const MUTABLE = ['title','description','status','my_priority','energy_required','context','project','tags','source_url','due_date','start_date','surface_after','task_type','event_time','end_time','recurrence','parent_id','agent_path','agent_resume','agent_autorun','agent_autorun_time','outcome','notes','inbox']
-  if (body.links !== undefined) db.prepare("UPDATE tasks SET links = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(body.links), id)
+  const MUTABLE = ['title','description','status','my_priority','energy_required','context','project','tags','source_url','due_date','hard_deadline','start_date','surface_after','task_type','event_time','end_time','recurrence','parent_id','agent_path','agent_resume','agent_autorun','agent_autorun_time','outcome','notes','inbox']
+  const now = nowIso()
+  if (body.links !== undefined) db.prepare("UPDATE tasks SET links = ?, updated_at = datetime('now'), last_reviewed_at = ? WHERE id = ?").run(JSON.stringify(body.links), now, id)
   const sets = []; const params = {}
   for (const f of MUTABLE) { if (body[f] !== undefined) { sets.push(`${f} = @${f}`); const v = body[f] === '' ? null : body[f]; params[f] = typeof v === 'boolean' ? (v ? 1 : 0) : v } }
-  if (sets.length) { params.id = id; db.prepare(`UPDATE tasks SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = @id`).run(params) }
+  if (sets.length) {
+    params.id = id
+    params.last_reviewed_at = now
+    db.prepare(`UPDATE tasks SET ${sets.join(', ')}, last_reviewed_at = @last_reviewed_at, updated_at = datetime('now') WHERE id = @id`).run(params)
+  }
   if (body.project) db.prepare(`INSERT OR IGNORE INTO projects (name) VALUES (?)`).run(body.project)
   return { ok: true }
 }
@@ -384,6 +507,7 @@ function deleteTask(id) {
   const subtaskIds = db.prepare('SELECT id FROM tasks WHERE parent_id = ?').all(id).map(r => r.id)
   const allIds = [id, ...subtaskIds]
   const ph = allIds.map(() => '?').join(',')
+  db.prepare(`DELETE FROM task_dependencies WHERE task_id IN (${ph}) OR blocked_by_task_id IN (${ph})`).run(...allIds, ...allIds)
   db.prepare(`DELETE FROM notes       WHERE task_id IN (${ph})`).run(...allIds)
   db.prepare(`DELETE FROM agent_jobs  WHERE task_id IN (${ph})`).run(...allIds)
   db.prepare(`DELETE FROM attachments WHERE task_id IN (${ph})`).run(...allIds)
@@ -398,7 +522,7 @@ function completeTask(id) {
   const { n } = db.prepare(`SELECT count(*) as n FROM tasks WHERE parent_id = ? AND status != 'done'`).get(id)
   if (n > 0) return { ok: false, reason: 'subtasks_incomplete', count: n }
   const now = nowIso()
-  db.prepare(`UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = ?, ai_context = ? WHERE id = ?`).run(now, appendAiContext(task.ai_context, 'Marked complete via UI.'), id)
+  db.prepare(`UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, 'Marked complete via UI.'), id)
   if (task.recurrence) {
     const nextDate = nextRecurrenceDate(task.due_date ?? task.start_date ?? today(), task.recurrence)
     if (nextDate) spawnRecurrence(task, nextDate, now, `Recurred from task ${id}`)
@@ -410,15 +534,16 @@ function completeTaskWithSubtasks(id) {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
   if (!task) return { ok: false, reason: 'not_found' }
   const now = nowIso()
-  db.prepare(`UPDATE tasks SET status = 'done', last_touched_human = ?, ai_context = ? WHERE parent_id = ? AND status != 'done'`).run(now, appendAiContext(null, 'Bulk-completed with parent via UI.'), id)
-  db.prepare(`UPDATE tasks SET status = 'done', last_touched_human = ?, ai_context = ? WHERE id = ?`).run(now, appendAiContext(task.ai_context, 'Marked complete via UI (with subtasks).'), id)
+  db.prepare(`UPDATE tasks SET status = 'done', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE parent_id = ? AND status != 'done'`).run(now, now, appendAiContext(null, 'Bulk-completed with parent via UI.'), id)
+  db.prepare(`UPDATE tasks SET status = 'done', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, 'Marked complete via UI (with subtasks).'), id)
   return { ok: true }
 }
 
 function uncompleteTask(id) {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
   if (!task) return { ok: false }
-  db.prepare(`UPDATE tasks SET status = 'active', last_touched_human = ?, ai_context = ? WHERE id = ?`).run(nowIso(), appendAiContext(task.ai_context, 'Reopened via UI.'), id)
+  const now = nowIso()
+  db.prepare(`UPDATE tasks SET status = 'active', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, 'Reopened via UI.'), id)
   return { ok: true }
 }
 
@@ -426,7 +551,7 @@ function skipTask(id) {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
   if (!task || !task.recurrence) return { ok: false }
   const now = nowIso()
-  db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ?`).run(now, appendAiContext(task.ai_context, 'Skipped via UI.'), id)
+  db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, 'Skipped via UI.'), id)
   const nextDate = nextRecurrenceDate(task.due_date ?? task.start_date ?? today(), task.recurrence)
   if (nextDate) spawnRecurrence(task, nextDate, now, `Recurred from task ${id}`)
   return { ok: true }
@@ -435,7 +560,8 @@ function skipTask(id) {
 function activateTask(id) {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
   if (!task) return { ok: false }
-  db.prepare(`UPDATE tasks SET status = 'active', surface_after = NULL, ai_context = ?, last_touched_human = ? WHERE id = ?`).run(appendAiContext(task.ai_context, 'Activated via UI.'), nowIso(), id)
+  const now = nowIso()
+  db.prepare(`UPDATE tasks SET status = 'active', surface_after = NULL, ai_context = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?`).run(appendAiContext(task.ai_context, 'Activated via UI.'), now, now, id)
   return { ok: true }
 }
 
@@ -444,25 +570,95 @@ function snoozeTask(id, until) {
   if (!task) return { ok: false }
   const hasTime = until.includes(' ') || until.includes('T')
   if (hasTime) {
-    db.prepare(`UPDATE tasks SET status = 'snoozed', surface_after = ?, due_date = ?, ai_context = ?, last_touched_human = ? WHERE id = ?`).run(until, until.substring(0, 10), appendAiContext(task.ai_context, `Snoozed until ${until}.`), nowIso(), id)
+    const now = nowIso()
+    db.prepare(`UPDATE tasks SET status = 'snoozed', surface_after = ?, due_date = ?, ai_context = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?`).run(until, until.substring(0, 10), appendAiContext(task.ai_context, `Snoozed until ${until}.`), now, now, id)
   } else {
-    db.prepare(`UPDATE tasks SET status = 'active', surface_after = NULL, due_date = ?, ai_context = ?, last_touched_human = ? WHERE id = ?`).run(until, appendAiContext(task.ai_context, `Deferred to ${until}.`), nowIso(), id)
+    const now = nowIso()
+    db.prepare(`UPDATE tasks SET status = 'active', surface_after = NULL, due_date = ?, ai_context = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?`).run(until, appendAiContext(task.ai_context, `Deferred to ${until}.`), now, now, id)
   }
   return { ok: true }
 }
 
-function updateTaskTitle(id, title) { db.prepare('UPDATE tasks SET title = ?, last_touched_human = ? WHERE id = ?').run(title, nowIso(), id); return { ok: true } }
-function updateTaskDescription(id, description) { db.prepare('UPDATE tasks SET description = ?, last_touched_human = ? WHERE id = ?').run(description ?? null, nowIso(), id); return { ok: true } }
-function updateTaskDueDate(id, dueDate) { db.prepare('UPDATE tasks SET due_date = ?, last_touched_human = ? WHERE id = ?').run(dueDate || null, nowIso(), id); return { ok: true } }
-function updateTaskRecurrence(id, recurrence) { db.prepare('UPDATE tasks SET recurrence = ?, last_touched_human = ? WHERE id = ?').run(recurrence || null, nowIso(), id); return { ok: true } }
+function updateTaskTitle(id, title) { const now = nowIso(); db.prepare('UPDATE tasks SET title = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(title, now, now, id); return { ok: true } }
+function updateTaskDescription(id, description) { const now = nowIso(); db.prepare('UPDATE tasks SET description = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(description ?? null, now, now, id); return { ok: true } }
+function updateTaskDueDate(id, dueDate) { const now = nowIso(); db.prepare('UPDATE tasks SET due_date = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(dueDate || null, now, now, id); return { ok: true } }
+function updateTaskRecurrence(id, recurrence) { const now = nowIso(); db.prepare('UPDATE tasks SET recurrence = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(recurrence || null, now, now, id); return { ok: true } }
 
 function addTaskLink(id, url) {
   const task = db.prepare('SELECT links FROM tasks WHERE id = ?').get(id)
   if (!task) throw new Error('Task not found')
   let links = []; try { links = JSON.parse(task.links || '[]') } catch {}
   if (!links.includes(url)) links.push(url)
-  db.prepare("UPDATE tasks SET links = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(links), id)
+  db.prepare("UPDATE tasks SET links = ?, updated_at = datetime('now'), last_reviewed_at = ? WHERE id = ?").run(JSON.stringify(links), nowIso(), id)
   return { ok: true }
+}
+
+function markReviewed(id) {
+  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(id)
+  if (!task) throw new Error('Task not found')
+  const now = nowIso()
+  db.prepare('UPDATE tasks SET last_reviewed_at = ?, last_touched_human = ? WHERE id = ?').run(now, now, id)
+  return { ok: true, task_id: id, last_reviewed_at: now }
+}
+
+function getStaleTasks(days = null) {
+  const parsedDays = days == null ? null : Number(days)
+  const hasOverride = Number.isFinite(parsedDays)
+  const staleWhere = hasOverride
+    ? `date(COALESCE(last_reviewed_at, created_at)) < date('now', @cutoff)`
+    : `(
+      (status = 'backlog' AND date(COALESCE(last_reviewed_at, created_at)) < date('now', '-${DEFAULT_BACKLOG_REVIEW_DAYS} days'))
+      OR
+      (status = 'active' AND date(COALESCE(last_reviewed_at, created_at)) < date('now', '-${DEFAULT_ACTIVE_REVIEW_DAYS} days'))
+    )`
+  const params = hasOverride ? { cutoff: `-${parsedDays} days` } : null
+  const stmt = db.prepare(`
+    SELECT * FROM tasks
+    WHERE status IN ('active', 'backlog')
+      AND task_type != 'event'
+      AND recurrence IS NULL
+      AND parent_id IS NULL
+      AND ${staleWhere}
+    ORDER BY date(COALESCE(last_reviewed_at, created_at)) ASC, sort_order ASC NULLS LAST, my_priority ASC NULLS LAST
+  `)
+  return attachSubtasks(params ? stmt.all(params) : stmt.all())
+}
+
+function getTaskDependencies(id) {
+  const task = getTask(id)
+  if (!task) throw new Error('Task not found')
+  return { blocks: task.blocks, blocked_by: task.blocked_by }
+}
+
+function dependencyWouldCycle(taskId, blockedByTaskId) {
+  return !!db.prepare(`
+    WITH RECURSIVE chain(id) AS (
+      SELECT blocked_by_task_id FROM task_dependencies WHERE task_id = ?
+      UNION
+      SELECT d.blocked_by_task_id
+      FROM task_dependencies d
+      JOIN chain c ON d.task_id = c.id
+    )
+    SELECT 1 FROM chain WHERE id = ? LIMIT 1
+  `).get(blockedByTaskId, taskId)
+}
+
+function addTaskDependency(taskId, blockedByTaskId) {
+  if (taskId === blockedByTaskId) throw new Error('A task cannot depend on itself')
+  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId)
+  if (!task) throw new Error('Task not found')
+  const blocker = db.prepare('SELECT id FROM tasks WHERE id = ?').get(blockedByTaskId)
+  if (!blocker) throw new Error('Blocking task not found')
+  if (dependencyWouldCycle(taskId, blockedByTaskId)) throw new Error('Dependency would create a cycle')
+  db.prepare('INSERT OR IGNORE INTO task_dependencies (task_id, blocked_by_task_id) VALUES (?, ?)').run(taskId, blockedByTaskId)
+  markReviewed(taskId)
+  return { ok: true, task_id: taskId, blocked_by_task_id: blockedByTaskId, ...getTaskDependencies(taskId) }
+}
+
+function removeTaskDependency(taskId, blockedByTaskId) {
+  db.prepare('DELETE FROM task_dependencies WHERE task_id = ? AND blocked_by_task_id = ?').run(taskId, blockedByTaskId)
+  markReviewed(taskId)
+  return { ok: true, task_id: taskId, blocked_by_task_id: blockedByTaskId, ...getTaskDependencies(taskId) }
 }
 
 function reorderTasks(ids) {
@@ -475,8 +671,8 @@ function createSubtask(parentId, title) {
   const parent = db.prepare('SELECT * FROM tasks WHERE id = ?').get(parentId)
   if (!parent) return null
   const id = crypto.randomUUID(); const now = nowIso()
-  db.prepare(`INSERT INTO tasks (id, title, status, context, project, parent_id, source, created_at, updated_at) VALUES (?, ?, 'active', ?, ?, ?, 'manual', ?, ?)`).run(id, title, parent.context, parent.project, parentId, now, now)
-  return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
+  db.prepare(`INSERT INTO tasks (id, title, status, context, project, parent_id, source, created_at, updated_at, last_reviewed_at) VALUES (?, ?, 'active', ?, ?, ?, 'manual', ?, ?, ?)`).run(id, title, parent.context, parent.project, parentId, now, now, now)
+  return getTask(id)
 }
 
 // ── Notes ─────────────────────────────────────────────────────────────────────
@@ -499,6 +695,9 @@ function saveDailyNote(date, content) {
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Invalid date')
   db.prepare(`INSERT INTO daily_notes (date, content, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(date) DO UPDATE SET content = excluded.content, updated_at = datetime('now')`).run(date, content ?? '')
   return { ok: true }
+}
+function searchDailyNotesDb(args = {}) {
+  return searchDailyNotes(db, args)
 }
 
 // ── Contexts ──────────────────────────────────────────────────────────────────
@@ -620,6 +819,7 @@ function upsertAgents(agents) {
     description: a.description ?? null, command: a.command ?? null,
     coding: a.coding ? 1 : 0, relative_path: a.relativePath ?? null, folder: a.folder ?? null,
   })))
+  upsertScannedCapabilities(db, agents)
   return { ok: true, count: agents.length }
 }
 function listAgentsDb(filter = {}) {
@@ -629,6 +829,9 @@ function listAgentsDb(filter = {}) {
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
   return db.prepare(`SELECT * FROM agents ${where} ORDER BY folder ASC NULLS LAST, name ASC`).all(params)
 }
+function listCapabilitiesDb(filter = {}) { return listCapabilities(db, filter) }
+function getCapabilityDb(selector = {}) { return getCapability(db, selector) }
+function searchCapabilitiesDb(args = {}) { return searchCapabilities(db, args) }
 function renameProject(oldName, newName) {
   const existing = db.prepare('SELECT name FROM projects WHERE name = ?').get(newName)
   db.transaction(() => {
@@ -730,7 +933,7 @@ function createAgentJob(taskId, userMessage) {
   const existingNotes = db.prepare(`SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC`).all(taskId)
   const parts = [
     `You are an agent running inside Qalatra. Task ID: ${taskId}`,
-    `If you create any output files, save them to ${task.agent_path}/output/ and include their paths in your response so Qalatra can link them back to this task.`,
+    `If you create any output files, save them to ${task.agent_path}/output/ and include their file paths in your response. Qalatra will auto-attach existing mentioned files back to this task.`,
     `Task: ${task.title}`
   ]
   if (task.description) parts.push(task.description)
@@ -765,7 +968,11 @@ function finishAgentJob(id, status, result, sessionId) {
 }
 function insertAgentNote(id, taskId, result, jobId) {
   db.prepare(`INSERT INTO notes (id, task_id, body, author, agent_job_id) VALUES (?, ?, ?, 'agent', ?)`).run(id, taskId, result, jobId)
-  return { ok: true }
+  const job = jobId ? db.prepare('SELECT agent_path FROM agent_jobs WHERE id = ?').get(jobId) : null
+  const task = db.prepare('SELECT agent_path FROM tasks WHERE id = ?').get(taskId)
+  const baseDirs = [job?.agent_path, task?.agent_path].filter(Boolean)
+  const attachments = autoAttachMentionedFiles(db, { taskId, text: result, baseDirs })
+  return { ok: true, auto_attached: attachments.length, attachments }
 }
 function resetStuckJobs() {
   // Jobs stuck for less than the 15-min timeout window were likely orphaned by an app crash — re-queue them.
@@ -778,7 +985,7 @@ function getAutorunTasks() {
   return db.prepare(`SELECT t.* FROM tasks t WHERE t.agent_path IS NOT NULL AND t.agent_autorun = 1 AND t.status = 'active' AND (t.due_date IS NULL OR t.due_date <= date('now', 'localtime')) AND time('now', 'localtime') >= COALESCE(t.agent_autorun_time, '09:00') AND NOT EXISTS (SELECT 1 FROM agent_jobs j WHERE j.task_id = t.id)`).all()
 }
 function insertAutorunJob(taskId, agentPath, prompt) {
-  const fullPrompt = `You are an agent running inside Qalatra. Task ID: ${taskId}\nIf you create any output files, save them to ${agentPath}/output/ and include their paths in your response so Qalatra can link them back to this task.\n${prompt}`
+  const fullPrompt = `You are an agent running inside Qalatra. Task ID: ${taskId}\nIf you create any output files, save them to ${agentPath}/output/ and include their file paths in your response. Qalatra will auto-attach existing mentioned files back to this task.\n${prompt}`
   db.prepare(`INSERT INTO agent_jobs (id, task_id, agent_path, prompt) VALUES (?, ?, ?, ?)`).run(crypto.randomUUID(), taskId, agentPath, fullPrompt)
   return { ok: true }
 }
@@ -915,12 +1122,14 @@ const METHODS = {
   skipTask, activateTask, snoozeTask,
   updateTaskTitle, updateTaskDescription, updateTaskDueDate, updateTaskRecurrence,
   addTaskLink, reorderTasks, createSubtask,
+  markReviewed, getStaleTasks, getTaskDependencies, addTaskDependency, removeTaskDependency,
   listNotes, addNote,
-  getDailyNote, saveDailyNote,
+  getDailyNote, saveDailyNote, searchDailyNotesDb,
   listContexts, createContext, updateContext, deleteContext,
   getProjectSummaries, getProjectDetail,
   listProjects, createProjectExplicit, updateProject, renameProject, setProjectContext, archiveProject, unarchiveProject, deleteProject,
   upsertAgents, listAgentsDb,
+  listCapabilitiesDb, getCapabilityDb, searchCapabilitiesDb,
   listHabits, createHabit, updateHabit, logHabit, unlogHabit,
   listAttachments, insertAttachment, getAttachment, deleteAttachment,
   getPendingAttachments, updateAttachmentStorage,

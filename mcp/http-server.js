@@ -16,6 +16,7 @@ import { toolDefs as agentDefs,    handlers as agentHandlers }    from './tools/
 import { toolDefs as habitDefs,       handlers as habitHandlers }       from './tools/habits.js';
 import { toolDefs as healthDefs,      handlers as healthHandlers }      from './tools/health.js';
 import { toolDefs as heartbeatDefs,   handlers as heartbeatHandlers }   from './tools/heartbeats.js';
+import { toolDefs as capabilityDefs,  handlers as capabilityHandlers }  from './tools/capabilities.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_FILE = process.env.TASKOS_SETTINGS_FILE
@@ -25,8 +26,8 @@ function loadSettings() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch { return {}; }
 }
 
-const allDefs     = [...taskDefs, ...triageDefs, ...briefingDefs, ...syncDefs, ...notesDefs, ...agentDefs, ...habitDefs, ...healthDefs, ...heartbeatDefs];
-const allHandlers = { ...taskHandlers, ...triageHandlers, ...briefingHandlers, ...syncHandlers, ...notesHandlers, ...agentHandlers, ...habitHandlers, ...healthHandlers, ...heartbeatHandlers };
+const allDefs     = [...taskDefs, ...triageDefs, ...briefingDefs, ...syncDefs, ...notesDefs, ...agentDefs, ...habitDefs, ...healthDefs, ...heartbeatDefs, ...capabilityDefs];
+const allHandlers = { ...taskHandlers, ...triageHandlers, ...briefingHandlers, ...syncHandlers, ...notesHandlers, ...agentHandlers, ...habitHandlers, ...healthHandlers, ...heartbeatHandlers, ...capabilityHandlers };
 
 function createMcpServer() {
   const server = new Server(
@@ -48,7 +49,7 @@ function createMcpServer() {
     let lastErr;
     for (let attempt = 0; attempt <= delays.length; attempt++) {
       try {
-        const result = handler(args ?? {});
+        const result = await handler(args ?? {});
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (err) {
         if (err.code === 'SQLITE_BUSY' && attempt < delays.length) {

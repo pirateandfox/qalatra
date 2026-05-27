@@ -7,13 +7,15 @@ function expandHome(p) {
   return p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p
 }
 
-function configuredRoots(settings = {}) {
+export function configuredRoots(settings = {}) {
   const roots = []
   const configured = (settings.fileRoots ?? '').split(',').map(r => r.trim()).filter(Boolean)
   roots.push(...configured)
+  if (settings.workspaceRoot) roots.push(settings.workspaceRoot)
   if (settings.agentsRoot) roots.push(settings.agentsRoot)
   if (settings.terminalCwd) roots.push(settings.terminalCwd)
   if (settings.attachmentCacheDir) roots.push(settings.attachmentCacheDir)
+  roots.push(path.join(os.homedir(), 'workspaces'))
   roots.push(path.join(os.homedir(), 'IdeaProjects'))
   return [...new Set(roots.map(expandHome).filter(Boolean).map(r => path.resolve(r)))]
 }
@@ -45,6 +47,30 @@ export function resolveAllowedPath(filePath, settings) {
   return assertAllowed(filePath, settings)
 }
 
+export function listWorkspaceRoots(settings = {}) {
+  const roots = configuredRoots(settings).map(root => {
+    let stat = null
+    try {
+      stat = fs.statSync(root)
+    } catch {}
+    return {
+      path: root,
+      name: root === os.homedir() ? '~' : path.basename(root) || root,
+      exists: !!stat,
+      isDirectory: !!stat?.isDirectory(),
+    }
+  })
+
+  return roots
+    .filter(root => root.exists && root.isDirectory)
+    .filter((root, index, all) => !all.some((other, otherIndex) => (
+      otherIndex !== index &&
+      other.exists &&
+      other.isDirectory &&
+      root.path.startsWith(other.path + path.sep)
+    )))
+}
+
 export function mimeTypeForPath(filePath) {
   return MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream'
 }
@@ -65,6 +91,38 @@ export function writeTextFile(filePath, contents, settings) {
   fs.mkdirSync(path.dirname(resolved), { recursive: true })
   fs.writeFileSync(resolved, contents, 'utf8')
   return { ok: true }
+}
+
+export function listDirectory(dirPath, settings = {}) {
+  const resolved = assertAllowed(dirPath, settings)
+  const stat = fs.statSync(resolved)
+  if (!stat.isDirectory()) throw new Error(`Not a directory: ${resolved}`)
+
+  const entries = fs.readdirSync(resolved, { withFileTypes: true })
+    .filter(entry => entry.name !== '.DS_Store')
+    .map(entry => {
+      const fullPath = path.join(resolved, entry.name)
+      let entryStat = null
+      try { entryStat = fs.lstatSync(fullPath) } catch {}
+      const isSymlink = !!entryStat?.isSymbolicLink()
+      const isDirectory = entry.isDirectory() && !isSymlink
+      return {
+        name: entry.name,
+        path: fullPath,
+        type: isDirectory ? 'directory' : isSymlink ? 'symlink' : 'file',
+        size: entryStat?.isFile() ? entryStat.size : null,
+        modifiedAt: entryStat?.mtime ? entryStat.mtime.toISOString() : null,
+        extension: isDirectory ? '' : path.extname(entry.name).slice(1).toLowerCase(),
+      }
+    })
+
+  entries.sort((a, b) => {
+    if (a.type === 'directory' && b.type !== 'directory') return -1
+    if (a.type !== 'directory' && b.type === 'directory') return 1
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+  })
+
+  return { path: resolved, entries }
 }
 
 export function findInheritedStyle(startDir, settings) {

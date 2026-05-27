@@ -1,5 +1,7 @@
 import { randomUUID } from 'crypto';
 import { openDb, today } from '../db.js';
+import { searchDailyNotes } from '../../server/daily-note-search.js';
+import { autoAttachMentionedFiles } from '../../server/mentioned-files.js';
 
 export const toolDefs = [
   {
@@ -58,6 +60,21 @@ export const toolDefs = [
       },
     },
   },
+  {
+    name: 'search_daily_notes',
+    description: 'Search daily-note memory by keyword and/or date range. Returns compact excerpts; use get_daily_note for the full note.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query:           { type: 'string', description: 'Search text, e.g. "Monroe billing decision". Optional when date range is provided.' },
+        date_from:       { type: 'string', description: 'YYYY-MM-DD inclusive lower bound' },
+        date_to:         { type: 'string', description: 'YYYY-MM-DD inclusive upper bound' },
+        limit:           { type: 'integer', description: 'Default 20, max 100' },
+        include_content: { type: 'boolean', description: 'Include full note content in each result. Defaults to false; prefer get_daily_note for one full note.' },
+        include_empty:   { type: 'boolean', description: 'When query is omitted, include empty daily notes. Defaults to false.' },
+      },
+    },
+  },
 ];
 
 export const handlers = {
@@ -76,9 +93,19 @@ export const handlers = {
   add_task_note(args) {
     const db = openDb();
     const id = randomUUID();
+    const author = args.author ?? 'ai';
     db.prepare(`INSERT INTO notes (id, task_id, body, author) VALUES (?, ?, ?, ?)`)
-      .run(id, args.task_id, args.body, args.author ?? 'ai');
-    return { ok: true, note_id: id };
+      .run(id, args.task_id, args.body, author);
+
+    const task = db.prepare('SELECT agent_path FROM tasks WHERE id = ?').get(args.task_id);
+    const attachments = author === 'user'
+      ? []
+      : autoAttachMentionedFiles(db, {
+        taskId: args.task_id,
+        text: args.body,
+        baseDirs: [task?.agent_path].filter(Boolean),
+      });
+    return { ok: true, note_id: id, auto_attached: attachments.length, attachments };
   },
 
   get_daily_note(args) {
@@ -108,5 +135,10 @@ export const handlers = {
       ORDER BY date DESC
     `).all(end, end);
     return { notes: rows };
+  },
+
+  search_daily_notes(args) {
+    const db = openDb();
+    return searchDailyNotes(db, args ?? {});
   },
 };

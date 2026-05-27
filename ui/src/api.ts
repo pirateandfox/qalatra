@@ -3,6 +3,7 @@ import { currentServerInstance, enc, httpJson, jsonRequest, v1 } from './apiRunt
 
 export {
   createAccessToken,
+  currentServerInstance,
   getAccessTokenExpiryLabel,
   getActiveInstance,
   getActiveInstanceId,
@@ -47,6 +48,91 @@ export async function textFileExists(path: string): Promise<boolean> {
   const active = await currentServerInstance()
   const data = await httpJson(active, `/api/files/exists?path=${encodeURIComponent(path)}`, { method: 'GET' })
   return !!data.exists
+}
+
+export interface WorkspaceRoot {
+  path: string
+  name: string
+  exists: boolean
+  isDirectory: boolean
+}
+
+export interface DirectoryEntry {
+  name: string
+  path: string
+  type: 'directory' | 'file' | 'symlink'
+  size: number | null
+  modifiedAt: string | null
+  extension: string
+}
+
+export async function listWorkspaceRoots(): Promise<WorkspaceRoot[]> {
+  const active = await currentServerInstance()
+  const data = await httpJson(active, '/api/workspace/roots', { method: 'GET' })
+  return data.roots ?? []
+}
+
+export async function listDirectory(path: string): Promise<{ path: string; entries: DirectoryEntry[] }> {
+  const active = await currentServerInstance()
+  const data = await httpJson(active, `/api/files/list?path=${encodeURIComponent(path)}`, { method: 'GET' })
+  return { path: data.path, entries: data.entries ?? [] }
+}
+
+export interface TerminalSession {
+  id: string
+  title: string
+  cwd: string
+  taskId: string | null
+  agentPath: string | null
+  tmuxSession: string
+  createdAt: string
+  lastActivityAt: string
+  lastAttachedAt: string | null
+  status: 'running' | 'exited'
+}
+
+export interface TerminalStatus {
+  tmux: { ok: boolean; version: string | null; error: string | null }
+  sessions: TerminalSession[]
+}
+
+export async function listTerminalSessions(): Promise<TerminalStatus> {
+  const active = await currentServerInstance()
+  const data = await httpJson(active, '/api/terminal/sessions', { method: 'GET' })
+  return { tmux: data.tmux, sessions: data.sessions ?? [] }
+}
+
+export async function createTerminalSession(body: { title?: string; cwd?: string; taskId?: string | null; agentPath?: string | null; command?: string }): Promise<TerminalSession> {
+  const active = await currentServerInstance()
+  const data = await httpJson(active, '/api/terminal/sessions', { method: 'POST', body: JSON.stringify(body) })
+  return data.session
+}
+
+export async function updateTerminalSession(id: string, body: { title?: string; taskId?: string | null; agentPath?: string | null }): Promise<TerminalSession> {
+  const active = await currentServerInstance()
+  const data = await httpJson(active, `/api/terminal/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) })
+  return data.session
+}
+
+export async function killTerminalSession(id: string): Promise<void> {
+  const active = await currentServerInstance()
+  await httpJson(active, `/api/terminal/sessions/${encodeURIComponent(id)}/kill`, { method: 'POST' })
+}
+
+export async function removeTerminalSession(id: string): Promise<void> {
+  const active = await currentServerInstance()
+  await httpJson(active, `/api/terminal/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export async function terminalSocketUrl(id: string, cols: number, rows: number): Promise<string> {
+  const active = await currentServerInstance()
+  const url = new URL(active.url)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = `/api/terminal/sessions/${encodeURIComponent(id)}/socket`
+  url.searchParams.set('token', active.token)
+  url.searchParams.set('cols', String(cols))
+  url.searchParams.set('rows', String(rows))
+  return url.toString()
 }
 
 export async function findInheritedStyle(dir: string): Promise<{ foundPath: string; content: string } | null> {
@@ -118,6 +204,12 @@ export async function fetchCodingTasks(): Promise<Task[]> {
 
 export async function fetchReadingTasks(): Promise<Task[]> {
   const data = await v1('/tasks/reading', { method: 'GET' })
+  return data.tasks ?? []
+}
+
+export async function fetchStaleTasks(days?: number): Promise<Task[]> {
+  const suffix = days == null ? '' : `?days=${enc(String(days))}`
+  const data = await v1(`/tasks/stale${suffix}`, { method: 'GET' })
   return data.tasks ?? []
 }
 
@@ -445,6 +537,10 @@ export async function updateTask(id: string, fields: Record<string, unknown>): P
   await v1(`/tasks/${enc(id)}`, jsonRequest('PATCH', fields))
 }
 
+export async function markReviewed(taskId: string): Promise<void> {
+  await v1(`/tasks/${enc(taskId)}/reviewed`, { method: 'POST' })
+}
+
 export async function fetchSettings(): Promise<Record<string, string>> {
   const data = await v1('/settings', { method: 'GET' })
   return data.settings ?? {}
@@ -567,5 +663,6 @@ export const api = {
     return data.result
   },
   updateNotes: (taskId: string, notes: string) => updateTask(taskId, { notes }),
+  markReviewed,
   clearInbox: (taskId: string) => updateTask(taskId, { inbox: 0 }),
 }

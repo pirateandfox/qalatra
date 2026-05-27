@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="${QALATRA_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DATA_DIR="${QALATRA_DATA_DIR:-$HOME/.local/share/qalatra/db}"
+WORKSPACE_ROOT="${QALATRA_WORKSPACE_ROOT:-$HOME/workspaces}"
 API_HOST="${QALATRA_API_HOST:-127.0.0.1}"
 API_PORT="${QALATRA_API_PORT:-3456}"
 MCP_HOST="${QALATRA_MCP_HOST:-127.0.0.1}"
@@ -40,9 +41,10 @@ wait_for_url() {
   return 1
 }
 
-mkdir -p "$DATA_DIR" "$SERVICE_DIR"
+mkdir -p "$DATA_DIR" "$SERVICE_DIR" "$WORKSPACE_ROOT"
 
 command -v curl >/dev/null 2>&1 || fail "curl is required."
+command -v tmux >/dev/null 2>&1 || fail "tmux is required for persistent Agent IDE terminal sessions."
 [ -n "$NODE_BIN" ] || fail "node is required. Install Node.js 22+ first."
 
 NODE_MAJOR="$("$NODE_BIN" -p "Number(process.versions.node.split('.')[0])")"
@@ -52,18 +54,29 @@ systemctl --user show-environment >/dev/null 2>&1 || fail "systemd --user is not
 
 systemd_literal "$ROOT_DIR" >/dev/null
 systemd_literal "$DATA_DIR" >/dev/null
+systemd_literal "$WORKSPACE_ROOT" >/dev/null
 systemd_literal "$NODE_BIN" >/dev/null
 
 info "Installing Qalatra Server"
 echo "Root: $ROOT_DIR"
 echo "Data: $DATA_DIR"
+echo "Workspace: $WORKSPACE_ROOT"
 echo "API:  http://$API_HOST:$API_PORT"
 echo "MCP:  http://$MCP_HOST:$MCP_PORT/mcp"
 
-if [ ! -d "$ROOT_DIR/node_modules" ]; then
-  info "Installing npm dependencies"
-  (cd "$ROOT_DIR" && npm ci --ignore-scripts)
+SETTINGS_FILE="$DATA_DIR/settings.json"
+if [ ! -f "$SETTINGS_FILE" ]; then
+  cat > "$SETTINGS_FILE" <<SETTINGS
+{
+  "workspaceRoot": "$WORKSPACE_ROOT",
+  "agentsRoot": "$WORKSPACE_ROOT",
+  "terminalCwd": "$WORKSPACE_ROOT"
+}
+SETTINGS
 fi
+
+info "Installing npm dependencies"
+(cd "$ROOT_DIR" && npm ci --ignore-scripts)
 
 # The desktop app rebuilds native modules for Electron's Node ABI. A pure
 # headless Linux server runs under system Node, so force native modules back
@@ -114,6 +127,7 @@ echo "Health:  $HEALTH_STATUS ($HEALTH_URL)"
 echo "API:     http://$API_HOST:$API_PORT"
 echo "MCP:     http://$MCP_HOST:$MCP_PORT/mcp"
 echo "Data:    $DATA_DIR"
+echo "Workspace: $WORKSPACE_ROOT"
 echo "Token:   $TOKEN_FILE"
 if [ -f "$TOKEN_FILE" ]; then
   echo

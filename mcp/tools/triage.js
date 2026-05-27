@@ -1,4 +1,5 @@
 import { openDb, today, nowIso, appendAiContext } from '../db.js';
+import { enrichTaskRows } from './trust-signals.js';
 
 export const toolDefs = [
   {
@@ -61,11 +62,13 @@ export const handlers = {
     ];
     if (args.context) conditions.push(`context = '${args.context.replace(/'/g, "''")}'`);
     const where = `WHERE ${conditions.join(' AND ')}`;
-    return db.prepare(
-      `SELECT id, title, context, project, due_date, my_priority, energy_required, source_url, tags
+    const rows = db.prepare(
+      `SELECT id, title, status, task_type, context, project, due_date, hard_deadline, my_priority,
+              energy_required, source_url, tags, recurrence, created_at, last_reviewed_at
        FROM tasks ${where}
        ORDER BY my_priority ASC NULLS LAST, due_date ASC NULLS LAST`
     ).all();
+    return enrichTaskRows(db, rows);
   },
 
   get_overdue_tasks() {
@@ -112,7 +115,7 @@ export const handlers = {
       : task.ai_context;
 
     db.prepare(`
-      UPDATE tasks SET status = 'backlog', ai_context = @ai_context, last_touched_human = @now
+      UPDATE tasks SET status = 'backlog', ai_context = @ai_context, last_touched_human = @now, last_reviewed_at = @now
       WHERE id = @id
     `).run({ ai_context, now: nowIso(), id: args.task_id });
 

@@ -1,0 +1,375 @@
+.agent-ide {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.ide-sidebar {
+  width: 340px;
+  min-width: 280px;
+  max-width: 420px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ide-section {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-only-sidebar {
+  width: 300px;
+}
+
+.file-tree-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: none;
+}
+
+.ide-section-title {
+  font-size: 11px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.ide-terminal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ide-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.ide-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.ide-button-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ide-button {
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ide-button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.ide-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ide-button.primary {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface2));
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+}
+
+.ide-button.danger {
+  color: #fca5a5;
+}
+
+.ide-alert,
+.ide-error {
+  margin-top: 10px;
+  border: 1px solid #7f1d1d;
+  background: color-mix(in srgb, #7f1d1d 35%, transparent);
+  color: #fecaca;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.ide-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.terminal-tabs {
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 12px;
+}
+
+.terminal-tabs-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: none;
+}
+
+.ide-session {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  border-radius: 6px;
+  padding: 7px;
+  cursor: pointer;
+}
+
+.ide-session:hover,
+.ide-session.selected {
+  background: var(--surface2);
+  border-color: var(--border);
+}
+
+.ide-session.selected {
+  border-color: var(--accent);
+}
+
+.ide-session-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.ide-session-dot.running {
+  background: #22c55e;
+}
+
+.ide-session-dot.exited {
+  background: #f97316;
+}
+
+.ide-session-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ide-session-title,
+.ide-session-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-session-title {
+  font-weight: 650;
+  font-size: 12px;
+}
+
+.ide-session-meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ide-empty,
+.ide-tree-status,
+.ide-tree-error {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px;
+}
+
+.ide-tree-error {
+  color: #fca5a5;
+}
+
+.ide-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.ide-tree-row {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ide-tree-row:hover,
+.ide-tree-row.selected {
+  background: var(--surface2);
+}
+
+.ide-tree-row.missing {
+  color: var(--muted);
+  cursor: default;
+}
+
+.ide-tree-twist {
+  width: 12px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.ide-tree-icon {
+  width: 14px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.ide-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ide-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ide-editor-panel {
+  flex: 1;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+}
+
+.ide-editor-panel.full-height {
+  height: 100%;
+  min-height: 0;
+  border-bottom: none;
+}
+
+.ide-editor-toolbar,
+.ide-terminal-toolbar {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.ide-editor-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 650;
+}
+
+.ide-editor-path,
+.ide-terminal-cwd {
+  color: var(--muted);
+  font-size: 11px;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70vw;
+}
+
+.ide-editor-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.ide-editor-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ide-terminal-panel {
+  height: 36%;
+  min-height: 250px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.terminal-main,
+.terminal-full-panel {
+  min-height: 0;
+}
+
+.terminal-full-panel {
+  height: 100%;
+  flex: 1;
+}
+
+.ide-terminal-toolbar {
+  min-height: 36px;
+  padding: 6px 12px;
+}
+
+.ide-terminal-title {
+  font-weight: 650;
+  margin-right: 8px;
+}
+
+.ide-terminal-xterm {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #0d1117;
+  padding: 4px 8px;
+}
+
+.ide-terminal-xterm .xterm {
+  height: 100%;
+}
+
+.ide-terminal-xterm .xterm-viewport {
+  overflow-y: auto !important;
+}

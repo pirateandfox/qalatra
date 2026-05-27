@@ -39,6 +39,11 @@ function boolParam(value) {
   return value === '1' || value === 'true' || value === 'yes'
 }
 
+function optionalBoolParam(value) {
+  if (value == null) return undefined
+  return boolParam(value)
+}
+
 function dateParam(value) {
   return value && DATE_RE.test(value) ? value : today()
 }
@@ -54,7 +59,7 @@ async function agentsForSettings(ctx) {
   if (!root) return []
   const agents = await scanAgents(root, excludeFolders)
   await ctx.dbCall('upsertAgents', agents)
-  return agents
+  return agents.map(({ capability, ...agent }) => agent)
 }
 
 async function testS3Connection(creds) {
@@ -94,6 +99,7 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     if (id === 'backlog' && method === 'GET') return data('tasks', await ctx.dbCall('getBacklog'))
     if (id === 'coding' && method === 'GET') return data('tasks', await ctx.dbCall('getCodingTasks'))
     if (id === 'reading' && method === 'GET') return data('tasks', await ctx.dbCall('getReadingTasks'))
+    if (id === 'stale' && method === 'GET') return data('tasks', await ctx.dbCall('getStaleTasks', url.searchParams.get('days')))
     if (id === 'reorder' && method === 'POST') {
       const body = await parseBody(req)
       return result(await ctx.dbCall('reorderTasks', body.ids ?? []))
@@ -103,6 +109,16 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     if (!action && method === 'GET') return data('task', await ctx.dbCall('getTask', id))
     if (!action && method === 'PATCH') return result(await ctx.dbCall('updateTask', id, await parseBody(req)))
     if (!action && method === 'DELETE') return result(await ctx.dbCall('deleteTask', id))
+    if (action === 'reviewed' && (method === 'POST' || method === 'PATCH')) return result(await ctx.dbCall('markReviewed', id))
+    if (action === 'dependencies' && method === 'GET') return data('dependencies', await ctx.dbCall('getTaskDependencies', id))
+    if (action === 'dependencies' && method === 'POST') {
+      const body = await parseBody(req)
+      return result(await ctx.dbCall('addTaskDependency', id, body.blocked_by_task_id ?? body.blockedByTaskId))
+    }
+    if (action === 'dependencies' && method === 'DELETE') {
+      const blockedBy = parts[3] ?? url.searchParams.get('blocked_by_task_id') ?? url.searchParams.get('blockedByTaskId')
+      return result(await ctx.dbCall('removeTaskDependency', id, blockedBy))
+    }
     if (action === 'subtasks' && method === 'GET') return data('tasks', await ctx.dbCall('getSubtasks', id))
     if (action === 'subtasks' && method === 'POST') {
       const body = await parseBody(req)
@@ -148,6 +164,19 @@ export async function handleV1(req, url, ctx, { parseBody }) {
       if (verb === 'activate') return result(await ctx.dbCall('activateTask', id))
       if (verb === 'snooze') return result(await ctx.dbCall('snoozeTask', id, body.until))
     }
+  }
+
+  if (resource === 'daily-notes' && id === 'search' && method === 'POST') {
+    return data('results', await ctx.dbCall('searchDailyNotesDb', await parseBody(req)))
+  }
+
+  if (resource === 'daily-notes' && !id && method === 'GET') {
+    return data('results', await ctx.dbCall('searchDailyNotesDb', {
+      query: url.searchParams.get('query') ?? '',
+      date_from: url.searchParams.get('date_from') ?? url.searchParams.get('from') ?? undefined,
+      date_to: url.searchParams.get('date_to') ?? url.searchParams.get('to') ?? undefined,
+      limit: url.searchParams.get('limit') ?? undefined,
+    }))
   }
 
   if (resource === 'daily-notes' && id) {
@@ -200,6 +229,38 @@ export async function handleV1(req, url, ctx, { parseBody }) {
       return ok()
     }
     if (id === 'db' && method === 'GET') return data('agents', await ctx.dbCall('listAgentsDb'))
+  }
+
+  if (resource === 'capabilities') {
+    const filterFromQuery = () => ({
+      context: url.searchParams.get('context') ?? undefined,
+      project: url.searchParams.get('project') ?? undefined,
+      kind: url.searchParams.get('kind') ?? undefined,
+      active: optionalBoolParam(url.searchParams.get('active')),
+    })
+    if (!id && method === 'GET') {
+      const query = url.searchParams.get('query') ?? url.searchParams.get('q')
+      if (query) {
+        return data('capabilities', await ctx.dbCall('searchCapabilitiesDb', {
+          ...filterFromQuery(),
+          query,
+          limit: parseInt(url.searchParams.get('limit') ?? '20', 10),
+        }))
+      }
+      return data('capabilities', await ctx.dbCall('listCapabilitiesDb', filterFromQuery()))
+    }
+    if (id === 'search' && method === 'POST') {
+      return data('capabilities', await ctx.dbCall('searchCapabilitiesDb', await parseBody(req)))
+    }
+    if (id === 'rescan' && method === 'POST') {
+      const agents = await runAgentScan(ctx)
+      return ok({ count: agents.length })
+    }
+    if (id && !action && method === 'GET') {
+      const capability = await ctx.dbCall('getCapabilityDb', { id })
+      if (!capability) return json({ error: 'Capability not found' }, 404)
+      return data('capability', capability)
+    }
   }
 
   if (resource === 'agent-jobs' && id && method === 'GET') {
