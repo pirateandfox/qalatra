@@ -134,7 +134,11 @@ function RemoteTerminal({ session }: { session: TerminalSession | null }) {
         }
         ws.onmessage = event => {
           let message: { type?: string; data?: string; error?: string; code?: number } = {}
-          try { message = JSON.parse(String(event.data)) } catch {}
+          try {
+            message = JSON.parse(String(event.data))
+          } catch {
+            message = { type: 'error', error: 'Received an unreadable terminal message.' }
+          }
           if (message.type === 'output' && typeof message.data === 'string') term.write(message.data)
           if (message.type === 'error') term.write(`\r\n\x1b[31m${message.error ?? 'Terminal error'}\x1b[0m\r\n`)
           if (message.type === 'exit') term.write(`\r\n\x1b[33mAttach process exited (${message.code ?? 0}). Session may still be running in tmux.\x1b[0m\r\n`)
