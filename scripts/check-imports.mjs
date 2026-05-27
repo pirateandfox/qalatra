@@ -12,6 +12,10 @@ import { fileURLToPath } from 'url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
+function normalizeRelPath(filePath) {
+  return filePath.replace(/\\/g, '/')
+}
+
 // Entry points that Electron loads directly (not through the UI bundle)
 const ENTRY_POINTS = [
   'electron-main.js',
@@ -68,9 +72,9 @@ function walk(absPath) {
   while ((m = re.exec(content)) !== null) {
     let resolved = resolve(dirname(absPath), m[1])
     if (!existsSync(resolved) && existsSync(resolved + '.js')) resolved += '.js'
-    const rel = relative(ROOT, resolved)
+    const rel = normalizeRelPath(relative(ROOT, resolved))
     if (!discovered.has(rel)) {
-      discovered.set(rel, relative(ROOT, absPath))
+      discovered.set(rel, normalizeRelPath(relative(ROOT, absPath)))
     }
     walk(resolved)
   }
