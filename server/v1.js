@@ -100,6 +100,13 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     if (id === 'coding' && method === 'GET') return data('tasks', await ctx.dbCall('getCodingTasks'))
     if (id === 'reading' && method === 'GET') return data('tasks', await ctx.dbCall('getReadingTasks'))
     if (id === 'stale' && method === 'GET') return data('tasks', await ctx.dbCall('getStaleTasks', url.searchParams.get('days')))
+    if (id === 'search' && method === 'GET') {
+      return data('tasks', await ctx.dbCall('searchTasks', {
+        query: url.searchParams.get('query') ?? url.searchParams.get('q') ?? '',
+        scope: url.searchParams.get('scope') ?? 'open',
+        limit: url.searchParams.get('limit') ?? undefined,
+      }))
+    }
     if (id === 'reorder' && method === 'POST') {
       const body = await parseBody(req)
       return result(await ctx.dbCall('reorderTasks', body.ids ?? []))

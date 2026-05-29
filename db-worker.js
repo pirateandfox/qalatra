@@ -479,6 +479,57 @@ function getReadingTasks() {
   return attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE task_type = 'reading' AND status NOT IN ('done','archived') AND parent_id IS NULL ORDER BY my_priority ASC NULLS LAST, created_at DESC`).all())
 }
 
+function searchTasks(args = {}) {
+  const query = String(args.query ?? '').trim()
+  if (!query) return []
+
+  const scope = args.scope === 'all' ? 'all' : 'open'
+  const rawLimit = Number(args.limit ?? 80)
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(200, Math.floor(rawLimit))) : 80
+  const statusClause = scope === 'all' ? '' : "AND status NOT IN ('done','archived')"
+  const like = `%${query.toLowerCase()}%`
+  const rows = db.prepare(`
+    SELECT * FROM tasks
+    WHERE parent_id IS NULL
+      ${statusClause}
+      AND (
+        lower(coalesce(title, '')) LIKE @like OR
+        lower(coalesce(description, '')) LIKE @like OR
+        lower(coalesce(notes, '')) LIKE @like OR
+        lower(coalesce(ai_context, '')) LIKE @like OR
+        lower(coalesce(context, '')) LIKE @like OR
+        lower(coalesce(project, '')) LIKE @like OR
+        lower(coalesce(tags, '')) LIKE @like OR
+        lower(coalesce(source, '')) LIKE @like OR
+        lower(coalesce(source_url, '')) LIKE @like
+      )
+    ORDER BY
+      CASE status
+        WHEN 'active' THEN 0
+        WHEN 'backlog' THEN 1
+        WHEN 'snoozed' THEN 2
+        WHEN 'done' THEN 3
+        WHEN 'archived' THEN 4
+        ELSE 5
+      END,
+      CASE task_type
+        WHEN 'task' THEN 0
+        WHEN 'coding' THEN 1
+        WHEN 'reading' THEN 2
+        WHEN 'reminder' THEN 3
+        WHEN 'event' THEN 4
+        ELSE 5
+      END,
+      sort_order ASC NULLS LAST,
+      my_priority ASC NULLS LAST,
+      coalesce(last_touched_human, updated_at, created_at) DESC
+    LIMIT @limit
+  `).all({ like, limit })
+  const tasks = attachSubtasks(rows)
+  stampAgentJobs(tasks)
+  return tasks
+}
+
 function createTask(body) {
   if (!body.title) throw new Error('title required')
   const id = crypto.randomUUID(); const now = nowIso()
@@ -1117,6 +1168,7 @@ function listHeartbeatJobs(heartbeatId, limit = 10) {
 
 const METHODS = {
   getTasksForDate, getTask, getSubtasks, getBacklog, getCodingTasks, getReadingTasks,
+  searchTasks,
   createTask, updateTask, deleteTask,
   completeTask, completeTaskWithSubtasks, uncompleteTask,
   skipTask, activateTask, snoozeTask,

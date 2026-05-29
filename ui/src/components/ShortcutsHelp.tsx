@@ -19,6 +19,7 @@ const SECTIONS = [
       ['c', 'Complete selected task'],
       ['b', 'Move selected task to backlog'],
       ['r', 'Refresh current view'],
+      ['/', 'Focus task search'],
       ['Escape', 'Close panel / dismiss dialog'],
     ],
   },

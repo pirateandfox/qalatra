@@ -213,6 +213,12 @@ export async function fetchStaleTasks(days?: number): Promise<Task[]> {
   return data.tasks ?? []
 }
 
+export async function searchTasks(query: string, scope: 'open' | 'all' = 'open', limit = 80): Promise<Task[]> {
+  const params = new URLSearchParams({ query, scope, limit: String(limit) })
+  const data = await v1(`/tasks/search?${params.toString()}`, { method: 'GET' })
+  return data.tasks ?? []
+}
+
 export async function fetchDailyNote(date: string): Promise<{ date: string; content: string }> {
   const data = await v1(`/daily-notes/${enc(date)}`, { method: 'GET' })
   return data.note
@@ -301,6 +307,11 @@ export async function fetchProjectSummaries(): Promise<ProjectSummary[]> {
 export async function fetchProjectDetail(name: string): Promise<ProjectDetail> {
   const data = await v1(`/projects/${enc(name)}`, { method: 'GET' })
   return data.project
+}
+
+export async function fetchAgentsDb(): Promise<AgentRecord[]> {
+  const data = await v1('/agents/db', { method: 'GET' })
+  return data.agents ?? []
 }
 
 export async function createProjectExplicit(name: string): Promise<void> {

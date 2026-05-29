@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type React from 'react'
-import { api, type TaskData } from '../api'
+import { api, searchTasks, type TaskData } from '../api'
 import type { Task } from '../types/task'
 import { useContexts } from '../lib/ContextsProvider'
 import TaskRow from './TaskRow'
@@ -16,6 +16,160 @@ interface Props {
   onSelect: (id: string) => void
   onMeetingOpen: (id: string) => void
   onMutate: () => void
+}
+
+type SearchMode = 'current' | 'all'
+type TaskArrayKey = 'inbox' | 'overdue' | 'dueToday' | 'active' | 'wakingUp' | 'doneToday' | 'scheduled' | 'timeSnoozed' | 'completed' | 'wasDue' | 'events' | 'reminders'
+
+const TASK_ARRAY_KEYS: TaskArrayKey[] = [
+  'inbox', 'overdue', 'dueToday', 'active', 'wakingUp', 'doneToday',
+  'scheduled', 'timeSnoozed', 'completed', 'wasDue', 'events', 'reminders',
+]
+
+const STATUS_LABELS: Record<Task['status'], string> = {
+  active: 'Active',
+  backlog: 'Backlog',
+  snoozed: 'Snoozed',
+  done: 'Done',
+  archived: 'Archived',
+}
+
+function normalizedText(value: unknown) {
+  return String(value ?? '').toLowerCase()
+}
+
+function taskMatches(task: Task, query: string) {
+  const q = query.toLowerCase()
+  const subtasks = (task as Task & { subtasks?: Task[] }).subtasks ?? []
+  const values = [
+    task.title,
+    task.description,
+    task.notes,
+    task.ai_context,
+    task.context,
+    task.project,
+    task.tags,
+    task.source,
+    task.source_url,
+    task.due_date,
+    task.status,
+    task.task_type,
+    task.energy_required,
+    task.my_priority ? `p${task.my_priority}` : '',
+    ...subtasks.map(s => s.title),
+  ]
+  return values.some(value => normalizedText(value).includes(q))
+}
+
+function habitMatches(habit: NonNullable<TaskData['habits']>[number], query: string) {
+  const q = query.toLowerCase()
+  return [habit.title, habit.description, habit.recurrence].some(value => normalizedText(value).includes(q))
+}
+
+function filterTaskData(data: TaskData, query: string): TaskData {
+  if (!query.trim()) return data
+  const next: TaskData = { ...data }
+  const mutable = next as TaskData & Partial<Record<TaskArrayKey, Task[]>>
+  for (const key of TASK_ARRAY_KEYS) {
+    const tasks = data[key]
+    if (tasks) mutable[key] = tasks.filter(task => taskMatches(task, query))
+  }
+  if (data.habits) next.habits = data.habits.filter(habit => habitMatches(habit, query))
+  return next
+}
+
+function countTaskData(data: TaskData) {
+  let count = 0
+  for (const key of TASK_ARRAY_KEYS) count += data[key]?.length ?? 0
+  count += data.habits?.length ?? 0
+  return count
+}
+
+function SearchToolbar({
+  query,
+  mode,
+  currentCount,
+  allCount,
+  allLoading,
+  onQueryChange,
+  onModeChange,
+}: {
+  query: string
+  mode: SearchMode
+  currentCount: number | null
+  allCount: number | null
+  allLoading: boolean
+  onQueryChange: (query: string) => void
+  onModeChange: (mode: SearchMode) => void
+}) {
+  const hasQuery = query.trim().length > 0
+  return (
+    <div className="task-search-bar">
+      <input
+        data-task-search-input
+        className="task-search-input"
+        value={query}
+        onChange={e => onQueryChange(e.target.value)}
+        placeholder="Search this screen..."
+        aria-label="Search tasks"
+      />
+      {hasQuery && (
+        <button className="task-search-clear" onClick={() => onQueryChange('')} title="Clear search">
+          Clear
+        </button>
+      )}
+      <button
+        className={`task-search-scope ${mode === 'current' ? 'active' : ''}`}
+        onClick={() => onModeChange('current')}
+        disabled={!hasQuery}
+      >
+        This screen{hasQuery && currentCount !== null ? ` (${currentCount})` : ''}
+      </button>
+      <button
+        className={`task-search-scope ${mode === 'all' ? 'active' : ''}`}
+        onClick={() => onModeChange('all')}
+        disabled={!hasQuery}
+      >
+        {allLoading ? 'Searching...' : `Search all${allCount !== null ? ` (${allCount})` : ''}`}
+      </button>
+    </div>
+  )
+}
+
+function AllSearchResults({ tasks, selectedId, onSelect, onMutate }: {
+  tasks: Task[]
+  selectedId?: string | null
+  onSelect: (id: string) => void
+  onMutate: () => void
+}) {
+  const byStatus: Record<Task['status'], Task[]> = {
+    active: [],
+    backlog: [],
+    snoozed: [],
+    done: [],
+    archived: [],
+  }
+  for (const task of tasks) byStatus[task.status]?.push(task)
+  return (
+    <>
+      {tasks.length === 0 && <div className="empty-state">No matching tasks.</div>}
+      {(Object.keys(byStatus) as Task['status'][]).map(status => {
+        const group = byStatus[status]
+        if (!group.length) return null
+        return (
+          <TaskSection
+            key={status}
+            title={STATUS_LABELS[status]}
+            icon=""
+            tasks={group}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            onMutate={onMutate}
+          />
+        )
+      })}
+    </>
+  )
 }
 
 function ReminderRow({ task, onSelect, onMutate }: { task: Task; onSelect: (id: string) => void; onMutate: () => void }) {
@@ -88,7 +242,72 @@ function DeferredSection({ title, icon, count, storageKey, defaultOpen = false, 
 }
 
 function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: Omit<Props, 'view'>) {
-  const allRaw = [...(data.overdue ?? []), ...(data.dueToday ?? []), ...(data.active ?? [])]
+  const [query, setQuery] = useState('')
+  const [searchMode, setSearchMode] = useState<SearchMode>('current')
+  const [allResults, setAllResults] = useState<Task[] | null>(null)
+  const [allLoading, setAllLoading] = useState(false)
+  const [allError, setAllError] = useState<string | null>(null)
+  const trimmedQuery = query.trim()
+  const filteredData = useMemo(
+    () => trimmedQuery ? filterTaskData(data, trimmedQuery) : data,
+    [data, trimmedQuery],
+  )
+  const currentMatchCount = trimmedQuery ? countTaskData(filteredData) : null
+  const activeData = searchMode === 'current' ? filteredData : data
+
+  useEffect(() => {
+    if (!trimmedQuery) {
+      setSearchMode('current')
+      setAllResults(null)
+      setAllError(null)
+      return
+    }
+    if (searchMode !== 'all') return
+    let cancelled = false
+    setAllLoading(true)
+    setAllError(null)
+    const handle = window.setTimeout(() => {
+      searchTasks(trimmedQuery, 'all', 100)
+        .then(tasks => { if (!cancelled) setAllResults(tasks) })
+        .catch(err => { if (!cancelled) setAllError(err?.message ?? String(err)) })
+        .finally(() => { if (!cancelled) setAllLoading(false) })
+    }, 180)
+    return () => {
+      cancelled = true
+      window.clearTimeout(handle)
+    }
+  }, [trimmedQuery, searchMode])
+
+  const searchToolbar = (
+    <SearchToolbar
+      query={query}
+      mode={searchMode}
+      currentCount={currentMatchCount}
+      allCount={allResults?.length ?? null}
+      allLoading={allLoading}
+      onQueryChange={next => {
+        setQuery(next)
+        if (!next.trim()) setSearchMode('current')
+        else if (searchMode === 'all') setAllResults(null)
+      }}
+      onModeChange={mode => setSearchMode(mode)}
+    />
+  )
+
+  if (searchMode === 'all' && trimmedQuery) {
+    return (
+      <>
+        {searchToolbar}
+        {allError && <div className="task-search-error">Search failed: {allError}</div>}
+        {!allError && allLoading && allResults === null && <div className="empty-state">Searching all tasks...</div>}
+        {!allError && allResults !== null && (
+          <AllSearchResults tasks={allResults} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
+        )}
+      </>
+    )
+  }
+
+  const allRaw = [...(activeData.overdue ?? []), ...(activeData.dueToday ?? []), ...(activeData.active ?? [])]
   // Scheduled = autorun tasks that haven't fired yet (no agent job)
   const scheduledTasks = allRaw.filter(t => t.agent_autorun === 1 && !t.agent_job_status)
   const scheduledIds = new Set(scheduledTasks.map(t => t.id))
@@ -96,35 +315,37 @@ function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: O
   const allTasks = allRaw.filter(t => !scheduledIds.has(t.id) && t.task_type !== 'coding')
   const waitingTasks = allTasks.filter(t => !!t.blocked)
   const actionableTasks = allTasks.filter(t => !t.blocked)
+  const noCurrentMatches = !!trimmedQuery && currentMatchCount === 0
 
   async function clearInbox(id: string) {
     await api.clearInbox(id)
     onMutate()
   }
 
-  if (data.view === 'today') return (
+  if (activeData.view === 'today') return (
     <>
-      <DeferredSection title="Inbox" icon="📥" count={data.inbox?.length ?? 0} storageKey="section-inbox" defaultOpen>
-        {(data.inbox ?? []).map(t => (
+      {searchToolbar}
+      <DeferredSection title="Inbox" icon="📥" count={activeData.inbox?.length ?? 0} storageKey="section-inbox" defaultOpen>
+        {(activeData.inbox ?? []).map(t => (
           <TaskRow key={t.id} task={t} selected={selectedId === t.id} onSelect={onSelect} onMutate={onMutate} onClearInbox={() => clearInbox(t.id)} />
         ))}
       </DeferredSection>
-      {(data.events?.length ?? 0) > 0 && (
+      {(activeData.events?.length ?? 0) > 0 && (
         <section className="task-section">
-          <h2>📅 Events <span className="count">{data.events!.length}</span></h2>
-          {data.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} />)}
+          <h2>📅 Events <span className="count">{activeData.events!.length}</span></h2>
+          {activeData.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} />)}
         </section>
       )}
-      {(data.reminders?.length ?? 0) > 0 && (
+      {(activeData.reminders?.length ?? 0) > 0 && (
         <section className="task-section">
-          <h2>🔔 Reminders <span className="count">{data.reminders!.length}</span></h2>
-          {data.reminders!.map(r => <ReminderRow key={r.id} task={r} onSelect={onSelect} onMutate={onMutate} />)}
+          <h2>🔔 Reminders <span className="count">{activeData.reminders!.length}</span></h2>
+          {activeData.reminders!.map(r => <ReminderRow key={r.id} task={r} onSelect={onSelect} onMutate={onMutate} />)}
         </section>
       )}
-      {(data.habits?.length ?? 0) > 0 && (
+      {(activeData.habits?.length ?? 0) > 0 && (
         <section className="task-section">
-          <h2>🌱 Habits <span className="count">{data.habits!.length}</span></h2>
-          {data.habits!.map(h => <HabitInlineRow key={h.id} habit={h} onMutate={onMutate} />)}
+          <h2>🌱 Habits <span className="count">{activeData.habits!.length}</span></h2>
+          {activeData.habits!.map(h => <HabitInlineRow key={h.id} habit={h} onMutate={onMutate} />)}
         </section>
       )}
       {actionableTasks.length > 0 && (
@@ -133,32 +354,41 @@ function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: O
       <DeferredSection title="Waiting" icon="⏸" count={waitingTasks.length} storageKey="section-waiting">
         <TaskSection title="" icon="" tasks={waitingTasks} hideHeader selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
       </DeferredSection>
-      <DeferredSection title="Snoozed" icon="💤" count={data.timeSnoozed?.length ?? 0} storageKey="section-snoozed">
-        <TaskSection title="" icon="" tasks={data.timeSnoozed ?? []} hideHeader selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
+      <DeferredSection title="Snoozed" icon="💤" count={activeData.timeSnoozed?.length ?? 0} storageKey="section-snoozed">
+        <TaskSection title="" icon="" tasks={activeData.timeSnoozed ?? []} hideHeader selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
       </DeferredSection>
       <DeferredSection title="Scheduled" icon="🤖" count={scheduledTasks.length} storageKey="section-scheduled">
         <TaskSection title="" icon="" tasks={scheduledTasks} hideHeader selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
       </DeferredSection>
-      <TaskSection title="Done Today" icon="✅" tasks={data.doneToday ?? []} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
-      {allTasks.length === 0 && scheduledTasks.length === 0 && !data.events?.length && <div className="empty-state">Nothing to show for today.</div>}
+      <TaskSection title="Done Today" icon="✅" tasks={activeData.doneToday ?? []} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
+      {noCurrentMatches && <div className="empty-state">No matches on this screen.</div>}
+      {!noCurrentMatches && allTasks.length === 0 && scheduledTasks.length === 0 && !activeData.events?.length && <div className="empty-state">Nothing to show for today.</div>}
     </>
   )
 
-  if (data.view === 'future') return (
-    <FutureView data={data} selectedId={selectedId} onSelect={onSelect} onMeetingOpen={onMeetingOpen} onMutate={onMutate} />
+  if (activeData.view === 'future') return (
+    <>
+      {searchToolbar}
+      {noCurrentMatches
+        ? <div className="empty-state">No matches on this screen.</div>
+        : <FutureView data={activeData} selectedId={selectedId} onSelect={onSelect} onMeetingOpen={onMeetingOpen} onMutate={onMutate} />
+      }
+    </>
   )
 
   return (
     <>
-      {(data.events?.length ?? 0) > 0 && (
+      {searchToolbar}
+      {(activeData.events?.length ?? 0) > 0 && (
         <section className="task-section">
-          <h2>📅 Events <span className="count">{data.events!.length}</span></h2>
-          {data.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} />)}
+          <h2>📅 Events <span className="count">{activeData.events!.length}</span></h2>
+          {activeData.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} />)}
         </section>
       )}
-      <TaskSection title="Completed" icon="✅" tasks={data.completed ?? []} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
-      <TaskSection title="Was Due" icon="📅" tasks={data.wasDue ?? []} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
-      {!data.events?.length && !data.completed?.length && !data.wasDue?.length && <div className="empty-state">No records for this date.</div>}
+      <TaskSection title="Completed" icon="✅" tasks={activeData.completed ?? []} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
+      <TaskSection title="Was Due" icon="📅" tasks={activeData.wasDue ?? []} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
+      {noCurrentMatches && <div className="empty-state">No matches on this screen.</div>}
+      {!noCurrentMatches && !activeData.events?.length && !activeData.completed?.length && !activeData.wasDue?.length && <div className="empty-state">No records for this date.</div>}
     </>
   )
 }

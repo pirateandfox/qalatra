@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { fetchProjectSummaries, fetchProjectDetail, createProjectExplicit, renameProject, setProjectContext, archiveProject, deleteProject, updateProject, rescanAgents, type ProjectSummary, type ProjectDetail, type AgentRecord } from '../api'
+import { fetchProjectSummaries, fetchProjectDetail, fetchAgentsDb, createProjectExplicit, renameProject, setProjectContext, archiveProject, deleteProject, updateProject, rescanAgents, type ProjectSummary, type ProjectDetail, type AgentRecord } from '../api'
 import { useContexts } from '../lib/ContextsProvider'
 import TaskRow from './TaskRow'
 import TaskSection from './TaskSection'
@@ -11,17 +11,32 @@ interface Props {
   onMutate: () => void
 }
 
-function ProjectList({ onDrillIn }: { onDrillIn: (name: string) => void; onRefresh?: () => void }) {
+function displayContextLabel(context: string, getLabel: (slug: string) => string) {
+  return context === '_none' ? 'No context' : getLabel(context)
+}
+
+function ProjectList({ onDrillIn, onShowContextAgents }: {
+  onDrillIn: (name: string) => void
+  onShowContextAgents: (context: string) => void
+  onRefresh?: () => void
+}) {
   const [summaries, setSummaries] = useState<ProjectSummary[]>([])
+  const [agents, setAgents] = useState<AgentRecord[]>([])
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [scanning, setScanning] = useState(false)
   const newInputRef = useRef<HTMLInputElement>(null)
-  const { getColor, getLabel } = useContexts()
+  const { contexts, getColor, getLabel } = useContexts()
 
   const load = useCallback(() => {
-    fetchProjectSummaries().then(setSummaries).catch(e => setError(String(e)))
+    Promise.all([fetchProjectSummaries(), fetchAgentsDb()])
+      .then(([nextSummaries, nextAgents]) => {
+        setSummaries(nextSummaries)
+        setAgents(nextAgents)
+        setError(null)
+      })
+      .catch(e => setError(String(e)))
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -50,6 +65,21 @@ function ProjectList({ onDrillIn }: { onDrillIn: (name: string) => void; onRefre
     if (!byContext[ctx]) byContext[ctx] = []
     byContext[ctx].push(p)
   }
+  const contextAgents: Record<string, AgentRecord[]> = {}
+  for (const agent of agents) {
+    if (agent.project) continue
+    const ctx = agent.context ?? '_none'
+    if (!contextAgents[ctx]) contextAgents[ctx] = []
+    contextAgents[ctx].push(agent)
+  }
+  const contextOrder = new Map(contexts.map((ctx, index) => [ctx.slug, index]))
+  const contextKeys = [...new Set([...Object.keys(byContext), ...Object.keys(contextAgents)])]
+    .sort((a, b) => {
+      const ai = contextOrder.get(a)
+      const bi = contextOrder.get(b)
+      if (ai !== undefined || bi !== undefined) return (ai ?? 9999) - (bi ?? 9999)
+      return displayContextLabel(a, getLabel).localeCompare(displayContextLabel(b, getLabel))
+    })
 
   if (error) return <div className="empty-state" style={{ color: '#e55', fontFamily: 'monospace', fontSize: 12 }}>Error: {error}</div>
 
@@ -83,16 +113,32 @@ function ProjectList({ onDrillIn }: { onDrillIn: (name: string) => void; onRefre
         )}
       </div>
 
-      {!summaries.length && !creating && <div className="empty-state">No projects yet.</div>}
+      {!summaries.length && agents.length === 0 && !creating && <div className="empty-state">No projects yet.</div>}
 
-      {Object.entries(byContext).map(([ctx, projects]) => {
+      {contextKeys.map(ctx => {
+        const projects = byContext[ctx] ?? []
+        const unregisteredAgents = contextAgents[ctx] ?? []
         const color = getColor(ctx)
-        const label = getLabel(ctx)
+        const label = displayContextLabel(ctx, getLabel)
         return (
           <div key={ctx} className="project-list-group">
             <div className="project-list-ctx" style={{ color }}>
               {label}
             </div>
+            {unregisteredAgents.length > 0 && (
+              <button className="project-list-row project-list-agent-row" onClick={() => onShowContextAgents(ctx)}>
+                <span className="project-list-name" style={{ borderLeft: `3px solid ${color}` }}>
+                  Unregistered agents
+                  <span className="proj-unregistered-hint">No project assigned</span>
+                </span>
+                <span className="project-list-counts">
+                  <span className="proj-pill pill-agent">
+                    {unregisteredAgents.length} {unregisteredAgents.length === 1 ? 'agent' : 'agents'}
+                  </span>
+                </span>
+                <span className="project-list-arrow">›</span>
+              </button>
+            )}
             {projects.map(p => (
               <button key={p.name} className="project-list-row" onClick={() => onDrillIn(p.name)}>
                 <span className="project-list-name" style={{ borderLeft: `3px solid ${color}` }}>
@@ -156,6 +202,52 @@ function AgentsSection({ agents }: { agents: AgentRecord[] }) {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  )
+}
+
+function ContextAgentsView({ context, onBack }: { context: string; onBack: () => void }) {
+  const [agents, setAgents] = useState<AgentRecord[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const { getLabel, getColor } = useContexts()
+
+  const load = useCallback(() => {
+    fetchAgentsDb()
+      .then(rows => {
+        setAgents(rows.filter(agent => !agent.project && (agent.context ?? '_none') === context))
+        setError(null)
+      })
+      .catch(e => setError(String(e)))
+  }, [context])
+
+  useEffect(() => { load() }, [load])
+
+  const label = displayContextLabel(context, getLabel)
+  const color = getColor(context)
+
+  return (
+    <div className="proj-detail">
+      <div className="proj-detail-header">
+        <button className="proj-back-btn" onClick={onBack}>‹ Projects</button>
+        <div className="proj-detail-title" style={{ flex: 1 }}>
+          <span className="proj-name">Unregistered agents</span>
+          <span className="proj-ctx-pill" style={{ background: `color-mix(in srgb, ${color} 16%, transparent)`, color }}>
+            {label}
+          </span>
+        </div>
+      </div>
+
+      <div className="proj-context-agent-note">
+        Agents in this context with no project assigned.
+      </div>
+
+      {error ? (
+        <div className="empty-state" style={{ color: '#e55', fontFamily: 'monospace', fontSize: 12 }}>Error: {error}</div>
+      ) : agents === null ? (
+        <div style={{ color: 'var(--muted)', padding: '40px', textAlign: 'center' }}>Loading…</div>
+      ) : (
+        <AgentsSection agents={agents} />
       )}
     </div>
   )
@@ -314,20 +406,32 @@ function ProjectDetailView({ name, selectedId, onSelect, onMutate, onBack, onRen
 }
 
 export default function ProjectDashboardView({ selectedId, onSelect, onMutate }: Props) {
-  const [drillProject, setDrillProject] = useState<string | null>(null)
+  const [drillTarget, setDrillTarget] = useState<
+    { type: 'project'; name: string } |
+    { type: 'context-agents'; context: string } |
+    null
+  >(null)
 
   return (
     <div className="task-list-container">
-      {drillProject
+      {drillTarget?.type === 'project'
         ? <ProjectDetailView
-            name={drillProject}
+            name={drillTarget.name}
             selectedId={selectedId}
             onSelect={onSelect}
             onMutate={onMutate}
-            onBack={() => setDrillProject(null)}
-            onRename={newName => setDrillProject(newName)}
+            onBack={() => setDrillTarget(null)}
+            onRename={newName => setDrillTarget({ type: 'project', name: newName })}
           />
-        : <ProjectList onDrillIn={setDrillProject} />
+        : drillTarget?.type === 'context-agents'
+          ? <ContextAgentsView
+              context={drillTarget.context}
+              onBack={() => setDrillTarget(null)}
+            />
+          : <ProjectList
+              onDrillIn={name => setDrillTarget({ type: 'project', name })}
+              onShowContextAgents={context => setDrillTarget({ type: 'context-agents', context })}
+            />
       }
     </div>
   )

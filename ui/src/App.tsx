@@ -166,6 +166,14 @@ function AppInner() {
         case '?':
           setShortcutsOpen(o => !o)
           break
+        case '/': {
+          const searchInput = document.querySelector<HTMLInputElement>('[data-task-search-input]')
+          if (searchInput) {
+            e.preventDefault()
+            searchInput.focus()
+          }
+          break
+        }
         case 'j':
         case 'k': {
           const rows = Array.from(document.querySelectorAll<HTMLElement>('.task-row[data-id]'))

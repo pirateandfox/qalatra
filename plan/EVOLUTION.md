@@ -1,5 +1,15 @@
 # Qalatra — Evolution Notes
 
+## 1.7.0 — Task search (2026-05-29)
+
+- Added full-text task search to the Priority view. A search bar at the top of the screen filters the current view in real time across title, description, notes, ai_context, context, project, tags, source, and source_url.
+- Added "Search all" mode: toggling from "This screen" to "Search all" hits the new `/tasks/search` backend endpoint and returns matches across every task status (active, backlog, snoozed, done, archived), grouped by status in the results pane.
+- Added `searchTasks` to `db-worker.js` with status-first ordering (active → backlog → snoozed → done → archived), then task_type (tasks before reminders/events), then sort_order / priority / recency. Configurable scope and limit with a 200-row cap.
+- Added `/api/v1/tasks/search` HTTP endpoint to `server/v1.js` accepting `query`, `scope`, and `limit` params.
+- Added `searchTasks` API client function in `ui/src/api.ts`.
+- Added `/` keyboard shortcut to focus the search bar from anywhere in the Priority view. Documented in the ShortcutsHelp overlay.
+- Updated the Project Dashboard to surface context-level agents (agents that have a context but no specific project) alongside their context's project list. Context groups now sort by the registered context order.
+
 ## 1.6.0 — Agent IDE and persistent remote terminals (2026-05-27)
 
 - Added first-class Files and Terminals surfaces in the main sidebar. Files handles server-backed workspace browsing plus Monaco file editing/saving; Terminals handles persistent terminal sessions with a full xterm pane.
