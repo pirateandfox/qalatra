@@ -26,6 +26,13 @@ const TASK_ARRAY_KEYS: TaskArrayKey[] = [
   'scheduled', 'timeSnoozed', 'completed', 'wasDue', 'events', 'reminders',
 ]
 
+function fmtMinutes(mins: number): string {
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
 const STATUS_LABELS: Record<Task['status'], string> = {
   active: 'Active',
   backlog: 'Backlog',
@@ -194,7 +201,7 @@ function FutureView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: Omi
       {(data.events?.length ?? 0) > 0 && (
         <section className="task-section">
           <h2>📅 Events <span className="count">{data.events!.length}</span></h2>
-          {data.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} />)}
+          {data.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} onMutate={onMutate} />)}
         </section>
       )}
       <TaskSection title="Scheduled" icon="📅" tasks={data.scheduled ?? []} draggable selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
@@ -333,7 +340,7 @@ function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: O
       {(activeData.events?.length ?? 0) > 0 && (
         <section className="task-section">
           <h2>📅 Events <span className="count">{activeData.events!.length}</span></h2>
-          {activeData.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} />)}
+          {activeData.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} onMutate={onMutate} />)}
         </section>
       )}
       {(activeData.reminders?.length ?? 0) > 0 && (
@@ -348,9 +355,22 @@ function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: O
           {activeData.habits!.map(h => <HabitInlineRow key={h.id} habit={h} onMutate={onMutate} />)}
         </section>
       )}
-      {actionableTasks.length > 0 && (
-        <TaskSection title="Tasks" icon="📋" tasks={actionableTasks} draggable groupKey="priority" selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
-      )}
+      {actionableTasks.length > 0 && (() => {
+        const estimatedMins = actionableTasks.reduce((s, t) => s + (t.time_estimate ?? 0), 0)
+        const withEstimate = actionableTasks.filter(t => t.time_estimate != null).length
+        const withoutEstimate = actionableTasks.length - withEstimate
+        return (
+          <>
+            {estimatedMins > 0 && (
+              <div className="capacity-banner">
+                <span className="capacity-total">⏱ {fmtMinutes(estimatedMins)} estimated</span>
+                {withoutEstimate > 0 && <span className="capacity-unestimated">+ {withoutEstimate} unestimated</span>}
+              </div>
+            )}
+            <TaskSection title="Tasks" icon="📋" tasks={actionableTasks} draggable groupKey="priority" selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
+          </>
+        )
+      })()}
       <DeferredSection title="Waiting" icon="⏸" count={waitingTasks.length} storageKey="section-waiting">
         <TaskSection title="" icon="" tasks={waitingTasks} hideHeader selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />
       </DeferredSection>
@@ -382,7 +402,7 @@ function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: O
       {(activeData.events?.length ?? 0) > 0 && (
         <section className="task-section">
           <h2>📅 Events <span className="count">{activeData.events!.length}</span></h2>
-          {activeData.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} />)}
+          {activeData.events!.map(e => <EventCard key={e.id} event={e} onSelect={onSelect} onMeetingOpen={onMeetingOpen} onMutate={onMutate} />)}
         </section>
       )}
       <TaskSection title="Completed" icon="✅" tasks={activeData.completed ?? []} selectedId={selectedId} onSelect={onSelect} onMutate={onMutate} />

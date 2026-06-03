@@ -22,6 +22,7 @@ export interface Task {
   blocks?: RelatedTask[]
   my_priority: number | null
   energy_required: 'high' | 'medium' | 'low' | 'async' | null
+  time_estimate: number | null
   task_type: 'task' | 'event' | 'reminder' | 'coding' | 'reading'
   event_time: string | null
   recurrence: string | null

@@ -73,6 +73,7 @@
 }
 .priority { font-size: 11px; font-weight: 700; }
 .energy { font-size: 11px; color: var(--muted); }
+.time-estimate { font-size: 11px; color: var(--muted); }
 .snooze-time { font-size: 11px; color: #60a5fa; opacity: 0.8; }
 .due-date { font-size: 11px; color: var(--muted); }
 .due-date--overdue  { color: #ef4444; font-weight: 600; }

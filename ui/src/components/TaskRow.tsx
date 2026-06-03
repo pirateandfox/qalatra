@@ -18,6 +18,13 @@ interface Props {
   onClearInbox?: () => void
 }
 
+function fmtMinutes(mins: number): string {
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
 export default function TaskRow({ task, showContext = true, draggable = false, selected = false, onSelect, onMutate, onClearInbox }: Props) {
   const { getColor, getLabel } = useContexts()
   const [snoozeAnchor, setSnoozeAnchor] = useState<DOMRect | null>(null)
@@ -135,6 +142,9 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
             )}
             {task.energy_required && (
               <span className="energy">{ENERGY_ICONS[task.energy_required] ?? ''} {task.energy_required}</span>
+            )}
+            {task.time_estimate != null && (
+              <span className="time-estimate" title={`Estimated: ${fmtMinutes(task.time_estimate)}`}>⏱ {fmtMinutes(task.time_estimate)}</span>
             )}
             {task.surface_after && !isDone && (
               <span className="snooze-time" title={`Snoozed until ${task.surface_after}`}>

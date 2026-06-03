@@ -64,7 +64,7 @@ export const handlers = {
     const where = `WHERE ${conditions.join(' AND ')}`;
     const rows = db.prepare(
       `SELECT id, title, status, task_type, context, project, due_date, hard_deadline, my_priority,
-              energy_required, source_url, tags, recurrence, created_at, last_reviewed_at
+              energy_required, time_estimate, source_url, tags, recurrence, created_at, last_reviewed_at
        FROM tasks ${where}
        ORDER BY my_priority ASC NULLS LAST, due_date ASC NULLS LAST`
     ).all();
@@ -75,9 +75,9 @@ export const handlers = {
     const db = openDb();
     const t = today();
     return db.prepare(
-      `SELECT id, title, context, project, due_date, my_priority, energy_required, source_url
+      `SELECT id, title, task_type, tags, context, project, due_date, my_priority, energy_required, time_estimate, source_url
        FROM tasks
-       WHERE status = 'active' AND task_type != 'event' AND due_date IS NOT NULL AND due_date < ?
+       WHERE status = 'active' AND task_type NOT IN ('event', 'reading') AND due_date IS NOT NULL AND due_date < ?
        ORDER BY due_date ASC`
     ).all(t);
   },

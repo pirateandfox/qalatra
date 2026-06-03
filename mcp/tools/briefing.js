@@ -79,22 +79,22 @@ export const handlers = {
     autoRolloverRecurring(db);
 
     const overdue = db.prepare(
-      `SELECT id, title, context, project, due_date, my_priority, energy_required, source_url, parent_id
+      `SELECT id, title, task_type, tags, context, project, due_date, my_priority, energy_required, time_estimate, source_url, parent_id
        FROM tasks WHERE status = 'active' AND due_date IS NOT NULL AND due_date < ?
-         AND (task_type IS NULL OR task_type != 'event')
+         AND task_type NOT IN ('event', 'reading')
        ORDER BY due_date ASC`
     ).all(t);
 
     const waking_up = db.prepare(
-      `SELECT id, title, context, project, due_date, my_priority, surface_after, ai_context, source_url
+      `SELECT id, title, task_type, tags, context, project, due_date, my_priority, surface_after, ai_context, source_url
        FROM tasks WHERE status IN ('snoozed', 'archived') AND surface_after IS NOT NULL
        AND surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')
        ORDER BY surface_after ASC`
     ).all();
 
     const due_today = db.prepare(
-      `SELECT id, title, context, project, due_date, my_priority, energy_required, source_url, parent_id
-       FROM tasks WHERE status = 'active' AND due_date = ? AND task_type != 'event'
+      `SELECT id, title, task_type, tags, context, project, due_date, my_priority, energy_required, time_estimate, source_url, parent_id
+       FROM tasks WHERE status = 'active' AND due_date = ? AND task_type NOT IN ('event', 'reading')
        ORDER BY my_priority ASC NULLS LAST`
     ).all(t);
 
@@ -108,7 +108,16 @@ export const handlers = {
 
     const by_context = Object.fromEntries(contextRows.map(r => [r.context, r.count]));
 
-    return { overdue, waking_up, due_today, active_count, by_context };
+    const allWorkable = [...overdue, ...due_today];
+    const estimatedMinutes = allWorkable.reduce((sum, t) => sum + (t.time_estimate ?? 0), 0);
+    const tasksWithEstimate = allWorkable.filter(t => t.time_estimate != null).length;
+    const capacity = {
+      estimated_minutes: estimatedMinutes,
+      tasks_with_estimate: tasksWithEstimate,
+      tasks_without_estimate: allWorkable.length - tasksWithEstimate,
+    };
+
+    return { overdue, waking_up, due_today, active_count, by_context, capacity };
   },
 
   afternoon_briefing() {
@@ -122,15 +131,15 @@ export const handlers = {
     ).all(t);
 
     const still_active = db.prepare(
-      `SELECT id, title, context, project, due_date, my_priority, energy_required, source_url
-       FROM tasks WHERE status = 'active' AND task_type != 'event'
+      `SELECT id, title, task_type, tags, context, project, due_date, my_priority, energy_required, time_estimate, source_url
+       FROM tasks WHERE status = 'active' AND task_type NOT IN ('event', 'reading')
        ORDER BY my_priority ASC NULLS LAST, due_date ASC NULLS LAST`
     ).all();
 
     const overdue = db.prepare(
-      `SELECT id, title, context, project, due_date, my_priority, source_url, parent_id
+      `SELECT id, title, task_type, tags, context, project, due_date, my_priority, time_estimate, source_url, parent_id
        FROM tasks WHERE status = 'active' AND due_date IS NOT NULL AND due_date < ?
-         AND (task_type IS NULL OR task_type != 'event')
+         AND task_type NOT IN ('event', 'reading')
        ORDER BY due_date ASC`
     ).all(t);
 

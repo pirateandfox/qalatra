@@ -243,6 +243,7 @@ function migrate() {
   tryAlter('ALTER TABLE tasks ADD COLUMN inbox INTEGER NOT NULL DEFAULT 0')
   tryAlter('ALTER TABLE tasks ADD COLUMN hard_deadline INTEGER NOT NULL DEFAULT 0')
   tryAlter('ALTER TABLE tasks ADD COLUMN last_reviewed_at TEXT')
+  tryAlter('ALTER TABLE tasks ADD COLUMN time_estimate INTEGER')
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN session_id TEXT')
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN user_message TEXT')
   tryAlter('ALTER TABLE contexts ADD COLUMN label TEXT')
@@ -431,6 +432,18 @@ function getTasksForDate(date) {
   if (date === t) {
     db.prepare(`UPDATE tasks SET status = 'active', surface_after = NULL WHERE status = 'snoozed' AND surface_after IS NOT NULL AND surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')`).run()
     autoRolloverRecurring()
+    // Auto-complete past events and timed events whose end time has passed
+    db.prepare(`
+      UPDATE tasks SET status = 'done',
+        last_touched_human = strftime('%Y-%m-%d %H:%M', 'now', 'localtime'),
+        updated_at = strftime('%Y-%m-%d %H:%M', 'now', 'localtime')
+      WHERE task_type = 'event' AND status NOT IN ('done', 'archived')
+      AND (
+        (due_date IS NOT NULL AND due_date < ?)
+        OR (due_date = ? AND event_time IS NOT NULL
+            AND time(COALESCE(end_time, time(event_time, '+1 hour'))) <= time('now', 'localtime'))
+      )
+    `).run(date, date)
     const inbox       = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 1 AND status = 'active' AND parent_id IS NULL AND task_type = 'task' ORDER BY created_at DESC`).all())
     const overdue     = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND due_date IS NOT NULL AND due_date < ? AND task_type = 'task' ORDER BY due_date ASC, ${ORDER}`).all(date))
     const dueToday    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND strftime('%Y-%m-%d', due_date) = ? AND task_type = 'task' AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime') OR strftime('%Y-%m-%d', due_date) <= ?) ORDER BY ${ORDER}`).all(date, date))
@@ -540,7 +553,7 @@ function createTask(body) {
 }
 
 function updateTask(id, body) {
-  const MUTABLE = ['title','description','status','my_priority','energy_required','context','project','tags','source_url','due_date','hard_deadline','start_date','surface_after','task_type','event_time','end_time','recurrence','parent_id','agent_path','agent_resume','agent_autorun','agent_autorun_time','outcome','notes','inbox']
+  const MUTABLE = ['title','description','status','my_priority','energy_required','context','project','tags','source_url','due_date','hard_deadline','start_date','surface_after','task_type','event_time','end_time','recurrence','parent_id','agent_path','agent_resume','agent_autorun','agent_autorun_time','outcome','notes','inbox','time_estimate']
   const now = nowIso()
   if (body.links !== undefined) db.prepare("UPDATE tasks SET links = ?, updated_at = datetime('now'), last_reviewed_at = ? WHERE id = ?").run(JSON.stringify(body.links), now, id)
   const sets = []; const params = {}

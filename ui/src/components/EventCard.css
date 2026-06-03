@@ -15,6 +15,12 @@
 .event-title:hover { text-decoration: underline; }
 .event-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; align-items: center; }
 .event-agenda-count { font-size: 11px; color: var(--muted); }
+.event-done-btn {
+  background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+  padding: 4px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; white-space: nowrap;
+  display: flex; align-items: center;
+}
+.event-done-btn:hover { color: #22c55e; border-color: #22c55e; }
 .meeting-btn {
   background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
   padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; white-space: nowrap;

@@ -8,6 +8,14 @@ import { PRIORITY_COLORS } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
 import './DetailPanel.css'
 
+const TIME_ESTIMATE_PRESETS = [15, 30, 60, 90, 120, 240]
+function fmtMinutes(mins: number): string {
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
 function TaskIdChip({ id }: { id: string }) {
   const [copied, setCopied] = useState(false)
   function copy() {
@@ -411,6 +419,20 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, onSel
                     className={`detail-pill ${task.energy_required === e ? 'active' : ''}`}
                     onClick={() => patch({ energy_required: task.energy_required === e ? null : e })}
                   >{ENERGY_LABELS[e]}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Time Estimate */}
+            <div className="detail-field-row">
+              <span className="detail-field-label">Estimate</span>
+              <div className="detail-pill-group">
+                {TIME_ESTIMATE_PRESETS.map(mins => (
+                  <button
+                    key={mins}
+                    className={`detail-pill ${task.time_estimate === mins ? 'active' : ''}`}
+                    onClick={() => patch({ time_estimate: task.time_estimate === mins ? null : mins })}
+                  >{fmtMinutes(mins)}</button>
                 ))}
               </div>
             </div>

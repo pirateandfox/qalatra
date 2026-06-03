@@ -1,15 +1,17 @@
 import type { Task } from '../types/task'
 import { fmtTime } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
+import { updateTask } from '../api'
 import './EventCard.css'
 
 interface Props {
   event: Task
   onSelect: (id: string) => void
   onMeetingOpen: (id: string) => void
+  onMutate: () => void
 }
 
-export default function EventCard({ event, onSelect, onMeetingOpen }: Props) {
+export default function EventCard({ event, onSelect, onMeetingOpen, onMutate }: Props) {
   const { getColor, getLabel } = useContexts()
   const color = getColor(event.context)
   const subtasks: Task[] = (event as any).subtasks ?? []
@@ -37,6 +39,7 @@ export default function EventCard({ event, onSelect, onMeetingOpen }: Props) {
             {(event as any).attachment_count > 0 && <span className="has-notes" title="Has attachments">📎</span>}
           </div>
         </div>
+        <button className="event-done-btn" title="Mark done" onClick={async () => { await updateTask(event.id, { status: 'done' }); onMutate() }}>✓</button>
         <button className="meeting-btn" onClick={() => onMeetingOpen(event.id)}>▶ Meeting</button>
       </div>
       {subtasks.length > 0 && (

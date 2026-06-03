@@ -1,5 +1,16 @@
 # Qalatra — Evolution Notes
 
+## Unreleased — Time estimates and daily capacity (2026-06-03)
+
+- Added `time_estimate INTEGER` column (minutes) to the tasks table. Migration runs in both `mcp/db.js` and `db-worker.js`.
+- Added `time_estimate` to `create_task` and `update_task` MCP schemas so agents can set/clear estimates.
+- `morning_briefing` now returns a `capacity` object: `{ estimated_minutes, tasks_with_estimate, tasks_without_estimate }` summed across overdue + due_today workable tasks. Gives agents a direct answer to "how loaded is today?"
+- `get_overdue_tasks`, `get_todays_tasks`, `morning_briefing`, and `afternoon_briefing` all include `time_estimate` in their SELECT outputs.
+- Also on this date: excluded `task_type = 'reading'` from all operational briefing outputs (`morning_briefing`, `afternoon_briefing`, `get_overdue_tasks`) — reading-lane tasks were polluting daily briefings and confusing agents. Added `task_type` and `tags` to all compact SELECTs so agents can filter edge cases.
+- UI: time estimate pill picker in DetailPanel (presets: 15m, 30m, 1h, 1.5h, 2h, 4h; click active preset to clear).
+- UI: `⏱ Xh Ym` badge on TaskRow next to energy indicator.
+- UI: capacity banner above the Tasks section in the today view — shows total estimated time for actionable tasks plus a count of unestimated tasks.
+
 ## 1.7.0 — Task search (2026-05-29)
 
 - Added full-text task search to the Priority view. A search bar at the top of the screen filters the current view in real time across title, description, notes, ai_context, context, project, tags, source, and source_url.

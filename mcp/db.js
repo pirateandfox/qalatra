@@ -192,6 +192,7 @@ function initSchema(db) {
   if (!existingCols.includes('assigned_agent'))     db.exec('ALTER TABLE tasks ADD COLUMN assigned_agent TEXT');
   if (!existingCols.includes('hard_deadline'))      db.exec('ALTER TABLE tasks ADD COLUMN hard_deadline INTEGER NOT NULL DEFAULT 0');
   if (!existingCols.includes('last_reviewed_at'))   db.exec('ALTER TABLE tasks ADD COLUMN last_reviewed_at TEXT');
+  if (!existingCols.includes('time_estimate'))      db.exec('ALTER TABLE tasks ADD COLUMN time_estimate INTEGER');
   db.exec(`UPDATE tasks SET last_reviewed_at = COALESCE(last_touched_human, created_at, datetime('now')) WHERE last_reviewed_at IS NULL`);
 
   // Migrations for contexts table columns added after initial schema
