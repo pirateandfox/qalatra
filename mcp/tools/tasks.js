@@ -392,12 +392,12 @@ export const handlers = {
         id, title, description, status, my_priority, energy_required, context, project, tags,
         source, source_id, source_url, source_priority, due_date, hard_deadline, start_date, surface_after,
         created_at, updated_at, last_reviewed_at, ai_context, task_type, event_time, end_time, parent_id, recurrence,
-        agent_path, assigned_agent, links, inbox
+        agent_path, assigned_agent, links, inbox, time_estimate
       ) VALUES (
         @id, @title, @description, @status, @my_priority, @energy_required, @context, @project, @tags,
         @source, @source_id, @source_url, @source_priority, @due_date, @hard_deadline, @start_date, @surface_after,
         @created_at, @updated_at, @last_reviewed_at, @ai_context, @task_type, @event_time, @end_time, @parent_id, @recurrence,
-        @agent_path, @assigned_agent, @links, @inbox
+        @agent_path, @assigned_agent, @links, @inbox, @time_estimate
       )
     `).run({
       id,
@@ -430,6 +430,7 @@ export const handlers = {
       assigned_agent:  args.assigned_agent  ?? null,
       links:           args.links ? JSON.stringify(args.links) : null,
       inbox:           args.inbox ? 1 : 0,
+      time_estimate:   args.time_estimate   ?? null,
     });
     const status = args.status ?? 'active';
     return { task_id: id, title: args.title, status, created_at: now };
@@ -447,7 +448,7 @@ export const handlers = {
       'title', 'description', 'status', 'my_priority', 'energy_required',
       'context', 'project', 'tags', 'source_url', 'due_date', 'hard_deadline', 'start_date', 'surface_after',
       'task_type', 'event_time', 'end_time', 'recurrence', 'parent_id', 'agent_path',
-      'assigned_agent', 'agent_autorun', 'agent_autorun_time', 'inbox',
+      'assigned_agent', 'agent_autorun', 'agent_autorun_time', 'inbox', 'time_estimate',
     ];
 
     const updates = {};

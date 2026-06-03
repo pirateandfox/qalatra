@@ -4,6 +4,7 @@
 
 - Added `time_estimate INTEGER` column (minutes) to the tasks table. Migration runs in both `mcp/db.js` and `db-worker.js`.
 - Added `time_estimate` to `create_task` and `update_task` MCP schemas so agents can set/clear estimates.
+- Fixed MCP `create_task` and `update_task` handlers to persist `time_estimate` instead of only exposing it in tool schemas.
 - `morning_briefing` now returns a `capacity` object: `{ estimated_minutes, tasks_with_estimate, tasks_without_estimate }` summed across overdue + due_today workable tasks. Gives agents a direct answer to "how loaded is today?"
 - `get_overdue_tasks`, `get_todays_tasks`, `morning_briefing`, and `afternoon_briefing` all include `time_estimate` in their SELECT outputs.
 - Also on this date: excluded `task_type = 'reading'` from all operational briefing outputs (`morning_briefing`, `afternoon_briefing`, `get_overdue_tasks`) — reading-lane tasks were polluting daily briefings and confusing agents. Added `task_type` and `tags` to all compact SELECTs so agents can filter edge cases.
