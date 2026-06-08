@@ -1,5 +1,10 @@
 # Qalatra — Evolution Notes
 
+## 1.9.1 — Heartbeat resume fix, terminal copy-out (2026-06-08)
+
+- Fixed `toggle_heartbeat` MCP tool crashing with ReferenceError on resume. `addMinutesFromNow` was referenced but never defined; replaced with the correct `nextRunAt(interval, run_at_time, minute_offset)` call. Also fetches `run_at_time` and `minute_offset` from the row so clock-aligned offsets are respected when resuming a paused heartbeat.
+- Fixed copy-out from the remote terminal on Mac. Added `attachCustomKeyEventHandler` in `RemoteTerminal`: Cmd+C (or Ctrl+C) with selected text writes to the clipboard and swallows the keystroke instead of sending an interrupt to the shell. With no selection the key passes through normally.
+
 ## 1.9.0 — Remote terminal UX, workspace file creation, instance tabs (2026-06-08)
 
 - WorkspaceFilesView: replaced the global `+` / full-path input with a per-folder hover `+` button and an inline create form. The form shows the parent directory path as a read-only label and accepts only the filename; creates the file and opens it in the editor. File creation now does a targeted directory refresh (`refreshTarget` mechanism) instead of remounting the whole tree — expansion state is fully preserved.
