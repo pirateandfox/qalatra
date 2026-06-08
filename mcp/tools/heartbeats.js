@@ -142,12 +142,12 @@ export const handlers = {
   toggle_heartbeat({ id } = {}) {
     if (!id) return { error: 'id required' };
     const db = openDb();
-    const hb = db.prepare('SELECT id, active, interval_minutes FROM heartbeats WHERE id = ?').get(id);
+    const hb = db.prepare('SELECT id, active, interval_minutes, run_at_time, minute_offset FROM heartbeats WHERE id = ?').get(id);
     if (!hb) return { error: 'Heartbeat not found' };
     if (hb.active === 1) {
       db.prepare(`UPDATE heartbeats SET active = 0, updated_at = ? WHERE id = ?`).run(nowIso(), id);
     } else {
-      const nextRun = addMinutesFromNow(hb.interval_minutes);
+      const nextRun = nextRunAt(hb.interval_minutes, hb.run_at_time, hb.minute_offset);
       db.prepare(`UPDATE heartbeats SET active = 1, next_run_at = ?, updated_at = ? WHERE id = ?`).run(nextRun, nowIso(), id);
     }
     return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
