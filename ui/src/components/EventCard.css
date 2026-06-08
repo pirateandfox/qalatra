@@ -29,3 +29,8 @@
 .meeting-btn:hover { color: var(--text); border-color: var(--accent); }
 .event-progress { height: 3px; background: var(--surface2); border-radius: 2px; overflow: hidden; }
 .event-progress-fill { height: 100%; border-radius: 2px; transition: width .3s; }
+.event-card.event-done { opacity: 0.45; }
+.event-card.event-done .event-title { text-decoration: line-through; }
+.event-done-check {
+  color: #22c55e; font-size: 14px; font-weight: 700; padding: 4px 8px; min-width: 30px; text-align: center;
+}

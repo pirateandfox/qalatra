@@ -27,11 +27,18 @@ function writeJson(file, data) {
 
 function tmuxAvailable() {
   const result = spawnSync('tmux', ['-V'], { encoding: 'utf8' })
-  return {
-    ok: result.status === 0,
-    version: result.status === 0 ? result.stdout.trim() : null,
-    error: result.status === 0 ? null : (result.stderr || result.error?.message || 'tmux is not available').trim(),
+  const ok = result.status === 0
+  let error = null
+  if (!ok) {
+    if (result.error?.code === 'ENOENT') {
+      error = os.platform() === 'darwin'
+        ? 'tmux is not installed — run: brew install tmux'
+        : 'tmux is not installed — run: sudo apt install tmux  (or equivalent for your distro)'
+    } else {
+      error = (result.stderr || result.error?.message || 'tmux not available').trim()
+    }
   }
+  return { ok, version: ok ? result.stdout.trim() : null, error }
 }
 
 function tmuxSessionExists(name) {

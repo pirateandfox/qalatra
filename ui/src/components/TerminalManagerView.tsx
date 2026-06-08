@@ -11,6 +11,7 @@ import {
   listWorkspaceRoots,
   removeTerminalSession,
   terminalSocketUrl,
+  updateTerminalSession,
   type Agent,
   type TerminalSession,
   type TerminalStatus,
@@ -50,7 +51,7 @@ function timeLabel(value: string | null) {
   return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-function RemoteTerminal({ session }: { session: TerminalSession | null }) {
+function RemoteTerminal({ session, reconnectKey }: { session: TerminalSession | null; reconnectKey: number }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -121,6 +122,8 @@ function RemoteTerminal({ session }: { session: TerminalSession | null }) {
       return
     }
 
+    term.focus()
+
     let cancelled = false
     term.write(`\x1b[2mConnecting to ${session.title}...\x1b[0m\r\n`)
     terminalSocketUrl(session.id, term.cols || 100, term.rows || 30)
@@ -159,7 +162,7 @@ function RemoteTerminal({ session }: { session: TerminalSession | null }) {
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [session?.id, session?.title, sendResize])
+  }, [session?.id, session?.title, sendResize, reconnectKey])
 
   return <div ref={containerRef} className="ide-terminal-xterm" />
 }
@@ -172,6 +175,9 @@ export default function TerminalManagerView() {
   const [cwdInput, setCwdInput] = useState('')
   const [titleInput, setTitleInput] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState(false)
+  const [renameInput, setRenameInput] = useState('')
+  const [reconnectKey, setReconnectKey] = useState(0)
 
   const sessions = terminalStatus?.sessions ?? []
   const selectedSession = useMemo(
@@ -249,6 +255,26 @@ export default function TerminalManagerView() {
     const settings = await fetchSettings().catch(() => ({} as Record<string, string>))
     const command = settings.defaultAgentCommand || 'claude --dangerously-skip-permissions'
     await createSession(command)
+  }
+
+  function startRename() {
+    if (!selectedSession) return
+    setRenameInput(selectedSession.title)
+    setRenaming(true)
+  }
+
+  async function commitRename() {
+    if (!selectedSession) return
+    const title = renameInput.trim()
+    setRenaming(false)
+    if (!title || title === selectedSession.title) return
+    setError(null)
+    try {
+      await updateTerminalSession(selectedSession.id, { title })
+      await reload()
+    } catch (err: any) {
+      setError(err?.message ?? String(err))
+    }
   }
 
   async function killSelected(remove = false) {
@@ -331,6 +357,7 @@ export default function TerminalManagerView() {
           <div className="ide-button-row">
             <button className="ide-button" disabled={!selectedSession} onClick={() => killSelected(false)}>Kill</button>
             <button className="ide-button danger" disabled={!selectedSession} onClick={() => killSelected(true)}>Remove</button>
+            <button className="ide-button" disabled={!selectedSession} onClick={startRename}>Rename</button>
             <button className="ide-button" onClick={reload}>Refresh</button>
           </div>
         </div>
@@ -339,12 +366,36 @@ export default function TerminalManagerView() {
       <main className="ide-main terminal-main">
         <section className="ide-terminal-panel terminal-full-panel">
           <div className="ide-terminal-toolbar">
-            <div>
-              <span className="ide-terminal-title">{selectedSession?.title ?? 'Terminal'}</span>
-              {selectedSession && <span className="ide-terminal-cwd">{selectedSession.cwd}</span>}
+            <div className="ide-terminal-title-area">
+              {renaming && selectedSession ? (
+                <input
+                  className="ide-input ide-terminal-rename-input"
+                  autoFocus
+                  value={renameInput}
+                  onChange={e => setRenameInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitRename()
+                    if (e.key === 'Escape') setRenaming(false)
+                  }}
+                  onBlur={commitRename}
+                />
+              ) : (
+                <span className="ide-terminal-title">{selectedSession?.title ?? 'Terminal'}</span>
+              )}
+              {selectedSession && !renaming && <span className="ide-terminal-cwd">{selectedSession.cwd}</span>}
             </div>
+            {selectedSession && (
+              <button
+                className="ide-button"
+                style={{ flexShrink: 0 }}
+                onClick={() => setReconnectKey(k => k + 1)}
+                title="Reattach to session"
+              >
+                Reconnect
+              </button>
+            )}
           </div>
-          <RemoteTerminal session={selectedSession} />
+          <RemoteTerminal session={selectedSession} reconnectKey={reconnectKey} />
         </section>
       </main>
     </div>

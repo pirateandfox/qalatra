@@ -120,9 +120,11 @@ function AppInner() {
     }
 
     const handler = async (e: KeyboardEvent) => {
-      const isInInput = (e.target instanceof HTMLInputElement) ||
-        (e.target instanceof HTMLTextAreaElement) ||
-        (e.target as HTMLElement).isContentEditable
+      const target = e.target as HTMLElement
+      const isInInput = (target instanceof HTMLInputElement) ||
+        (target instanceof HTMLTextAreaElement) ||
+        target.isContentEditable ||
+        !!target.closest?.('.ide-terminal-xterm')
 
       // Always-active shortcuts (work even in inputs)
       if (e.key === '`' && e.ctrlKey) { setTerminalMode(m => m === 'closed' ? 'docked' : 'closed'); return }
@@ -238,7 +240,6 @@ function AppInner() {
           date={date}
           nav={nav}
           onDateChange={d => { setDate(d); setSelectedId(null) }}
-          onTerminalToggle={() => setTerminalMode(m => m === 'closed' ? 'docked' : 'closed')}
           onRefresh={() => {
             if (nav === 'backlog') setBacklogRefresh(n => n + 1)
             else if (nav === 'daily') setDailyNoteRefresh(n => n + 1)

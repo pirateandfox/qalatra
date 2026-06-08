@@ -21,8 +21,6 @@
 }
 .nav-btn:hover { color: var(--text); background: var(--surface2); }
 
-.terminal-btn { font-family: monospace; font-size: 12px; letter-spacing: 0; }
-
 .date-nav {
   display: flex;
   align-items: center;
@@ -50,3 +48,29 @@
   font-size: 12px;
 }
 .today-link:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+
+.instance-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+}
+
+.instance-tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.instance-tab:hover { color: var(--text); background: var(--surface2); }
+
+.instance-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}

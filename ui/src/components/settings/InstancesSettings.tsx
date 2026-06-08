@@ -130,13 +130,12 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
             >
               {localServerBusy ? 'Starting...' : localServer?.running ? 'Restart' : 'Start'}
             </button>
-            {localServer?.running && localServer.token && (
+            {localServer?.running && (
               <button
                 className="settings-save"
                 style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
                 onClick={() => {
-                  const savedInstance = upsertInstance({ name: 'Local Server', url: localServer.url, token: localServer.token! })
-                  setActiveInstance(savedInstance.id)
+                  setActiveInstance(null)
                   refreshInstances()
                   window.location.reload()
                 }}

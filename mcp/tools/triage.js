@@ -56,7 +56,7 @@ export const handlers = {
     const t = today();
     const conditions = [
       `status = 'active'`,
-      `task_type != 'event'`,
+      `task_type NOT IN ('event', 'reading')`,
       `(start_date IS NULL OR start_date <= '${t}')`,
       `(surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime'))`,
     ];

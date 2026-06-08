@@ -1,6 +1,21 @@
 # Qalatra — Evolution Notes
 
-## Unreleased — Time estimates and daily capacity (2026-06-03)
+## 1.9.0 — Remote terminal UX, workspace file creation, instance tabs (2026-06-08)
+
+- WorkspaceFilesView: replaced the global `+` / full-path input with a per-folder hover `+` button and an inline create form. The form shows the parent directory path as a read-only label and accepts only the filename; creates the file and opens it in the editor. File creation now does a targeted directory refresh (`refreshTarget` mechanism) instead of remounting the whole tree — expansion state is fully preserved.
+- WorkspaceFilesView: workspace root nodes auto-expand on mount (`initialExpanded` prop triggers `loadChildren()` immediately), so the first level of the file tree is always visible without a manual click.
+- Header: replaced the `_` terminal toggle button with instance switcher tabs (Local + each saved remote). Clicking a tab calls `setActiveInstance(id)` and reloads the app. Tabs only render when there is at least one saved remote instance.
+- TerminalManagerView: inline session rename. A Rename button in the actions row puts the toolbar title into edit mode; Enter or blur saves, Escape cancels. Sends a `PATCH /api/v1/terminal-sessions/:id` call and reloads the session list.
+- TerminalManagerView: Reconnect button in the terminal toolbar. Incrementing `reconnectKey` forces the `useEffect` to close the dead WebSocket and open a new one — no navigation required to wake a dormant session.
+- TerminalManagerView: `term.focus()` called on session selection so xterm captures keypresses immediately without the user clicking inside the terminal first.
+- App.tsx: keyboard shortcut guard extended to `.ide-terminal-xterm` — inputs inside the terminal pane no longer trigger the global `d` shortcut and redirect to the daily note.
+- server/terminal-sessions.js: tmux ENOENT error now shows a platform-specific install message: `brew install tmux` on macOS, `sudo apt install tmux` on Linux, instead of the raw Node spawn error.
+- EventCard.tsx/css: done events render a static `✓` span (not a clickable button). Added `.event-card.event-done` with 45% opacity and a strikethrough title so completed calendar events visually recede without disappearing.
+- db-worker.js: `doneToday` query excludes events (`AND task_type != 'event'`) so the "done today" count reflects tasks, not calendar events. Events query removes the `AND status != 'done'` filter so done events are visible in the events list.
+- mcp/tools/triage.js: triage tool excludes both events and reading tasks (`task_type NOT IN ('event', 'reading')`); previously only excluded events.
+- settings/InstancesSettings.tsx: "Use Local Server" button no longer requires `localServer.token` to be present — calls `setActiveInstance(null)` and reloads immediately, fixing a case where the button appeared disabled after clearing tokens.
+
+## 1.8.0 — Time estimates and daily capacity (2026-06-03)
 
 - Added `time_estimate INTEGER` column (minutes) to the tasks table. Migration runs in both `mcp/db.js` and `db-worker.js`.
 - Added `time_estimate` to `create_task` and `update_task` MCP schemas so agents can set/clear estimates.
@@ -609,6 +624,8 @@ _All resolved._
 ---
 
 ## Shipped
+
+- **Done events stay in Events section** (2026-06-04) — When an event is auto-completed (or manually marked done), it stays pinned in the Events section at the top of Today view rather than falling into "Done Today" with regular tasks. Done events are rendered grayed out (45% opacity) with a strikethrough title and a green ✓ check instead of the mark-done button. The `doneToday` query now excludes events (`task_type != 'event'`); the `events` query no longer filters by `status != 'done'`.
 
 - **Events are records, not tasks** (2026-03-13) — Events (`task_type = 'event'`) are treated as permanent dated records, not action items. `task_type != 'event'` is now applied universally across all active task queries: overdue, due_today, active_count, by_context, still_active, get_todays_tasks, get_overdue_tasks, end_of_day_triage. Events stay pinned to their date indefinitely with no status transitions needed. Added `end_time` (HH:MM) field to schema for start/end metadata and future calendar-sync readiness.
 

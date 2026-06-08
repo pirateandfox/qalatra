@@ -221,8 +221,19 @@
   font-size: 12px;
 }
 
-.ide-tree-row {
+.ide-tree-row-wrap {
+  display: flex;
+  align-items: center;
   width: 100%;
+}
+
+.ide-tree-row-wrap:hover {
+  background: var(--surface2);
+}
+
+.ide-tree-row-btn {
+  flex: 1;
+  min-width: 0;
   min-height: 28px;
   display: flex;
   align-items: center;
@@ -233,16 +244,76 @@
   text-align: left;
   cursor: pointer;
   white-space: nowrap;
+  padding-right: 4px;
 }
 
-.ide-tree-row:hover,
-.ide-tree-row.selected {
+.ide-tree-row-btn.selected,
+.ide-tree-row-wrap:hover .ide-tree-row-btn {
+  background: transparent;
+}
+
+.ide-tree-row-wrap.is-dir:hover .ide-tree-row-btn,
+.ide-tree-row-btn.selected {
+  background: transparent;
+}
+
+.ide-tree-row-btn.selected {
+  color: var(--text);
+}
+
+.ide-tree-row-wrap:has(.ide-tree-row-btn.selected) {
   background: var(--surface2);
 }
 
-.ide-tree-row.missing {
+.ide-tree-row-btn.missing {
   color: var(--muted);
   cursor: default;
+}
+
+.ide-tree-add-btn {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 6px;
+  height: 28px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.ide-tree-row-wrap:hover .ide-tree-add-btn {
+  opacity: 1;
+}
+
+.ide-tree-add-btn:hover {
+  color: var(--text);
+}
+
+.ide-inline-create {
+  padding: 6px 8px 8px;
+  border-left: 2px solid var(--accent);
+  margin: 2px 0;
+}
+
+.ide-inline-create-dir {
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-inline-create-input {
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 12px;
+  padding: 4px 7px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .ide-tree-twist {
@@ -356,6 +427,20 @@
 .ide-terminal-title {
   font-weight: 650;
   margin-right: 8px;
+}
+
+.ide-terminal-title-area {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ide-terminal-rename-input {
+  font-weight: 650;
+  font-size: 13px;
+  padding: 3px 7px;
+  width: 240px;
 }
 
 .ide-terminal-xterm {

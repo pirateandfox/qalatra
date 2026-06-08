@@ -18,9 +18,10 @@ export default function EventCard({ event, onSelect, onMeetingOpen, onMutate }: 
   const done = subtasks.filter(s => s.status === 'done').length
   const pct = subtasks.length ? Math.round(done / subtasks.length * 100) : 0
   const timeStr = fmtTime(event.event_time)
+  const isDone = event.status === 'done'
 
   return (
-    <div className="event-card" style={{ borderLeft: `3px solid ${color}` }} data-id={event.id}>
+    <div className={`event-card${isDone ? ' event-done' : ''}`} style={{ borderLeft: `3px solid ${isDone ? 'var(--border)' : color}` }} data-id={event.id}>
       <div className="event-card-top">
         <div className="event-time">{timeStr}</div>
         <div className="event-body">
@@ -39,7 +40,10 @@ export default function EventCard({ event, onSelect, onMeetingOpen, onMutate }: 
             {(event as any).attachment_count > 0 && <span className="has-notes" title="Has attachments">📎</span>}
           </div>
         </div>
-        <button className="event-done-btn" title="Mark done" onClick={async () => { await updateTask(event.id, { status: 'done' }); onMutate() }}>✓</button>
+        {isDone
+          ? <span className="event-done-check" title="Done">✓</span>
+          : <button className="event-done-btn" title="Mark done" onClick={async () => { await updateTask(event.id, { status: 'done' }); onMutate() }}>✓</button>
+        }
         <button className="meeting-btn" onClick={() => onMeetingOpen(event.id)}>▶ Meeting</button>
       </div>
       {subtasks.length > 0 && (
