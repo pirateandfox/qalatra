@@ -132,6 +132,10 @@ export function createTerminalManager({ dataDir, loadSettings }) {
     const tmuxSession = sessionName(id)
     const createdAt = now()
     runTmux(['new-session', '-d', '-s', tmuxSession, '-c', cwd])
+    // Disable tmux mouse mode so xterm handles selection natively.
+    // If the user's tmux.conf has `set -g mouse on`, it would intercept mouse
+    // events and copy to the tmux paste buffer instead of the system clipboard.
+    try { runTmux(['set-option', '-t', tmuxSession, 'mouse', 'off']) } catch {}
 
     const session = {
       id,
