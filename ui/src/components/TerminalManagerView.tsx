@@ -90,10 +90,16 @@ function RemoteTerminal({ session, reconnectKey }: { session: TerminalSession | 
         ws.send(JSON.stringify({ type: 'input', data }))
       }
     })
-    // Cmd+C (Mac) with selected text copies to clipboard instead of sending interrupt
+    // Cmd+C (Mac) / Ctrl+C with selected text copies to clipboard instead of sending interrupt
     term.attachCustomKeyEventHandler(event => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'c' && event.type === 'keydown' && term.hasSelection()) {
-        navigator.clipboard.writeText(term.getSelection()).catch(() => {})
+        const text = term.getSelection()
+        const api = (window as any).electronAPI
+        if (api?.writeClipboard) {
+          api.writeClipboard(text)
+        } else {
+          navigator.clipboard.writeText(text).catch(() => {})
+        }
         return false
       }
       return true
