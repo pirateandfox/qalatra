@@ -1,5 +1,9 @@
 # Qalatra — Evolution Notes
 
+## 1.9.3 — CI fix (2026-06-10)
+
+- Bumped `concurrently` dev dependency from 9.x to 10.x. The old version pulled in `shell-quote` with a critical advisory that was failing CI on every commit without affecting the release build.
+
 ## 1.9.2 — Terminal copy-out working (2026-06-10)
 
 - Fixed copy-out from remote terminals. Root cause: if the remote server's `~/.tmux.conf` has `set -g mouse on`, tmux intercepts mouse selection events on the server and copies to its own paste buffer — xterm on the Mac never sees the selection. Qalatra now disables mouse mode on every tmux session it creates (`tmux set-option -t session mouse off`) so xterm handles selection natively.
