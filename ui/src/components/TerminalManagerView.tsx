@@ -90,6 +90,13 @@ function RemoteTerminal({ session, reconnectKey }: { session: TerminalSession | 
         ws.send(JSON.stringify({ type: 'input', data }))
       }
     })
+    // Copy-on-select: whenever selection changes, write it to clipboard immediately.
+    // This sidesteps all Cmd+C / accelerator interception issues in Electron.
+    term.onSelectionChange(() => {
+      if (!term.hasSelection()) return
+      const api = (window as any).electronAPI
+      if (api?.writeClipboard) api.writeClipboard(term.getSelection())
+    })
     term.onResize(({ cols, rows }) => {
       const ws = wsRef.current
       if (ws?.readyState === WebSocket.OPEN) {
@@ -102,21 +109,7 @@ function RemoteTerminal({ session, reconnectKey }: { session: TerminalSession | 
     })
     resizeObserver.observe(containerRef.current)
 
-    // Copy out of xterm: listen at the document level so we catch Cmd+C regardless
-    // of whether Electron's menu accelerator intercepts the keydown event first.
-    const container = containerRef.current
-    const handleCopy = () => {
-      if (!container.contains(document.activeElement)) return
-      if (!term.hasSelection()) return
-      const text = term.getSelection()
-      const api = (window as any).electronAPI
-      if (api?.writeClipboard) api.writeClipboard(text)
-      else navigator.clipboard.writeText(text).catch(() => {})
-    }
-    document.addEventListener('copy', handleCopy)
-
     return () => {
-      document.removeEventListener('copy', handleCopy)
       resizeObserver.disconnect()
       wsRef.current?.close()
       term.dispose()
