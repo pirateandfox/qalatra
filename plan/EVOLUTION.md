@@ -1,5 +1,11 @@
 # Qalatra — Evolution Notes
 
+## 1.9.2 — Terminal copy-out working (2026-06-10)
+
+- Fixed copy-out from remote terminals. Root cause: if the remote server's `~/.tmux.conf` has `set -g mouse on`, tmux intercepts mouse selection events on the server and copies to its own paste buffer — xterm on the Mac never sees the selection. Qalatra now disables mouse mode on every tmux session it creates (`tmux set-option -t session mouse off`) so xterm handles selection natively.
+- Switched terminal copy mechanism to copy-on-select: `onSelectionChange` writes selected text to the Mac clipboard via `electronAPI.writeClipboard` (Electron native clipboard, synchronous). No Cmd+C needed — select text, paste anywhere. Previous approaches using `attachCustomKeyEventHandler` and `document 'copy'` event both failed because Electron's menu accelerator intercepts Cmd+C before JavaScript sees it.
+- Existing terminal sessions need to be killed and recreated to pick up the mouse mode change.
+
 ## 1.9.1 — Heartbeat resume fix, terminal copy-out (2026-06-08)
 
 - Fixed `toggle_heartbeat` MCP tool crashing with ReferenceError on resume. `addMinutesFromNow` was referenced but never defined; replaced with the correct `nextRunAt(interval, run_at_time, minute_offset)` call. Also fetches `run_at_time` and `minute_offset` from the row so clock-aligned offsets are respected when resuming a paused heartbeat.
