@@ -132,10 +132,11 @@ export function createTerminalManager({ dataDir, loadSettings }) {
     const tmuxSession = sessionName(id)
     const createdAt = now()
     runTmux(['new-session', '-d', '-s', tmuxSession, '-c', cwd])
-    // Disable tmux mouse mode so xterm handles selection natively.
-    // If the user's tmux.conf has `set -g mouse on`, it would intercept mouse
-    // events and copy to the tmux paste buffer instead of the system clipboard.
-    try { runTmux(['set-option', '-t', tmuxSession, 'mouse', 'off']) } catch {}
+    // Enable tmux mouse mode so mouse-wheel scroll works (tmux handles it natively).
+    // With mouse on, normal click-drag is intercepted by tmux; use Shift+drag to
+    // select text — xterm bypasses mouse forwarding on Shift, so onSelectionChange
+    // still fires and copy-on-select still works.
+    try { runTmux(['set-option', '-t', tmuxSession, 'mouse', 'on']) } catch {}
 
     const session = {
       id,

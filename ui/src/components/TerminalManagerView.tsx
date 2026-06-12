@@ -133,44 +133,74 @@ function RemoteTerminal({ session, reconnectKey }: { session: TerminalSession | 
     term.focus()
 
     let cancelled = false
-    term.write(`\x1b[2mConnecting to ${session.title}...\x1b[0m\r\n`)
-    terminalSocketUrl(session.id, term.cols || 100, term.rows || 30)
-      .then(url => {
-        if (cancelled) return
-        const ws = new WebSocket(url)
-        wsRef.current = ws
-        ws.onopen = () => {
-          term.write('\x1b[2mConnected.\x1b[0m\r\n')
-          sendResize()
-        }
-        ws.onmessage = event => {
-          let message: { type?: string; data?: string; error?: string; code?: number } = {}
-          try {
-            message = JSON.parse(String(event.data))
-          } catch {
-            message = { type: 'error', error: 'Received an unreadable terminal message.' }
+    let ptyExited = false
+    let retryCount = 0
+    let pingInterval: ReturnType<typeof setInterval> | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    const MAX_RETRIES = 8
+
+    function connect() {
+      if (cancelled) return
+      const isRetry = retryCount > 0
+      term.write(`\x1b[2m${isRetry ? 'Reconnecting...' : `Connecting to ${session!.title}...`}\x1b[0m\r\n`)
+      terminalSocketUrl(session!.id, term.cols || 100, term.rows || 30)
+        .then(url => {
+          if (cancelled) return
+          const ws = new WebSocket(url)
+          wsRef.current = ws
+          ws.onopen = () => {
+            retryCount = 0
+            ptyExited = false
+            term.write(`\x1b[2m${isRetry ? 'Reconnected.' : 'Connected.'}\x1b[0m\r\n`)
+            sendResize()
+            pingInterval = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }))
+            }, 25000)
           }
-          if (message.type === 'output' && typeof message.data === 'string') term.write(message.data)
-          if (message.type === 'error') term.write(`\r\n\x1b[31m${message.error ?? 'Terminal error'}\x1b[0m\r\n`)
-          if (message.type === 'exit') term.write(`\r\n\x1b[33mAttach process exited (${message.code ?? 0}). Session may still be running in tmux.\x1b[0m\r\n`)
-        }
-        ws.onclose = () => {
-          if (!cancelled) term.write('\r\n\x1b[2mDisconnected. Re-select the session to attach again.\x1b[0m\r\n')
-        }
-        ws.onerror = () => {
-          term.write('\r\n\x1b[31mWebSocket terminal connection failed.\x1b[0m\r\n')
-        }
-      })
-      .catch(err => {
-        term.write(`\r\n\x1b[31m${err?.message ?? String(err)}\x1b[0m\r\n`)
-      })
+          ws.onmessage = event => {
+            let message: { type?: string; data?: string; error?: string; code?: number } = {}
+            try {
+              message = JSON.parse(String(event.data))
+            } catch {
+              message = { type: 'error', error: 'Received an unreadable terminal message.' }
+            }
+            if (message.type === 'output' && typeof message.data === 'string') term.write(message.data)
+            if (message.type === 'error') term.write(`\r\n\x1b[31m${message.error ?? 'Terminal error'}\x1b[0m\r\n`)
+            if (message.type === 'exit') {
+              ptyExited = true
+              term.write(`\r\n\x1b[33mAttach process exited (${message.code ?? 0}). Session may still be running in tmux.\x1b[0m\r\n`)
+            }
+          }
+          ws.onclose = () => {
+            if (pingInterval) { clearInterval(pingInterval); pingInterval = null }
+            if (cancelled || ptyExited) return
+            if (retryCount < MAX_RETRIES) {
+              retryCount++
+              const delay = Math.min(500 * retryCount, 4000)
+              reconnectTimer = setTimeout(connect, delay)
+            } else {
+              term.write('\r\n\x1b[31mFailed to reconnect. Click Reconnect to try again.\x1b[0m\r\n')
+            }
+          }
+          ws.onerror = () => {
+            term.write('\r\n\x1b[31mWebSocket terminal connection failed.\x1b[0m\r\n')
+          }
+        })
+        .catch(err => {
+          if (!cancelled) term.write(`\r\n\x1b[31m${err?.message ?? String(err)}\x1b[0m\r\n`)
+        })
+    }
+
+    connect()
 
     return () => {
       cancelled = true
+      if (pingInterval) { clearInterval(pingInterval); pingInterval = null }
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [session?.id, session?.title, sendResize, reconnectKey])
+  }, [session?.id, sendResize, reconnectKey])
 
   return <div ref={containerRef} className="ide-terminal-xterm" />
 }

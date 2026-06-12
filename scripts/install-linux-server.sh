@@ -112,6 +112,42 @@ info "Starting systemd user service"
 systemctl --user daemon-reload
 systemctl --user enable --now qalatra-server.service
 
+# Auto-updater: systemd timer that checks GitHub releases every 6 hours
+UPDATER_SERVICE="$SERVICE_DIR/qalatra-updater.service"
+UPDATER_TIMER="$SERVICE_DIR/qalatra-updater.timer"
+
+cat > "$UPDATER_SERVICE" <<UPDATER_SVC
+[Unit]
+Description=Qalatra Auto-Updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=QALATRA_ROOT=$(systemd_literal "$ROOT_DIR")
+Environment=QALATRA_NODE_BIN=$(systemd_literal "$NODE_BIN")
+ExecStart=$(systemd_literal "$ROOT_DIR/scripts/auto-update.sh")
+StandardOutput=journal
+StandardError=journal
+UPDATER_SVC
+
+cat > "$UPDATER_TIMER" <<UPDATER_TMR
+[Unit]
+Description=Qalatra Auto-Updater Timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UPDATER_TMR
+
+chmod +x "$ROOT_DIR/scripts/auto-update.sh"
+systemctl --user daemon-reload
+systemctl --user enable --now qalatra-updater.timer
+
 HEALTH_URL="http://$API_HOST:$API_PORT/health"
 if wait_for_url "$HEALTH_URL"; then
   HEALTH_STATUS="ok"
@@ -136,8 +172,9 @@ if [ -f "$TOKEN_FILE" ]; then
   echo "  curl -fsS -H \"Authorization: Bearer \$TOKEN\" http://$API_HOST:$API_PORT/api/instance"
 fi
 echo
-echo "Status: systemctl --user status qalatra-server.service"
-echo "Logs:   journalctl --user -u qalatra-server.service -f"
+echo "Status:  systemctl --user status qalatra-server.service"
+echo "Logs:    journalctl --user -u qalatra-server.service -f"
+echo "Updates: systemctl --user status qalatra-updater.timer"
 echo
 echo "For a truly headless machine that should start before an interactive login,"
 echo "enable user lingering once: loginctl enable-linger \"$USER\""

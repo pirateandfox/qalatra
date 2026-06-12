@@ -1,5 +1,12 @@
 # Qalatra — Evolution Notes
 
+## 1.9.4 — Terminal scroll, keepalive, headless auto-update (2026-06-12)
+
+- **Terminal scroll restored**: re-enabled tmux mouse mode on Qalatra-managed sessions. Mouse wheel now scrolls through terminal history via tmux copy mode. Trade-off: normal click-drag no longer auto-selects (tmux intercepts it). Use **Shift+drag** to select text — xterm bypasses mouse forwarding on Shift, `onSelectionChange` still fires, copy-on-select still works. Existing sessions need to be killed/recreated to pick up the change.
+- **Terminal WebSocket keepalive**: client sends a `{ type: 'ping' }` frame every 25 seconds. Prevents proxy/NAT idle-timeout from silently dropping connections when the app is backgrounded or inactive.
+- **Terminal auto-reconnect**: on unexpected WebSocket close (network blip, server restart), the terminal automatically retries up to 8 times with exponential backoff (500ms → 4s). No more manual "Reconnect" clicks for transient drops. Intentional disconnects (switching sessions, PTY exit) are not retried.
+- **Headless auto-update**: new `scripts/auto-update.sh` + systemd timer (`qalatra-updater.timer`) installed by `install-linux-server.sh`. Checks GitHub releases every 6 hours; if a newer version is published, runs `git reset --hard v<tag>`, `npm ci`, `npm run rebuild:node`, then restarts `qalatra-server.service`. Logs to journald. Existing servers can bootstrap the updater by re-running `install-linux-server.sh` from the 1.9.4 checkout.
+
 ## 1.9.3 — CI fix (2026-06-10)
 
 - Bumped `concurrently` dev dependency from 9.x to 10.x. The old version pulled in `shell-quote` with a critical advisory that was failing CI on every commit without affecting the release build.
