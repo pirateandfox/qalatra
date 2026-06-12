@@ -10,12 +10,11 @@ Use two separate Cloudflare channels:
 |---|---|---:|---|
 | Operator access | `agent-test.qalatra.com`, `desktop-test.qalatra.com` | On | Cloudflare Access + SSH keys |
 | Qalatra API | `api-test.qalatra.com` | Off | Qalatra bearer tokens |
+| Qalatra MCP | `mcp-test.qalatra.com` | Off | Qalatra bearer tokens (requires `QALATRA_MCP_AUTH=required`) |
 
-Do not add the Qalatra API hostname to the operator Access app. Electron, web, and mobile clients expect JSON responses from Qalatra and cannot handle a Cloudflare email/login wall.
+Do not add the Qalatra API or MCP hostnames to the operator Access app. Clients expect JSON/MCP responses from Qalatra and cannot handle a Cloudflare email/login wall.
 
 It is fine if `~/.cloudflared/cert.pem` already exists from the operator setup. The Qalatra tunnel installer reuses that Cloudflare login, creates or reuses its own `qalatra-api` tunnel, and writes a separate user service named `qalatra-cloudflared.service`.
-
-Never expose the MCP port (`3457`) through Cloudflare. MCP stays local to the Linux machine.
 
 ## Prerequisites
 
@@ -88,18 +87,31 @@ systemctl --user status qalatra-cloudflared.service --no-pager -l
 
 ## Updating an Existing Headless Install
 
-Run the update as the normal Qalatra service user, not with `sudo`.
+### Automatic updates (1.9.4+)
+
+Fresh installs from 1.9.4 onward install a `qalatra-updater.timer` that checks GitHub releases every 6 hours. No manual action needed — the box will update itself.
+
+Check the timer status:
+```bash
+systemctl --user status qalatra-updater.timer
+journalctl --user -u qalatra-updater.service -n 40 --no-pager
+```
+
+### Manual update / bootstrap the auto-updater on older installs
+
+Run as the Qalatra service user (not `sudo`):
 
 ```bash
 cd ~/qalatra
-git fetch origin develop --tags
-git checkout develop
-git pull --ff-only origin develop
-./scripts/install-linux-server.sh
+git fetch --tags origin
+git reset --hard v1.9.4     # or latest tag
+npm ci --ignore-scripts
+npm run rebuild:node
+./scripts/install-linux-server.sh   # also installs qalatra-updater.timer
 systemctl --user restart qalatra-server.service
 ```
 
-The installer is safe to rerun. It refreshes npm dependencies, rebuilds native modules for system Node, rewrites the user service, and starts the server. This matters when a release adds server-side dependencies such as the persistent terminal session runtime.
+The installer is safe to rerun. It refreshes npm dependencies, rebuilds native modules for system Node, rewrites the user service and installs the auto-updater timer.
 
 If this is the first update to the Agent IDE build, verify `tmux` exists and keep the workspace under the normal user account:
 
@@ -167,15 +179,13 @@ Token: contents of ~/.local/share/qalatra/db/admin-token.txt from the Linux serv
 
 Prefer creating a dedicated expiring token for each client in Settings -> Instances -> Access Tokens. Treat the bootstrap token like an admin password and revoke unused tokens promptly.
 
-## Local MCP Setup
+## MCP Setup
 
-The Linux service starts MCP locally at:
+The Linux service starts MCP locally at `http://127.0.0.1:3457/mcp`.
 
-```text
-http://127.0.0.1:3457/mcp
-```
+### Local-only (Claude Code running on the same box)
 
-If Claude Code runs on the Linux machine, add this to that user's `~/.claude.json`:
+If Claude Code runs on the Linux machine, add this to `~/.claude.json`:
 
 ```json
 {
@@ -188,7 +198,66 @@ If Claude Code runs on the Linux machine, add this to that user's `~/.claude.jso
 }
 ```
 
-Restart Claude Code after editing the file.
+Restart Claude Code after editing the file. No auth is needed — loopback requests bypass token checking by default.
+
+### Remote MCP via Cloudflare Tunnel
+
+To reach MCP from your laptop (or any Claude Code instance on another machine), expose the MCP port through a separate tunnel hostname and enable token auth.
+
+**⚠️ IMPORTANT:** By default (`QALATRA_MCP_AUTH=local-bypass`), the MCP server skips auth for requests that appear to come from loopback. Behind a Cloudflare tunnel, all traffic arrives from the local `cloudflared` daemon at `127.0.0.1`, so it looks like loopback — meaning the default mode offers **no protection** for tunneled traffic. You must set `QALATRA_MCP_AUTH=required` before exposing the port.
+
+1. Add `QALATRA_MCP_AUTH=required` to the server's systemd service:
+
+```bash
+# Edit the service file
+systemctl --user edit qalatra-server.service
+```
+
+Add under `[Service]`:
+```ini
+[Service]
+Environment=QALATRA_MCP_AUTH=required
+```
+
+Then reload and restart:
+```bash
+systemctl --user daemon-reload
+systemctl --user restart qalatra-server.service
+```
+
+2. Add the MCP hostname to your Cloudflare tunnel config (in `~/.config/qalatra/cloudflared/config.yml`):
+
+```yaml
+ingress:
+  - hostname: api-test.qalatra.com
+    service: http://127.0.0.1:3456
+  - hostname: mcp-test.qalatra.com
+    service: http://127.0.0.1:3457
+  - service: http_status:404
+```
+
+Restart the tunnel: `systemctl --user restart qalatra-cloudflared.service`
+
+3. Add a DNS route in Cloudflare for the MCP hostname pointing to the same tunnel UUID.
+
+4. On your laptop, configure Claude Code with `mcp-remote`:
+
+```json
+{
+  "mcpServers": {
+    "qalatra-shi": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "https://mcp-test.qalatra.com/mcp",
+        "--header", "Authorization: Bearer ${QALATRA_MCP_TOKEN}"
+      ]
+    }
+  }
+}
+```
+
+Set `QALATRA_MCP_TOKEN` in your environment to any valid Qalatra token (create one in Settings → Instances → Access Tokens). The same tokens that work for the API also work for MCP.
 
 ## Troubleshooting
 

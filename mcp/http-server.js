@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { initAuth, authenticate } from '../server/auth.js';
 
 import { toolDefs as taskDefs,     handlers as taskHandlers }     from './tools/tasks.js';
 import { toolDefs as triageDefs,   handlers as triageHandlers }   from './tools/triage.js';
@@ -24,6 +25,40 @@ const SETTINGS_FILE = process.env.TASKOS_SETTINGS_FILE
 
 function loadSettings() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch { return {}; }
+}
+
+// Auth — reuses the same auth_tokens table as the API server.
+// QALATRA_MCP_AUTH modes:
+//   local-bypass (default) — loopback callers skip auth; non-loopback require a valid token.
+//   required               — every request needs a valid token, including loopback.
+//                            Use this on any box where the MCP port is reachable via a tunnel.
+//   off                    — no auth (today's behaviour, explicit opt-out).
+//
+// ⚠️  WARNING: behind a cloudflared tunnel the request arrives from 127.0.0.1 (the local
+// cloudflared daemon). local-bypass is therefore UNSAFE on a tunneled box.
+// Any box with an MCP ingress hostname MUST set QALATRA_MCP_AUTH=required.
+const MCP_AUTH_MODE = (process.env.QALATRA_MCP_AUTH || 'local-bypass').toLowerCase()
+const DATA_DIR_FOR_AUTH = process.env.TASKOS_DB_DIR ?? path.join(__dirname, '../db')
+const authDb = initAuth(path.join(DATA_DIR_FOR_AUTH, 'tasks.db'))
+
+function isLoopback(addr = '') {
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
+}
+
+// Returns true if the request is authorized. Writes 401 and returns false if not.
+function checkMcpAuth(req, res) {
+  if (MCP_AUTH_MODE === 'off') return true
+  if (MCP_AUTH_MODE === 'local-bypass' && isLoopback(req.socket?.remoteAddress)) return true
+  const user = authenticate(authDb, req)
+  if (!user) {
+    res.writeHead(401, {
+      'Content-Type': 'application/json',
+      'WWW-Authenticate': 'Bearer realm="Qalatra MCP"',
+    })
+    res.end(JSON.stringify({ error: 'Unauthorized' }))
+    return false
+  }
+  return true
 }
 
 const allDefs     = [...taskDefs, ...triageDefs, ...briefingDefs, ...syncDefs, ...notesDefs, ...agentDefs, ...habitDefs, ...healthDefs, ...heartbeatDefs, ...capabilityDefs];
@@ -98,7 +133,7 @@ const httpServer = http.createServer(async (req, res) => {
   }, REQUEST_TIMEOUT_MS);
   res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, last-event-id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, last-event-id, Authorization');
 
   res.on('finish', () => clearTimeout(timeout));
   res.on('close',  () => clearTimeout(timeout));
@@ -122,10 +157,13 @@ const httpServer = http.createServer(async (req, res) => {
   }
 
   if (url.pathname !== '/mcp') {
+    // Auth is only enforced on /mcp. /health and 404s are exempt.
     res.writeHead(404);
     res.end('Not found');
     return;
   }
+
+  if (!checkMcpAuth(req, res)) return;
 
   const sessionId = req.headers['mcp-session-id'];
 

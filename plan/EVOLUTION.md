@@ -1,5 +1,17 @@
 # Qalatra — Evolution Notes
 
+## 1.9.5 — MCP bearer-token authentication (2026-06-12)
+
+- **MCP auth**: `mcp/http-server.js` now validates the same tokens as the API server (`server/auth.js`, `auth_tokens` table, sha256 hash, revocation, expiry, `last_used_at` bump). Any token created in Settings → Instances → Access Tokens works for both API and MCP calls.
+- **Three modes via `QALATRA_MCP_AUTH` env var:**
+  - `local-bypass` *(default)* — loopback requests skip auth; back-compat for the desktop app and any Claude Code running on the same box.
+  - `required` — every request needs a valid token. **Required on any box with an MCP tunnel hostname.**
+  - `off` — no auth (explicit opt-out).
+- **⚠️ Tunnel warning**: behind a Cloudflare tunnel, traffic arrives from `127.0.0.1` (the local cloudflared daemon) and looks like loopback. `local-bypass` is NOT safe on a tunneled box. Any box with an MCP ingress hostname must add `Environment=QALATRA_MCP_AUTH=required` to its systemd service.
+- `Authorization` added to MCP server's `Access-Control-Allow-Headers`.
+- `docs/linux-remote-install.md` updated with MCP tunnel setup guide and the `required` warning.
+- Tokens now work at: `npx -y mcp-remote https://mcp-<box>.qalatra.com/mcp --header "Authorization: Bearer <token>"`
+
 ## 1.9.4 — Terminal scroll, keepalive, headless auto-update (2026-06-12)
 
 - **Terminal scroll restored**: re-enabled tmux mouse mode on Qalatra-managed sessions. Mouse wheel now scrolls through terminal history via tmux copy mode. Trade-off: normal click-drag no longer auto-selects (tmux intercepts it). Use **Shift+drag** to select text — xterm bypasses mouse forwarding on Shift, `onSelectionChange` still fires, copy-on-select still works. Existing sessions need to be killed/recreated to pick up the change.
