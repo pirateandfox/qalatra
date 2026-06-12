@@ -119,8 +119,8 @@ function RemoteTerminal({ session, reconnectKey }: { session: TerminalSession | 
   }, [sendResize])
 
   useEffect(() => {
-    const term = termRef.current
-    if (!term) return
+    if (!termRef.current) return
+    const term: XTerm = termRef.current
     wsRef.current?.close()
     wsRef.current = null
     term.reset()
