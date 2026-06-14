@@ -90,12 +90,42 @@ function RemoteTerminal({ session, reconnectKey }: { session: TerminalSession | 
         ws.send(JSON.stringify({ type: 'input', data }))
       }
     })
-    // Copy-on-select: whenever selection changes, write it to clipboard immediately.
-    // This sidesteps all Cmd+C / accelerator interception issues in Electron.
-    term.onSelectionChange(() => {
-      if (!term.hasSelection()) return
-      const api = (window as any).electronAPI
-      if (api?.writeClipboard) api.writeClipboard(term.getSelection())
+    // OSC 52 clipboard: tmux (set-clipboard on) emits "\e]52;c;<base64>\a" when a
+    // copy-mode selection is made — i.e. on a normal mouse click-drag release. Catch it,
+    // decode the base64 (UTF-8 safe), and write it to the native clipboard. This is what
+    // makes plain drag-to-select actually copy, since tmux owns the mouse.
+    term.parser.registerOscHandler(52, data => {
+      const payload = data.split(';').pop() || ''
+      if (!payload || payload === '?') return true // read request / empty — ignore
+      try {
+        const bytes = Uint8Array.from(atob(payload), c => c.charCodeAt(0))
+        const text = new TextDecoder().decode(bytes)
+        const api = (window as any).electronAPI
+        if (text && api?.writeClipboard) api.writeClipboard(text)
+      } catch {
+        // Malformed OSC 52 payload — ignore.
+      }
+      return true
+    })
+
+    // Cmd+C (and Ctrl+Shift+C) copies the current xterm selection — used for Shift+drag,
+    // which bypasses tmux's mouse forwarding and selects in xterm itself. Returning false
+    // tells xterm to handle the event and not forward it to the pty. Plain Ctrl+C is left
+    // untouched so it still sends SIGINT.
+    term.attachCustomKeyEventHandler(event => {
+      if (
+        event.type === 'keydown' &&
+        event.key.toLowerCase() === 'c' &&
+        (event.metaKey || (event.ctrlKey && event.shiftKey))
+      ) {
+        if (term.hasSelection()) {
+          const sel = term.getSelection()
+          const api = (window as any).electronAPI
+          if (sel && api?.writeClipboard) api.writeClipboard(sel)
+          return false
+        }
+      }
+      return true
     })
     term.onResize(({ cols, rows }) => {
       const ws = wsRef.current

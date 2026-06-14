@@ -92,6 +92,17 @@ export default function Terminal({ mode, onClose, onToggleFullscreen, pendingCom
     term.onData(data => { eAPI().terminalInput(data) })
     term.onResize(({ cols, rows }) => { eAPI().terminalResize(cols, rows) })
 
+    // Copy-on-select: whenever selection changes, write it to clipboard immediately.
+    // This sidesteps all Cmd+C / accelerator interception issues in Electron and matches
+    // the behavior in TerminalManagerView. Without this the local terminal never copies.
+    term.onSelectionChange(() => {
+      if (!term.hasSelection()) return
+      const sel = term.getSelection()
+      if (!sel) return
+      const api = eAPI()
+      if (api?.writeClipboard) api.writeClipboard(sel)
+    })
+
     const resizeObserver = new ResizeObserver(() => fit.fit())
     resizeObserver.observe(containerRef.current)
     return () => { resizeObserver.disconnect() }

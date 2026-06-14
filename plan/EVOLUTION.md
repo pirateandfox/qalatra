@@ -1,5 +1,13 @@
 # Qalatra — Evolution Notes
 
+## 1.9.6 — Terminal copy actually fixed (sandboxed preload clipboard) (2026-06-14)
+
+- **Root cause of every prior failed "terminal copy" fix:** the preload runs sandboxed, where `require('electron')` does **not** expose the `clipboard` module. `preload.cjs`'s `writeClipboard: (text) => clipboard.writeText(text)` therefore threw `Cannot read properties of undefined (reading 'writeText')` on every call — silently breaking copy-on-select, Cmd+C, *and* OSC 52 alike. The 1.9.1/1.9.2 "terminal copy-out" entries never actually worked in the packaged/sandboxed app.
+- **Fix (client):** clipboard writes now go through IPC — `preload.cjs` does `ipcRenderer.send('clipboard:write', text)`, handled in `electron-main.js` by `clipboard.writeText` in the main process (which has the module). Verified end-to-end via CDP: a tmux selection now lands on the macOS clipboard.
+- **Remote terminal copy (`TerminalManagerView.tsx`):** registered an OSC 52 handler (`term.parser.registerOscHandler(52, …)`) that base64-decodes (UTF-8 safe) and writes to the clipboard. With tmux `set-clipboard on`, a normal mouse drag-release in a remote/agent terminal now copies to the local Mac clipboard over the wire. Added a Cmd+C / Ctrl+Shift+C handler for Shift+drag xterm selections; plain Ctrl+C still sends SIGINT. Replaced the old (non-functional) copy-on-select.
+- **Server (`server/terminal-sessions.js`):** set tmux `set-clipboard on` (server option) on both session create and attach, so tmux emits OSC 52 on copy. `TERM=xterm-256color` advertises the `clipboard` feature, so this works without extra terminal-overrides. Fleet boxes pick this up on the next deploy (bootstrap `git reset --hard origin/develop` + service restart).
+- **Bottom-panel terminal (`Terminal.tsx`):** added copy-on-select (it had no clipboard handling at all); now works thanks to the preload IPC fix.
+
 ## 1.9.5 — MCP bearer-token authentication (2026-06-12)
 
 - **MCP auth**: `mcp/http-server.js` now validates the same tokens as the API server (`server/auth.js`, `auth_tokens` table, sha256 hash, revocation, expiry, `last_used_at` bump). Any token created in Settings → Instances → Access Tokens works for both API and MCP calls.

@@ -133,10 +133,13 @@ export function createTerminalManager({ dataDir, loadSettings }) {
     const createdAt = now()
     runTmux(['new-session', '-d', '-s', tmuxSession, '-c', cwd])
     // Enable tmux mouse mode so mouse-wheel scroll works (tmux handles it natively).
-    // With mouse on, normal click-drag is intercepted by tmux; use Shift+drag to
-    // select text — xterm bypasses mouse forwarding on Shift, so onSelectionChange
-    // still fires and copy-on-select still works.
+    // With mouse on, normal click-drag is intercepted by tmux's copy-mode. To get those
+    // selections onto the user's system clipboard, enable set-clipboard: tmux then emits
+    // an OSC 52 sequence on copy (TERM=xterm-256color advertises the Ms capability), which
+    // xterm.js catches and writes to the native clipboard. Plain click-drag now copies on
+    // release; Shift+drag still uses xterm's own selection + Cmd+C.
     try { runTmux(['set-option', '-t', tmuxSession, 'mouse', 'on']) } catch {}
+    try { runTmux(['set-option', '-s', 'set-clipboard', 'on']) } catch {}
 
     const session = {
       id,
@@ -207,6 +210,9 @@ export function createTerminalManager({ dataDir, loadSettings }) {
     }
 
     touchSession(id, 'lastAttachedAt', { force: true })
+    // Ensure OSC 52 clipboard export is on for the whole tmux server, including sessions
+    // created before this option existed and after a tmux server restart. Idempotent.
+    try { runTmux(['set-option', '-s', 'set-clipboard', 'on']) } catch {}
     const cols = Math.max(20, Math.min(500, parseInt(params.get('cols') || '100', 10) || 100))
     const rows = Math.max(8, Math.min(200, parseInt(params.get('rows') || '30', 10) || 30))
     const proc = pty.spawn('tmux', ['attach-session', '-t', session.tmuxSession], {

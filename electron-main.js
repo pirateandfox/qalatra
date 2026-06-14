@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, nativeImage, dialog, Menu, ipcMain, safeStorage } from 'electron'
+import { app, BrowserWindow, shell, nativeImage, dialog, Menu, ipcMain, safeStorage, clipboard } from 'electron'
 import { createServer } from 'net'
 import { fileURLToPath } from 'url'
 import path from 'path'
@@ -666,6 +666,9 @@ function setupTerminalIpc(win) {
   })
   ipcMain.on('terminal:input', (_, data) => { ptyProcess?.write(data) })
   ipcMain.on('terminal:resize', (_, cols, rows) => { try { ptyProcess?.resize(cols, rows) } catch {} })
+  // Clipboard writes must go through the main process: the preload runs sandboxed,
+  // where require('electron') does not expose the `clipboard` module.
+  ipcMain.on('clipboard:write', (_, text) => { try { clipboard.writeText(String(text ?? '')) } catch {} })
 }
 
 function setupUpdaterIpc() {
