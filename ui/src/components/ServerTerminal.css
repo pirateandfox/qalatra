@@ -1,0 +1,15 @@
+.server-terminal-xterm {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #0d1117;
+  padding: 4px 8px;
+}
+
+.server-terminal-xterm .xterm {
+  height: 100%;
+}
+
+.server-terminal-xterm .xterm-viewport {
+  overflow-y: auto !important;
+}

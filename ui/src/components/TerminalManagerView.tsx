@@ -1,7 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Terminal as XTerm } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import '@xterm/xterm/css/xterm.css'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   createTerminalSession,
   fetchAgents,
@@ -10,13 +7,12 @@ import {
   listTerminalSessions,
   listWorkspaceRoots,
   removeTerminalSession,
-  terminalSocketUrl,
   updateTerminalSession,
   type Agent,
-  type TerminalSession,
   type TerminalStatus,
 } from '../api'
 import ComboBox, { type ComboOption } from './ComboBox'
+import ServerTerminal from './ServerTerminal'
 import './AgentIdeView.css'
 
 function basename(filePath: string) {
@@ -49,190 +45,6 @@ function timeLabel(value: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-}
-
-function RemoteTerminal({ session, reconnectKey }: { session: TerminalSession | null; reconnectKey: number }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const termRef = useRef<XTerm | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
-
-  const sendResize = useCallback(() => {
-    const term = termRef.current
-    const ws = wsRef.current
-    if (!term || !ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
-  }, [])
-
-  useEffect(() => {
-    if (!containerRef.current || termRef.current) return
-    const term = new XTerm({
-      theme: {
-        background: '#0d1117',
-        foreground: '#e2e8f0',
-        cursor: '#4f9cf9',
-        selectionBackground: '#4f9cf940',
-      },
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: 13,
-      lineHeight: 1.35,
-      cursorBlink: true,
-    })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(containerRef.current)
-    fit.fit()
-    termRef.current = term
-    fitRef.current = fit
-    term.onData(data => {
-      const ws = wsRef.current
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'input', data }))
-      }
-    })
-    // OSC 52 clipboard: tmux (set-clipboard on) emits "\e]52;c;<base64>\a" when a
-    // copy-mode selection is made — i.e. on a normal mouse click-drag release. Catch it,
-    // decode the base64 (UTF-8 safe), and write it to the native clipboard. This is what
-    // makes plain drag-to-select actually copy, since tmux owns the mouse.
-    term.parser.registerOscHandler(52, data => {
-      const payload = data.split(';').pop() || ''
-      if (!payload || payload === '?') return true // read request / empty — ignore
-      try {
-        const bytes = Uint8Array.from(atob(payload), c => c.charCodeAt(0))
-        const text = new TextDecoder().decode(bytes)
-        const api = (window as any).electronAPI
-        if (text && api?.writeClipboard) api.writeClipboard(text)
-      } catch {
-        // Malformed OSC 52 payload — ignore.
-      }
-      return true
-    })
-
-    // Cmd+C (and Ctrl+Shift+C) copies the current xterm selection — used for Shift+drag,
-    // which bypasses tmux's mouse forwarding and selects in xterm itself. Returning false
-    // tells xterm to handle the event and not forward it to the pty. Plain Ctrl+C is left
-    // untouched so it still sends SIGINT.
-    term.attachCustomKeyEventHandler(event => {
-      if (
-        event.type === 'keydown' &&
-        event.key.toLowerCase() === 'c' &&
-        (event.metaKey || (event.ctrlKey && event.shiftKey))
-      ) {
-        if (term.hasSelection()) {
-          const sel = term.getSelection()
-          const api = (window as any).electronAPI
-          if (sel && api?.writeClipboard) api.writeClipboard(sel)
-          return false
-        }
-      }
-      return true
-    })
-    term.onResize(({ cols, rows }) => {
-      const ws = wsRef.current
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-      }
-    })
-    const resizeObserver = new ResizeObserver(() => {
-      fit.fit()
-      sendResize()
-    })
-    resizeObserver.observe(containerRef.current)
-
-    return () => {
-      resizeObserver.disconnect()
-      wsRef.current?.close()
-      term.dispose()
-      termRef.current = null
-      fitRef.current = null
-    }
-  }, [sendResize])
-
-  useEffect(() => {
-    if (!termRef.current) return
-    const term: XTerm = termRef.current
-    wsRef.current?.close()
-    wsRef.current = null
-    term.reset()
-
-    if (!session) {
-      term.write('\x1b[2mCreate or select a terminal session.\x1b[0m')
-      return
-    }
-
-    term.focus()
-
-    let cancelled = false
-    let ptyExited = false
-    let retryCount = 0
-    let pingInterval: ReturnType<typeof setInterval> | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    const MAX_RETRIES = 8
-
-    function connect() {
-      if (cancelled) return
-      const isRetry = retryCount > 0
-      term.write(`\x1b[2m${isRetry ? 'Reconnecting...' : `Connecting to ${session!.title}...`}\x1b[0m\r\n`)
-      terminalSocketUrl(session!.id, term.cols || 100, term.rows || 30)
-        .then(url => {
-          if (cancelled) return
-          const ws = new WebSocket(url)
-          wsRef.current = ws
-          ws.onopen = () => {
-            retryCount = 0
-            ptyExited = false
-            term.write(`\x1b[2m${isRetry ? 'Reconnected.' : 'Connected.'}\x1b[0m\r\n`)
-            sendResize()
-            pingInterval = setInterval(() => {
-              if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }))
-            }, 25000)
-          }
-          ws.onmessage = event => {
-            let message: { type?: string; data?: string; error?: string; code?: number } = {}
-            try {
-              message = JSON.parse(String(event.data))
-            } catch {
-              message = { type: 'error', error: 'Received an unreadable terminal message.' }
-            }
-            if (message.type === 'output' && typeof message.data === 'string') term.write(message.data)
-            if (message.type === 'error') term.write(`\r\n\x1b[31m${message.error ?? 'Terminal error'}\x1b[0m\r\n`)
-            if (message.type === 'exit') {
-              ptyExited = true
-              term.write(`\r\n\x1b[33mAttach process exited (${message.code ?? 0}). Session may still be running in tmux.\x1b[0m\r\n`)
-            }
-          }
-          ws.onclose = () => {
-            if (pingInterval) { clearInterval(pingInterval); pingInterval = null }
-            if (cancelled || ptyExited) return
-            if (retryCount < MAX_RETRIES) {
-              retryCount++
-              const delay = Math.min(500 * retryCount, 4000)
-              reconnectTimer = setTimeout(connect, delay)
-            } else {
-              term.write('\r\n\x1b[31mFailed to reconnect. Click Reconnect to try again.\x1b[0m\r\n')
-            }
-          }
-          ws.onerror = () => {
-            term.write('\r\n\x1b[31mWebSocket terminal connection failed.\x1b[0m\r\n')
-          }
-        })
-        .catch(err => {
-          if (!cancelled) term.write(`\r\n\x1b[31m${err?.message ?? String(err)}\x1b[0m\r\n`)
-        })
-    }
-
-    connect()
-
-    return () => {
-      cancelled = true
-      if (pingInterval) { clearInterval(pingInterval); pingInterval = null }
-      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
-      wsRef.current?.close()
-      wsRef.current = null
-    }
-  }, [session?.id, sendResize, reconnectKey])
-
-  return <div ref={containerRef} className="ide-terminal-xterm" />
 }
 
 export default function TerminalManagerView() {
@@ -463,7 +275,7 @@ export default function TerminalManagerView() {
               </button>
             )}
           </div>
-          <RemoteTerminal session={selectedSession} reconnectKey={reconnectKey} />
+          <ServerTerminal session={selectedSession} reconnectKey={reconnectKey} className="ide-terminal-xterm" />
         </section>
       </main>
     </div>

@@ -1,5 +1,12 @@
 # Qalatra — Evolution Notes
 
+## 1.9.7 — Instance startup default and server-backed slide-up terminal (2026-06-15)
+
+- Added an explicit Settings -> Instances -> Startup Default selector. The previous persisted active-instance value migrates into this default once, so users who already defaulted to a remote box keep that behavior.
+- Active instance switching is now scoped to the current app session; after a full restart Qalatra uses the configured startup default, falling back to Local Server if the saved remote is removed or missing.
+- Added a "Hide Local Server in the header instance switcher" checkbox. Local Server cannot be removed and remains available in Settings, but the header can stay focused on remote instances when local is not part of the normal workflow.
+- Reworked the slide-up document terminal to use the same server-backed tmux/WebSocket transport as the Terminals view. Terminal/Chat from document previewers now opens on the active Qalatra server, so remote-default workflows run in the same filesystem as the document instead of trying to spawn a local Electron PTY. Plain document Terminal opens in the document folder; Chat starts the configured agent command there.
+
 ## 1.9.6 — Terminal copy actually fixed (sandboxed preload clipboard) (2026-06-14)
 
 - **Root cause of every prior failed "terminal copy" fix:** the preload runs sandboxed, where `require('electron')` does **not** expose the `clipboard` module. `preload.cjs`'s `writeClipboard: (text) => clipboard.writeText(text)` therefore threw `Cannot read properties of undefined (reading 'writeText')` on every call — silently breaking copy-on-select, Cmd+C, *and* OSC 52 alike. The 1.9.1/1.9.2 "terminal copy-out" entries never actually worked in the packaged/sandboxed app.

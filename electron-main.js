@@ -644,11 +644,23 @@ function setupTerminalIpc(win) {
       const s = JSON.parse(fs.readFileSync(path.join(win._dbDir || os.homedir(), 'settings.json'), 'utf8'))
       if (s.terminalCwd) cwd = s.terminalCwd
     } catch {}
+    try {
+      if (!fs.statSync(cwd).isDirectory()) throw new Error('not a directory')
+    } catch (err) {
+      console.warn(`[terminal] configured cwd is unavailable (${cwd}); falling back to ${os.homedir()}: ${err.message}`)
+      cwd = os.homedir()
+    }
     const shell = process.platform === 'win32'
       ? (process.env.ComSpec || 'cmd.exe')
       : (process.env.SHELL || '/bin/zsh')
     console.log(`[terminal] spawning pty: shell=${shell} cwd=${cwd}`)
-    const thisPty = pty.spawn(shell, [], { name: 'xterm-256color', cols: cols || 80, rows: rows || 24, cwd, env: process.env })
+    let thisPty
+    try {
+      thisPty = pty.spawn(shell, [], { name: 'xterm-256color', cols: cols || 80, rows: rows || 24, cwd, env: process.env })
+    } catch (err) {
+      console.error(`[terminal] failed to spawn pty: ${err.message}`)
+      throw err
+    }
     ptyProcess = thisPty
     thisPty.onData(data => { if (!win.isDestroyed()) win.webContents.send('terminal:output', data) })
     thisPty.onExit(({ exitCode }) => {

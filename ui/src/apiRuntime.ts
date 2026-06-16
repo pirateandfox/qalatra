@@ -1,5 +1,9 @@
 const INSTANCES_KEY = 'qalatra.instances'
 const ACTIVE_INSTANCE_KEY = 'qalatra.activeInstanceId'
+const DEFAULT_INSTANCE_KEY = 'qalatra.defaultInstanceId'
+const HIDE_LOCAL_INSTANCE_KEY = 'qalatra.hideLocalInstance'
+const INSTANCE_CONFIG_EVENT = 'qalatra.instanceConfigChanged'
+export const LOCAL_INSTANCE_ID = 'local-server'
 
 interface ElectronBridge {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
@@ -24,6 +28,39 @@ function normalizeUrl(url: string) {
   return url.trim().replace(/\/+$/, '')
 }
 
+function notifyInstanceConfigChanged() {
+  window.dispatchEvent(new Event(INSTANCE_CONFIG_EVENT))
+}
+
+export function onInstanceConfigChange(listener: () => void) {
+  window.addEventListener(INSTANCE_CONFIG_EVENT, listener)
+  return () => window.removeEventListener(INSTANCE_CONFIG_EVENT, listener)
+}
+
+let defaultInstanceMigrated = false
+
+function migrateDefaultInstance() {
+  if (defaultInstanceMigrated) return
+  defaultInstanceMigrated = true
+
+  const legacyActive = localStorage.getItem(ACTIVE_INSTANCE_KEY)
+  if (localStorage.getItem(DEFAULT_INSTANCE_KEY) === null && legacyActive !== null) {
+    localStorage.setItem(DEFAULT_INSTANCE_KEY, legacyActive || LOCAL_INSTANCE_ID)
+  }
+  localStorage.removeItem(ACTIVE_INSTANCE_KEY)
+}
+
+function storedInstanceValue(id: string | null) {
+  return id || LOCAL_INSTANCE_ID
+}
+
+function resolveStoredInstanceId(value: string | null, onInvalid?: () => void): string | null {
+  if (!value || value === LOCAL_INSTANCE_ID) return null
+  if (getInstances().some(instance => instance.id === value)) return value
+  onInvalid?.()
+  return null
+}
+
 export function getInstances(): QalatraInstance[] {
   try {
     const raw = localStorage.getItem(INSTANCES_KEY)
@@ -36,10 +73,18 @@ export function getInstances(): QalatraInstance[] {
 
 export function saveInstances(instances: QalatraInstance[]) {
   localStorage.setItem(INSTANCES_KEY, JSON.stringify(instances))
+  notifyInstanceConfigChanged()
 }
 
 export function getActiveInstanceId(): string | null {
-  return localStorage.getItem(ACTIVE_INSTANCE_KEY)
+  migrateDefaultInstance()
+  const sessionActive = sessionStorage.getItem(ACTIVE_INSTANCE_KEY)
+  if (sessionActive !== null) {
+    const activeId = resolveStoredInstanceId(sessionActive, () => sessionStorage.removeItem(ACTIVE_INSTANCE_KEY))
+    if (activeId || !sessionActive || sessionActive === LOCAL_INSTANCE_ID) return activeId
+    return getDefaultInstanceId()
+  }
+  return getDefaultInstanceId()
 }
 
 export function getActiveInstance(): QalatraInstance | null {
@@ -49,8 +94,33 @@ export function getActiveInstance(): QalatraInstance | null {
 }
 
 export function setActiveInstance(id: string | null) {
-  if (id) localStorage.setItem(ACTIVE_INSTANCE_KEY, id)
-  else localStorage.removeItem(ACTIVE_INSTANCE_KEY)
+  migrateDefaultInstance()
+  sessionStorage.setItem(ACTIVE_INSTANCE_KEY, storedInstanceValue(id))
+  notifyInstanceConfigChanged()
+}
+
+export function getDefaultInstanceId(): string | null {
+  migrateDefaultInstance()
+  return resolveStoredInstanceId(
+    localStorage.getItem(DEFAULT_INSTANCE_KEY),
+    () => localStorage.removeItem(DEFAULT_INSTANCE_KEY),
+  )
+}
+
+export function setDefaultInstance(id: string | null) {
+  migrateDefaultInstance()
+  localStorage.setItem(DEFAULT_INSTANCE_KEY, storedInstanceValue(id))
+  notifyInstanceConfigChanged()
+}
+
+export function getHideLocalInstance() {
+  return localStorage.getItem(HIDE_LOCAL_INSTANCE_KEY) === 'true'
+}
+
+export function setHideLocalInstance(hidden: boolean) {
+  if (hidden) localStorage.setItem(HIDE_LOCAL_INSTANCE_KEY, 'true')
+  else localStorage.removeItem(HIDE_LOCAL_INSTANCE_KEY)
+  notifyInstanceConfigChanged()
 }
 
 export function upsertInstance(input: Partial<QalatraInstance> & { name: string; url: string; token: string }): QalatraInstance {
@@ -67,8 +137,12 @@ export function upsertInstance(input: Partial<QalatraInstance> & { name: string;
 }
 
 export function removeInstance(id: string) {
+  const wasActive = sessionStorage.getItem(ACTIVE_INSTANCE_KEY) === id
+  const wasDefault = localStorage.getItem(DEFAULT_INSTANCE_KEY) === id
   saveInstances(getInstances().filter(i => i.id !== id))
-  if (getActiveInstanceId() === id) setActiveInstance(null)
+  if (wasActive) sessionStorage.removeItem(ACTIVE_INSTANCE_KEY)
+  if (wasDefault) localStorage.removeItem(DEFAULT_INSTANCE_KEY)
+  notifyInstanceConfigChanged()
 }
 
 function activeHttpInstance() {

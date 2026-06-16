@@ -1,8 +1,0 @@
-#terminal-container {
-  flex: 1;
-  min-height: 0;
-  padding: 4px 8px;
-  overflow: hidden;
-}
-#terminal-container .xterm { height: 100%; }
-#terminal-container .xterm-viewport { overflow-y: auto !important; }

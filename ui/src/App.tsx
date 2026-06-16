@@ -11,7 +11,7 @@ import CodeAgentsView from './components/CodeAgentsView'
 import ReadingView from './components/ReadingView'
 import ProjectDashboardView from './components/ProjectDashboardView'
 import DetailPanel from './components/DetailPanel'
-import Terminal from './components/Terminal'
+import Terminal, { type TerminalLaunch } from './components/Terminal'
 import SettingsView from './components/SettingsView'
 import MeetingView from './components/MeetingView'
 import CreateTask from './components/CreateTask'
@@ -25,6 +25,19 @@ import './index.css'
 const DailyNote = lazy(() => import('./components/DailyNote'))
 const TerminalManagerView = lazy(() => import('./components/TerminalManagerView'))
 const WorkspaceFilesView = lazy(() => import('./components/WorkspaceFilesView'))
+
+function dirname(filePath: string) {
+  const idx = filePath.lastIndexOf('/')
+  return idx > 0 ? filePath.slice(0, idx) : undefined
+}
+
+function basename(filePath: string) {
+  return filePath.split('/').filter(Boolean).pop() || filePath
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
 
 export default function App() {
   return (
@@ -45,7 +58,7 @@ function AppInner() {
   const [taskData, setTaskData]     = useState<TaskData | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [terminalMode, setTerminalMode] = useState<'closed' | 'docked' | 'fullscreen'>('closed')
-  const [terminalCommand, setTerminalCommand] = useState<string | null>(null)
+  const [terminalLaunch, setTerminalLaunch] = useState<TerminalLaunch | null>(null)
   const [previewPath, setPreviewPath]   = useState<string | null>(null)
   const [mdPath, setMdPath]             = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -54,6 +67,37 @@ function AppInner() {
   const [loading, setLoading]       = useState(false)
   const [apiError, setApiError]     = useState<string | null>(null)
   const [updateStatus, setUpdateStatus] = useState<{ status: string; version?: string; percent?: number; message?: string } | null>(null)
+
+  const toggleTerminal = useCallback((launch: TerminalLaunch | null = null) => {
+    setTerminalMode(current => {
+      if (current === 'closed') {
+        setTerminalLaunch(launch)
+        return 'docked'
+      }
+      return 'closed'
+    })
+  }, [])
+
+  const openTerminal = useCallback((launch: TerminalLaunch | null = null) => {
+    setTerminalLaunch(launch)
+    setTerminalMode(current => current === 'closed' ? 'docked' : current)
+  }, [])
+
+  function terminalLaunchForFile(filePath: string): TerminalLaunch {
+    const name = basename(filePath)
+    return { cwd: dirname(filePath), title: name }
+  }
+
+  async function chatWithDoc(filePath: string) {
+    const settings = await fetchSettings().catch(() => ({} as Record<string, string>))
+    const agentCmd = settings.defaultAgentCommand || 'claude --dangerously-skip-permissions'
+    const name = basename(filePath)
+    openTerminal({
+      cwd: dirname(filePath),
+      title: `Chat: ${name}`,
+      command: `${agentCmd} ${shellQuote(`I want to work on ${name}`)}`,
+    })
+  }
 
   const load = useCallback(async (d: string, silent = false) => {
     if (!silent) setLoading(true)
@@ -124,10 +168,10 @@ function AppInner() {
       const isInInput = (target instanceof HTMLInputElement) ||
         (target instanceof HTMLTextAreaElement) ||
         target.isContentEditable ||
-        !!target.closest?.('.ide-terminal-xterm')
+        !!target.closest?.('.ide-terminal-xterm, .server-terminal-xterm')
 
       // Always-active shortcuts (work even in inputs)
-      if (e.key === '`' && e.ctrlKey) { setTerminalMode(m => m === 'closed' ? 'docked' : 'closed'); return }
+      if (e.key === '`' && e.ctrlKey) { toggleTerminal(); return }
       if (e.key === 'Escape') {
         if (shortcutsOpen) { setShortcutsOpen(false); return }
         if (createOpen) { setCreateOpen(false); return }
@@ -156,7 +200,7 @@ function AppInner() {
           else load(date)
           break
         case 't':
-          setTerminalMode(m => m === 'closed' ? 'docked' : 'closed')
+          toggleTerminal()
           break
         case 'd':
           setNav('daily')
@@ -211,7 +255,7 @@ function AppInner() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedId, meetingId, createOpen, shortcutsOpen, nav, date, load])
+  }, [selectedId, meetingId, createOpen, shortcutsOpen, nav, date, load, toggleTerminal])
 
   if (meetingId) {
     return (
@@ -337,7 +381,7 @@ function AppInner() {
             onSelectTask={id => setSelectedId(id)}
             terminalOpen={terminalMode !== 'closed'}
             onPreview={path => path.endsWith('.md') ? setMdPath(path) : setPreviewPath(path)}
-            onRunInTerminal={cmd => { setTerminalCommand(cmd); setTerminalMode(m => m === 'closed' ? 'docked' : m) }}
+            onRunInTerminal={cmd => openTerminal({ command: cmd, title: 'Task terminal' })}
           />
         </div>
 
@@ -345,8 +389,8 @@ function AppInner() {
           mode={terminalMode}
           onClose={() => setTerminalMode('closed')}
           onToggleFullscreen={() => setTerminalMode(m => m === 'fullscreen' ? 'docked' : 'fullscreen')}
-          pendingCommand={terminalCommand}
-          onCommandConsumed={() => setTerminalCommand(null)}
+          pendingLaunch={terminalLaunch}
+          onCommandConsumed={() => setTerminalLaunch(null)}
         />
       </div>
 
@@ -361,15 +405,8 @@ function AppInner() {
           filePath={previewPath}
           onClose={() => setPreviewPath(null)}
           terminalOpen={terminalMode !== 'closed'}
-          onTerminalToggle={() => setTerminalMode(m => m === 'closed' ? 'docked' : 'closed')}
-          onChatWithDoc={async (fp) => {
-            const settings = await fetchSettings().catch(() => ({} as Record<string, string>))
-            const agentCmd = settings.defaultAgentCommand || 'claude --dangerously-skip-permissions'
-            const dir = fp.substring(0, fp.lastIndexOf('/'))
-            const name = fp.split('/').pop() ?? fp
-            setTerminalCommand(`cd "${dir}" && ${agentCmd} "I want to work on ${name}"\r`)
-            setTerminalMode('docked')
-          }}
+          onTerminalToggle={(fp) => toggleTerminal(terminalLaunchForFile(fp))}
+          onChatWithDoc={chatWithDoc}
         />
       )}
       {mdPath && (
@@ -377,15 +414,8 @@ function AppInner() {
           filePath={mdPath}
           onClose={() => setMdPath(null)}
           terminalOpen={terminalMode !== 'closed'}
-          onTerminalToggle={() => setTerminalMode(m => m === 'closed' ? 'docked' : 'closed')}
-          onChatWithDoc={async (fp) => {
-            const settings = await fetchSettings().catch(() => ({} as Record<string, string>))
-            const agentCmd = settings.defaultAgentCommand || 'claude --dangerously-skip-permissions'
-            const dir = fp.substring(0, fp.lastIndexOf('/'))
-            const name = fp.split('/').pop() ?? fp
-            setTerminalCommand(`cd "${dir}" && ${agentCmd} "I want to work on ${name}"\r`)
-            setTerminalMode('docked')
-          }}
+          onTerminalToggle={(fp) => toggleTerminal(terminalLaunchForFile(fp))}
+          onChatWithDoc={chatWithDoc}
         />
       )}
       <UpdateBanner status={updateStatus} onDismiss={() => setUpdateStatus(null)} />

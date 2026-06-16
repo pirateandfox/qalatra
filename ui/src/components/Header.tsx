@@ -1,6 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { offsetDate, today as todayStr } from '../lib/constants'
-import { getActiveInstanceId, getInstances, setActiveInstance, type QalatraInstance } from '../apiRuntime'
+import {
+  getActiveInstanceId,
+  getHideLocalInstance,
+  getInstances,
+  onInstanceConfigChange,
+  setActiveInstance,
+  type QalatraInstance,
+} from '../apiRuntime'
 import type { NavSection } from './Sidebar'
 import './Header.css'
 
@@ -13,18 +20,31 @@ interface Props {
 
 const DATE_VIEWS: NavSection[] = ['priority', 'daily', 'habits']
 
+function readInstanceState() {
+  return {
+    activeId: getActiveInstanceId(),
+    hideLocal: getHideLocalInstance(),
+    instances: getInstances(),
+  }
+}
+
 export default function Header({ date, nav, onDateChange, onRefresh }: Props) {
   const today = todayStr()
   const prev = offsetDate(date, -1)
   const next = offsetDate(date, 1)
   const showDateNav = DATE_VIEWS.includes(nav)
 
-  const [instances] = useState<QalatraInstance[]>(() => getInstances())
-  const [activeId, setActiveId] = useState<string | null>(() => getActiveInstanceId())
+  const [{ activeId, hideLocal, instances }, setInstanceState] = useState<{
+    activeId: string | null
+    hideLocal: boolean
+    instances: QalatraInstance[]
+  }>(() => readInstanceState())
+
+  useEffect(() => onInstanceConfigChange(() => setInstanceState(readInstanceState())), [])
 
   function switchTo(id: string | null) {
     setActiveInstance(id)
-    setActiveId(id)
+    setInstanceState(readInstanceState())
     window.location.reload()
   }
 
@@ -48,12 +68,14 @@ export default function Header({ date, nav, onDateChange, onRefresh }: Props) {
       <div style={{ flex: 1 }} />
       {instances.length > 0 && (
         <div className="instance-tabs">
-          <button
-            className={`instance-tab${!activeId ? ' active' : ''}`}
-            onClick={() => switchTo(null)}
-          >
-            Local
-          </button>
+          {!hideLocal && (
+            <button
+              className={`instance-tab${!activeId ? ' active' : ''}`}
+              onClick={() => switchTo(null)}
+            >
+              Local
+            </button>
+          )}
           {instances.map(instance => (
             <button
               key={instance.id}

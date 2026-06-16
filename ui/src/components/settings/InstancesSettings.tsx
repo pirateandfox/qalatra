@@ -1,11 +1,12 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import {
-  createAccessToken, getAccessTokenExpiryLabel, getActiveInstanceId, getInstances,
+  createAccessToken, getAccessTokenExpiryLabel, getActiveInstanceId, getDefaultInstanceId,
+  getHideLocalInstance, getInstances,
   getLocalServerServiceStatus, getLocalServerStatus, installLocalServerService,
   listAccessTokens, removeInstance, restartLocalServer, restartLocalServerService,
-  revokeAccessToken, saveSettings, setActiveInstance, startLocalServer,
-  startLocalServerService, stopLocalServerService, testInstanceConnection,
-  tokenIsExpired, uninstallLocalServerService, upsertInstance,
+  revokeAccessToken, saveSettings, setActiveInstance, setDefaultInstance,
+  setHideLocalInstance, startLocalServer, startLocalServerService, stopLocalServerService,
+  testInstanceConnection, tokenIsExpired, uninstallLocalServerService, upsertInstance,
   type AccessToken, type LocalServerServiceStatus, type LocalServerStatus,
   type QalatraInstance,
 } from '../../api'
@@ -30,6 +31,8 @@ interface InstancesSettingsProps {
 export function InstancesSettings({ settings, setSettings, markSaved }: InstancesSettingsProps) {
   const [instances, setInstances] = useState<QalatraInstance[]>([])
   const [activeInstanceId, setActiveInstanceIdState] = useState<string | null>(null)
+  const [defaultInstanceId, setDefaultInstanceIdState] = useState<string | null>(null)
+  const [hideLocalInstance, setHideLocalInstanceState] = useState(false)
   const [instanceName, setInstanceName] = useState('')
   const [instanceUrl, setInstanceUrl] = useState('')
   const [instanceToken, setInstanceToken] = useState('')
@@ -95,6 +98,24 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
   function refreshInstances() {
     setInstances(getInstances())
     setActiveInstanceIdState(getActiveInstanceId())
+    setDefaultInstanceIdState(getDefaultInstanceId())
+    setHideLocalInstanceState(getHideLocalInstance())
+  }
+
+  function useInstance(id: string | null) {
+    setActiveInstance(id)
+    refreshInstances()
+    window.location.reload()
+  }
+
+  function chooseDefaultInstance(id: string | null) {
+    setDefaultInstance(id)
+    refreshInstances()
+  }
+
+  function toggleHideLocalInstance(checked: boolean) {
+    setHideLocalInstance(checked)
+    refreshInstances()
   }
 
   async function refreshAccessTokens() {
@@ -134,11 +155,7 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
               <button
                 className="settings-save"
                 style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
-                onClick={() => {
-                  setActiveInstance(null)
-                  refreshInstances()
-                  window.location.reload()
-                }}
+                onClick={() => useInstance(null)}
               >
                 Use Local Server
               </button>
@@ -231,11 +248,7 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
             <button
               className="settings-save"
               style={{ background: !activeInstanceId ? 'var(--accent)' : 'transparent', border: '1px solid var(--border)', color: !activeInstanceId ? '#fff' : 'var(--muted)' }}
-              onClick={() => {
-                setActiveInstance(null)
-                refreshInstances()
-                window.location.reload()
-              }}
+              onClick={() => useInstance(null)}
             >
               Local Server
             </button>
@@ -244,18 +257,50 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
                 key={instance.id}
                 className="settings-save"
                 style={{ background: activeInstanceId === instance.id ? 'var(--accent)' : 'transparent', border: '1px solid var(--border)', color: activeInstanceId === instance.id ? '#fff' : 'var(--muted)' }}
-                onClick={() => {
-                  setActiveInstance(instance.id)
-                  refreshInstances()
-                  window.location.reload()
-                }}
+                onClick={() => useInstance(instance.id)}
               >
                 {instance.name}
               </button>
             ))}
           </div>
           <span className="settings-hint">
-            Local Server is the default authenticated API running against this machine's Qalatra database. Remote instances use the same API with their own URL and token.
+            Active Instance applies to the current app session. Startup Default controls which server is selected after a full restart.
+          </span>
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <label className="settings-label">Startup Default</label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              className="settings-save"
+              style={{ background: !defaultInstanceId ? 'var(--accent)' : 'transparent', border: '1px solid var(--border)', color: !defaultInstanceId ? '#fff' : 'var(--muted)' }}
+              onClick={() => chooseDefaultInstance(null)}
+            >
+              Local Server
+            </button>
+            {instances.map(instance => (
+              <button
+                key={instance.id}
+                className="settings-save"
+                style={{ background: defaultInstanceId === instance.id ? 'var(--accent)' : 'transparent', border: '1px solid var(--border)', color: defaultInstanceId === instance.id ? '#fff' : 'var(--muted)' }}
+                onClick={() => chooseDefaultInstance(instance.id)}
+              >
+                {instance.name}
+              </button>
+            ))}
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text)' }}>
+            <input
+              type="checkbox"
+              checked={hideLocalInstance}
+              onChange={e => toggleHideLocalInstance(e.target.checked)}
+            />
+            Hide Local Server in the header instance switcher
+          </label>
+          <span className="settings-hint">
+            Local Server remains available here even when hidden from the header. Remote instances use the same authenticated API with their own URL and token.
           </span>
         </div>
       </div>
@@ -407,6 +452,7 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
             disabled={!instanceName.trim() || !instanceUrl.trim() || !instanceToken.trim()}
             onClick={() => {
               const savedInstance = upsertInstance({ name: instanceName, url: instanceUrl, token: instanceToken })
+              setDefaultInstance(savedInstance.id)
               setActiveInstance(savedInstance.id)
               setInstanceName('')
               setInstanceUrl('')

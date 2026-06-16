@@ -1,152 +1,126 @@
-import { useEffect, useRef, useCallback } from 'react'
-import { fetchSettings } from '../api'
-import { Terminal as XTerm } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import '@xterm/xterm/css/xterm.css'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  createTerminalSession,
+  fetchSettings,
+  listWorkspaceRoots,
+  removeTerminalSession,
+  type TerminalSession,
+} from '../api'
 import BottomPanel from './BottomPanel'
+import ServerTerminal from './ServerTerminal'
+
+export interface TerminalLaunch {
+  cwd?: string
+  command?: string
+  title?: string
+}
 
 interface Props {
   mode: 'closed' | 'docked' | 'fullscreen'
   onClose: () => void
   onToggleFullscreen: () => void
-  pendingCommand?: string | null
+  pendingLaunch?: TerminalLaunch | null
   onCommandConsumed?: () => void
 }
 
-const eAPI = () => (window as any).electronAPI
+function basename(filePath: string) {
+  return filePath.split('/').filter(Boolean).pop() || filePath
+}
 
-export default function Terminal({ mode, onClose, onToggleFullscreen, pendingCommand, onCommandConsumed }: Props) {
+function normalizeCommand(command: string | undefined) {
+  const trimmed = command?.trim()
+  return trimmed || undefined
+}
+
+async function terminalDefaults() {
+  const settings = await fetchSettings().catch(() => ({} as Record<string, string>))
+  if (settings.terminalCwd?.trim()) {
+    return { cwd: settings.terminalCwd.trim(), autoRun: normalizeCommand(settings.terminalAutoRun) }
+  }
+  const roots = await listWorkspaceRoots().catch(() => [])
+  return {
+    cwd: roots.find(root => root.exists && root.isDirectory)?.path,
+    autoRun: normalizeCommand(settings.terminalAutoRun),
+  }
+}
+
+export default function Terminal({ mode, onClose, onToggleFullscreen, pendingLaunch, onCommandConsumed }: Props) {
   const open = mode !== 'closed'
-  const containerRef = useRef<HTMLDivElement>(null)
-  const termRef = useRef<XTerm | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
-  const readyRef = useRef(false)
-  const xtermInitRef = useRef(false)
-  const outputCleanupRef = useRef<(() => void) | null>(null)
-  const exitCleanupRef = useRef<(() => void) | null>(null)
+  const [session, setSession] = useState<TerminalSession | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [reconnectKey, setReconnectKey] = useState(0)
+  const sessionRef = useRef<TerminalSession | null>(null)
+  const launchTokenRef = useRef(0)
 
-  const connect = useCallback(async () => {
-    // Clean up previous output listener if any
-    outputCleanupRef.current?.()
-    exitCleanupRef.current?.()
-    readyRef.current = false
-    // Reset terminal display state — clears alternate screen, raw mode, and any other
-    // settings left behind by programs (e.g. Claude Code) that exited uncleanly via Ctrl+C.
-    termRef.current?.reset()
+  const cleanupSession = useCallback(async (target: TerminalSession | null) => {
+    if (!target) return
+    try { await removeTerminalSession(target.id) } catch {}
+  }, [])
 
-    const cols = termRef.current?.cols ?? 80
-    const rows = termRef.current?.rows ?? 24
+  useEffect(() => {
+    sessionRef.current = session
+  }, [session])
 
-    outputCleanupRef.current = eAPI().onTerminalOutput((data: string) => {
-      termRef.current?.write(data)
-    })
+  useEffect(() => {
+    if (open) return
+    launchTokenRef.current++
+    const current = sessionRef.current
+    sessionRef.current = null
+    setSession(null)
+    setError(null)
+    setLoading(false)
+    cleanupSession(current)
+  }, [cleanupSession, open])
 
-    exitCleanupRef.current = eAPI().onTerminalExit(() => {
-      readyRef.current = false
-      termRef.current?.write('\r\n\x1b[33mProcess exited. Reopen terminal to start a new session.\x1b[0m\r\n')
-    })
+  useEffect(() => {
+    if (!open) return
+    if (!pendingLaunch && sessionRef.current) return
 
-    try {
-      await eAPI().terminalStart(cols, rows)
-      readyRef.current = true
-    } catch (err: any) {
-      termRef.current?.write('\r\n\x1b[31mFailed to start terminal: ' + (err?.message ?? err) + '\x1b[0m\r\n')
-      return
-    }
+    const token = ++launchTokenRef.current
+    const previous = sessionRef.current
+    sessionRef.current = null
+    setSession(null)
+    setError(null)
+    setLoading(true)
+    cleanupSession(previous)
 
-    try {
-      const settings = await fetchSettings()
-      const autoRun = settings.terminalAutoRun?.trim()
-      if (autoRun) {
-        setTimeout(() => { eAPI().terminalInput(autoRun + '\r') }, 300)
+    async function start() {
+      try {
+        const defaults = await terminalDefaults()
+        const cwd = pendingLaunch?.cwd?.trim() || defaults.cwd
+        const command = normalizeCommand(pendingLaunch?.command) || (!pendingLaunch ? defaults.autoRun : undefined)
+        const title = pendingLaunch?.title?.trim() || (command ? 'Command' : cwd ? basename(cwd) : 'Terminal')
+        const created = await createTerminalSession({ cwd, title, command })
+        if (launchTokenRef.current !== token) {
+          cleanupSession(created)
+          return
+        }
+        sessionRef.current = created
+        setSession(created)
+        setReconnectKey(key => key + 1)
+        if (command) onCommandConsumed?.()
+      } catch (err: any) {
+        if (launchTokenRef.current === token) {
+          setError(err?.message ?? String(err))
+          onCommandConsumed?.()
+        }
+      } finally {
+        if (launchTokenRef.current === token) setLoading(false)
       }
-    } catch {
-      // Terminal auto-run settings are optional.
     }
-  }, [])
 
-  // Initialize xterm DOM once
+    start()
+  }, [cleanupSession, onCommandConsumed, open, pendingLaunch])
+
   useEffect(() => {
-    if (xtermInitRef.current || !containerRef.current) return
-    xtermInitRef.current = true
-
-    const term = new XTerm({
-      theme: {
-        background: '#0d1117',
-        foreground: '#e2e8f0',
-        cursor: '#4f9cf9',
-        selectionBackground: '#4f9cf940',
-      },
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: 13,
-      lineHeight: 1.4,
-      cursorBlink: true,
-    })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(containerRef.current)
-    fit.fit()
-    termRef.current = term
-    fitRef.current = fit
-
-    term.onData(data => { eAPI().terminalInput(data) })
-    term.onResize(({ cols, rows }) => { eAPI().terminalResize(cols, rows) })
-
-    // Copy-on-select: whenever selection changes, write it to clipboard immediately.
-    // This sidesteps all Cmd+C / accelerator interception issues in Electron and matches
-    // the behavior in TerminalManagerView. Without this the local terminal never copies.
-    term.onSelectionChange(() => {
-      if (!term.hasSelection()) return
-      const sel = term.getSelection()
-      if (!sel) return
-      const api = eAPI()
-      if (api?.writeClipboard) api.writeClipboard(sel)
-    })
-
-    const resizeObserver = new ResizeObserver(() => fit.fit())
-    resizeObserver.observe(containerRef.current)
-    return () => { resizeObserver.disconnect() }
-  }, [])
-
-  // Connect/reconnect pty whenever terminal opens
-  useEffect(() => {
-    if (!open || !xtermInitRef.current) return
-    connect()
     return () => {
-      outputCleanupRef.current?.()
-      exitCleanupRef.current?.()
+      launchTokenRef.current++
+      const current = sessionRef.current
+      sessionRef.current = null
+      cleanupSession(current)
     }
-  }, [open, connect])
-
-  useEffect(() => {
-    if (open) {
-      setTimeout(() => { fitRef.current?.fit(); termRef.current?.focus() }, 250)
-    }
-  }, [open, mode])
-
-  // Fire a one-shot command when the terminal opens with a pending command.
-  // If the terminal is already running (readyRef = true), kill it and reconnect first
-  // so we don't inject the command into an active session (e.g. a running Claude).
-  // If the terminal just opened, connect() was already called by the open effect — just wait.
-  useEffect(() => {
-    if (!open || !pendingCommand) return
-    const send = () => { eAPI().terminalInput(pendingCommand); onCommandConsumed?.() }
-    if (readyRef.current) {
-      // Terminal already has an active session — restart it
-      readyRef.current = false
-      connect().then(() => {
-        const interval = setInterval(() => {
-          if (readyRef.current) { clearInterval(interval); setTimeout(send, 200) }
-        }, 100)
-      })
-    } else {
-      // Terminal is freshly opening — connect() from the open effect handles the pty
-      const interval = setInterval(() => {
-        if (readyRef.current) { clearInterval(interval); setTimeout(send, 200) }
-      }, 100)
-      return () => clearInterval(interval)
-    }
-  }, [open, pendingCommand])
+  }, [cleanupSession])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === '`' && e.ctrlKey) onClose() }
@@ -154,9 +128,15 @@ export default function Terminal({ mode, onClose, onToggleFullscreen, pendingCom
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
+  const emptyText = loading
+    ? 'Starting terminal...'
+    : error
+      ? `Terminal failed to start: ${error}`
+      : 'Starting terminal...'
+
   return (
     <BottomPanel
-      title="Terminal"
+      title={session?.title ?? 'Terminal'}
       open={mode !== 'closed'}
       fullscreen={mode === 'fullscreen'}
       onClose={onClose}
@@ -165,7 +145,7 @@ export default function Terminal({ mode, onClose, onToggleFullscreen, pendingCom
       zIndex={1200}
       inline
     >
-      <div ref={containerRef} id="terminal-container" style={{ flex: 1, minHeight: 0, padding: '4px 8px', overflow: 'hidden' }} />
+      <ServerTerminal session={session} reconnectKey={reconnectKey} emptyText={emptyText} />
     </BottomPanel>
   )
 }

@@ -18,7 +18,7 @@ interface Props {
   filePath: string
   onClose: () => void
   terminalOpen: boolean
-  onTerminalToggle: () => void
+  onTerminalToggle: (filePath: string) => void
   onChatWithDoc: (filePath: string) => void | Promise<void>
 }
 
@@ -316,7 +316,7 @@ export default function MdView({ filePath, onClose, terminalOpen, onTerminalTogg
 
         <button
           className="mdview-toolbar-btn"
-          onClick={onTerminalToggle}
+          onClick={() => onTerminalToggle(filePath)}
           title="Toggle terminal (Ctrl+`)"
           style={{ color: terminalOpen ? '#3b82f6' : undefined }}
         >
