@@ -144,12 +144,67 @@ function rewriteRootRelativeAttributes(html, base) {
     })
 }
 
+function boxWebRuntimeScript(base) {
+  return `<script>
+(() => {
+  const boxWebBase = ${JSON.stringify(base)};
+
+  function rewriteBoxWebUrl(value) {
+    if (typeof value !== 'string') return value;
+    try {
+      const url = new URL(value, document.baseURI || window.location.href);
+      if (url.origin !== window.location.origin) return value;
+      if (!url.pathname.startsWith('/api/')) return value;
+      if (url.pathname === boxWebBase || url.pathname.startsWith(boxWebBase + '/')) return value;
+      return boxWebBase + url.pathname + url.search + url.hash;
+    } catch {
+      return value;
+    }
+  }
+
+  function rewriteFetchInput(input) {
+    if (typeof Request !== 'undefined' && input instanceof Request) {
+      const rewritten = rewriteBoxWebUrl(input.url);
+      return rewritten === input.url ? input : new Request(rewritten, input);
+    }
+    return rewriteBoxWebUrl(input);
+  }
+
+  if (typeof window.fetch === 'function') {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => originalFetch(rewriteFetchInput(input), init);
+  }
+
+  if (typeof XMLHttpRequest !== 'undefined') {
+    const originalOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+      return originalOpen.call(this, method, rewriteBoxWebUrl(url), ...rest);
+    };
+  }
+
+  if (typeof EventSource !== 'undefined') {
+    const OriginalEventSource = EventSource;
+    window.EventSource = function(url, config) {
+      return new OriginalEventSource(rewriteBoxWebUrl(url), config);
+    };
+    window.EventSource.prototype = OriginalEventSource.prototype;
+  }
+
+  if (navigator.sendBeacon) {
+    const originalSendBeacon = navigator.sendBeacon.bind(navigator);
+    navigator.sendBeacon = (url, data) => originalSendBeacon(rewriteBoxWebUrl(url), data);
+  }
+})();
+</script>`
+}
+
 function rewriteHtml(html, ticket) {
   const base = proxyBase(ticket)
   const baseTag = `<base href="${base}/">`
+  const headExtras = `${baseTag}${boxWebRuntimeScript(base)}`
   const withBase = /<head(\s[^>]*)?>/i.test(html)
-    ? html.replace(/<head(\s[^>]*)?>/i, match => `${match}${baseTag}`)
-    : `${baseTag}${html}`
+    ? html.replace(/<head(\s[^>]*)?>/i, match => `${match}${headExtras}`)
+    : `${headExtras}${html}`
   return rewriteRootRelativeAttributes(withBase, base)
 }
 

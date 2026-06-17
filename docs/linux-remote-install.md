@@ -188,7 +188,8 @@ The server side is deliberately narrow in V1:
 - Qalatra Server proxies only `http://127.0.0.1:8080` on the active remote box.
 - The desktop client creates a short-lived Box Web session through the existing bearer-token API connection, then loads the iframe through `/api/box-web/proxy/<ticket>/...`.
 - The permanent Qalatra token is not sent to the embedded page.
-- Root-relative HTML links/assets and CSS `url(/...)` references are rewritten for the proxy. JavaScript that hard-codes absolute paths such as `fetch('/api/...')` may need relative URLs or a later proxy rewrite pass.
+- Root-relative HTML links/assets and CSS `url(/...)` references are rewritten for the proxy.
+- Qalatra 1.9.9+ also rewrites common runtime API calls from inside the iframe, including `fetch('/api/...')`, `XMLHttpRequest`, `EventSource`, and `navigator.sendBeacon`, so dynamic apps can use the same root-absolute `/api` paths they use behind nginx.
 
 Enable it on the desktop:
 

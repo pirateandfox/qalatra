@@ -1,5 +1,10 @@
 # Qalatra — Evolution Notes
 
+## 1.9.9 — Box Web runtime API routing (2026-06-17)
+
+- Fixed dynamic Box Web apps whose JavaScript calls root-absolute API paths such as `fetch('/api/inbox')`. The iframe now injects a small runtime shim that rewrites `fetch`, `XMLHttpRequest`, `EventSource`, and `navigator.sendBeacon` calls back through the ticketed `/api/box-web/proxy/<ticket>/...` path.
+- The fix keeps Qalatra's own `/api/*` routes protected: bare `/api/*` requests still require bearer auth unless they originate inside the Box Web page and are rewritten to the session-scoped proxy path.
+
 ## 1.9.8 — Box Web App private proxy (2026-06-17)
 
 - Added V1 Box Web Apps for remote-first workflows: each saved remote instance can opt into one sidebar-pinned web surface, with a configurable label that defaults to "Tools".
