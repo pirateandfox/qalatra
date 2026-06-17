@@ -1,7 +1,7 @@
 import type { ThemeMode } from '../lib/theme'
 import './Sidebar.css'
 
-export type NavSection = 'priority' | 'daily' | 'code' | 'terminals' | 'files' | 'reading' | 'project' | 'backlog' | 'habits' | 'heartbeats' | 'settings'
+export type NavSection = 'priority' | 'daily' | 'code' | 'terminals' | 'files' | 'boxWeb' | 'reading' | 'project' | 'backlog' | 'habits' | 'heartbeats' | 'settings'
 
 const THEME_ICONS: Record<ThemeMode, string> = { system: '◑', light: '☀', dark: '☾' }
 const THEME_CYCLE: ThemeMode[] = ['system', 'light', 'dark']
@@ -22,6 +22,7 @@ interface Props {
   nav: NavSection
   onNavChange: (n: NavSection) => void
   activeAgentCount: number
+  boxWebItem: { label: string } | null
   onNewTask: () => void
   dailyNoteActive: boolean
   onDailyNoteOpen: () => void
@@ -31,6 +32,7 @@ interface Props {
 
 export default function Sidebar({
   nav, onNavChange, activeAgentCount,
+  boxWebItem,
   onNewTask, dailyNoteActive, onDailyNoteOpen,
   themeMode, onThemeModeChange,
 }: Props) {
@@ -39,11 +41,19 @@ export default function Sidebar({
     onThemeModeChange(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length])
   }
 
+  const navItems = boxWebItem
+    ? [
+        ...NAV_ITEMS.slice(0, 4),
+        { key: 'boxWeb' as NavSection, icon: '▣', label: boxWebItem.label },
+        ...NAV_ITEMS.slice(4),
+      ]
+    : NAV_ITEMS
+
   return (
     <aside className="sidebar">
       <div className="sidebar-drag" />
       <nav className="sidebar-nav">
-        {NAV_ITEMS.map(item => (
+        {navItems.map(item => (
           <button
             key={item.key}
             className={`sidebar-item${nav === item.key ? ' active' : ''}`}

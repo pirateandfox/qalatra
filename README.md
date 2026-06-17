@@ -126,6 +126,8 @@ curl -fsSL https://raw.githubusercontent.com/pirateandfox/qalatra/develop/script
 
 See [Linux Headless Server and Remote Access](docs/linux-remote-install.md) for Cloudflare setup, smoke tests, and MCP configuration.
 
+Remote boxes can also expose one private tools page inside the desktop sidebar. Serve a dashboard or root `www` page on `127.0.0.1:8080` on the box, then enable it from Settings -> Instances -> Box Web Apps. A public tools hostname remains optional for access outside Qalatra.
+
 ---
 
 ## Run from source

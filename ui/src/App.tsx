@@ -1,5 +1,9 @@
 import { lazy, Suspense, useState, useEffect, useCallback, useMemo } from 'react'
-import { fetchTasks, fetchSettings, updateTask, api, type TaskData } from './api'
+import {
+  fetchTasks, fetchSettings, updateTask, api,
+  getActiveInstance, onInstanceConfigChange,
+  type TaskData,
+} from './api'
 import { today as todayStr } from './lib/constants'
 import { ContextsProvider } from './lib/ContextsProvider'
 import { ThemeProvider, useTheme } from './lib/ThemeProvider'
@@ -25,6 +29,7 @@ import './index.css'
 const DailyNote = lazy(() => import('./components/DailyNote'))
 const TerminalManagerView = lazy(() => import('./components/TerminalManagerView'))
 const WorkspaceFilesView = lazy(() => import('./components/WorkspaceFilesView'))
+const BoxWebView = lazy(() => import('./components/BoxWebView'))
 
 function dirname(filePath: string) {
   const idx = filePath.lastIndexOf('/')
@@ -37,6 +42,12 @@ function basename(filePath: string) {
 
 function shellQuote(value: string) {
   return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function readBoxWebItem() {
+  const active = getActiveInstance()
+  if (!active?.boxWebEnabled) return null
+  return { label: active.boxWebLabel?.trim() || 'Tools' }
 }
 
 export default function App() {
@@ -67,6 +78,7 @@ function AppInner() {
   const [loading, setLoading]       = useState(false)
   const [apiError, setApiError]     = useState<string | null>(null)
   const [updateStatus, setUpdateStatus] = useState<{ status: string; version?: string; percent?: number; message?: string } | null>(null)
+  const [boxWebItem, setBoxWebItem] = useState<{ label: string } | null>(() => readBoxWebItem())
 
   const toggleTerminal = useCallback((launch: TerminalLaunch | null = null) => {
     setTerminalMode(current => {
@@ -115,6 +127,15 @@ function AppInner() {
   }, [])
 
   useEffect(() => { load(date) }, [date, load])
+
+  useEffect(() => onInstanceConfigChange(() => setBoxWebItem(readBoxWebItem())), [])
+
+  useEffect(() => {
+    if (nav === 'boxWeb' && !boxWebItem) {
+      setNav('priority')
+      setSelectedId(null)
+    }
+  }, [nav, boxWebItem])
 
   // Background poll — 30s normally, 5s while agent jobs are running
   useEffect(() => {
@@ -272,6 +293,7 @@ function AppInner() {
         nav={nav}
         onNavChange={n => { setNav(n); setSelectedId(null) }}
         activeAgentCount={activeAgentCount}
+        boxWebItem={boxWebItem}
         onNewTask={() => setCreateOpen(true)}
         dailyNoteActive={nav === 'daily'}
         onDailyNoteOpen={() => { setNav('daily'); setSelectedId(null) }}
@@ -292,7 +314,7 @@ function AppInner() {
         />
 
         <div className={`layout ${selectedId ? 'panel-open' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div style={{ flex: 1, overflowY: nav === 'settings' || nav === 'daily' || nav === 'terminals' || nav === 'files' ? 'hidden' : 'auto', minWidth: 0 }}>
+          <div style={{ flex: 1, overflowY: nav === 'settings' || nav === 'daily' || nav === 'terminals' || nav === 'files' || nav === 'boxWeb' ? 'hidden' : 'auto', minWidth: 0 }}>
             {nav === 'settings' ? (
               <SettingsView />
             ) : nav === 'daily' ? (
@@ -308,6 +330,10 @@ function AppInner() {
             ) : nav === 'files' ? (
               <Suspense fallback={<div style={{ color: 'var(--muted)', padding: '40px', textAlign: 'center' }}>Loading files...</div>}>
                 <WorkspaceFilesView />
+              </Suspense>
+            ) : nav === 'boxWeb' ? (
+              <Suspense fallback={<div style={{ color: 'var(--muted)', padding: '40px', textAlign: 'center' }}>Loading Box Web App...</div>}>
+                <BoxWebView label={boxWebItem?.label || 'Tools'} />
               </Suspense>
             ) : nav === 'habits' ? (
               <HabitsView onMutate={() => load(date, true)} />

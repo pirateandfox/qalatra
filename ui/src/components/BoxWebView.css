@@ -1,0 +1,119 @@
+.box-web-view {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+}
+
+.box-web-toolbar {
+  height: 44px;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.box-web-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.box-web-icon {
+  width: 18px;
+  text-align: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.box-web-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+}
+
+.box-web-meta code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: Menlo, Monaco, "Courier New", monospace;
+}
+
+.box-web-button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.box-web-button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.box-web-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.box-web-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: #0f1117;
+}
+
+.box-web-frame {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+  background: #fff;
+}
+
+.box-web-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.box-web-state strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.box-web-state code {
+  color: var(--text);
+  font-family: Menlo, Monaco, "Courier New", monospace;
+}
+
+.box-web-state-error span {
+  max-width: 640px;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 12px;
+}

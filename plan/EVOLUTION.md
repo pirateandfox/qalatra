@@ -1,5 +1,12 @@
 # Qalatra — Evolution Notes
 
+## 1.9.8 — Box Web App private proxy (2026-06-17)
+
+- Added V1 Box Web Apps for remote-first workflows: each saved remote instance can opt into one sidebar-pinned web surface, with a configurable label that defaults to "Tools".
+- Added Settings -> Instances -> Box Web Apps controls. The sidebar item appears only when the active remote instance has Box Web enabled, keeping local and unused boxes uncluttered.
+- Added an authenticated Qalatra Server proxy for the box-local web app at `http://127.0.0.1:8080`. The desktop client creates a short-lived session ticket using the existing bearer token, then embeds `/api/box-web/proxy/<ticket>/...` without exposing the permanent token to the iframe.
+- The proxy is intentionally not a general URL proxy: V1 only forwards to loopback port 8080 on the active Qalatra server. It rewrites root-relative HTML links/assets and CSS `url(/...)` references so simple static dashboards served from a box `www` root work inside Qalatra without Cloudflare Access.
+
 ## 1.9.7 — Instance startup default and server-backed slide-up terminal (2026-06-15)
 
 - Added an explicit Settings -> Instances -> Startup Default selector. The previous persisted active-instance value migrates into this default once, so users who already defaulted to a remote box keep that behavior.

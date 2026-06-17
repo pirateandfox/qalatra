@@ -179,6 +179,55 @@ Token: contents of ~/.local/share/qalatra/db/admin-token.txt from the Linux serv
 
 Prefer creating a dedicated expiring token for each client in Settings -> Instances -> Access Tokens. Treat the bootstrap token like an admin password and revoke unused tokens promptly.
 
+## Box Web Apps
+
+Qalatra 1.9.8+ can embed one private web app per remote box in the desktop sidebar. This is intended for box-local tools such as a small dashboard, email console, or root page that links to the other tools running on that same machine.
+
+The server side is deliberately narrow in V1:
+
+- Qalatra Server proxies only `http://127.0.0.1:8080` on the active remote box.
+- The desktop client creates a short-lived Box Web session through the existing bearer-token API connection, then loads the iframe through `/api/box-web/proxy/<ticket>/...`.
+- The permanent Qalatra token is not sent to the embedded page.
+- Root-relative HTML links/assets and CSS `url(/...)` references are rewritten for the proxy. JavaScript that hard-codes absolute paths such as `fetch('/api/...')` may need relative URLs or a later proxy rewrite pass.
+
+Enable it on the desktop:
+
+```text
+Settings -> Instances -> Box Web Apps
+
+Check "Show for <box>"
+Label: Tools
+```
+
+Serve the box tools app on loopback port 8080. For a static `www` root, any normal local-only static server is fine:
+
+```bash
+cd ~/www
+python3 -m http.server 8080 --bind 127.0.0.1
+```
+
+For a persistent service, point nginx, Caddy, or your app server at `127.0.0.1:8080`. Do not bind this private surface to `0.0.0.0` unless you also intend to expose it outside the box.
+
+Smoke test from the Linux box:
+
+```bash
+curl -fsS http://127.0.0.1:8080/ >/dev/null
+
+TOKEN=$(cat ~/.local/share/qalatra/db/admin-token.txt)
+
+curl -fsS \
+  -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:3456/api/box-web/status
+```
+
+Expected response when the tools app is reachable:
+
+```json
+{"ok":true,"available":true,"target":"http://127.0.0.1:8080","statusCode":200}
+```
+
+A public Cloudflare hostname for the same tools app, such as `tools-shi.qalatra.com`, remains optional. It is useful when you are away from a machine with Qalatra Desktop. It is not required for the in-app Box Web sidebar, which uses the existing authenticated Qalatra API connection.
+
 ## MCP Setup
 
 The Linux service starts MCP locally at `http://127.0.0.1:3457/mcp`.

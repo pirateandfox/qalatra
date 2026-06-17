@@ -31,12 +31,51 @@ export {
   testInstanceConnection,
   tokenIsExpired,
   uninstallLocalServerService,
+  updateInstance,
   upsertInstance,
   type AccessToken,
   type LocalServerServiceStatus,
   type LocalServerStatus,
   type QalatraInstance,
 } from './apiRuntime'
+
+export interface BoxWebSession {
+  url: string
+  path: string
+  expiresAt: string
+  target: string
+}
+
+export interface BoxWebStatus {
+  ok: boolean
+  available: boolean
+  target: string
+  statusCode?: number | null
+  error?: string
+}
+
+export async function createBoxWebSession(): Promise<BoxWebSession> {
+  const active = await currentServerInstance()
+  const data = await httpJson(active, '/api/box-web/session', { method: 'POST' })
+  return {
+    url: `${active.url}${data.session.path}`,
+    path: data.session.path,
+    expiresAt: data.session.expiresAt,
+    target: data.session.target,
+  }
+}
+
+export async function getBoxWebStatus(): Promise<BoxWebStatus> {
+  const active = await currentServerInstance()
+  const data = await httpJson(active, '/api/box-web/status', { method: 'GET' })
+  return {
+    ok: !!data.ok,
+    available: !!data.available,
+    target: data.target,
+    statusCode: data.statusCode,
+    error: data.error,
+  }
+}
 
 export async function readTextFile(path: string): Promise<string> {
   const active = await currentServerInstance()

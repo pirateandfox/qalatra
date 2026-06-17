@@ -15,6 +15,7 @@ import { applyCors, parseBody, parseRawBody, sendBinary, sendJson, streamFile } 
 import { handleV1 } from './v1.js'
 import { startBackgroundWorkers } from './workers.js'
 import { createTerminalManager } from './terminal-sessions.js'
+import { createBoxWebProxy } from './box-web.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
@@ -68,6 +69,7 @@ async function main() {
 
   const ctx = { dbCall, loadSettings, saveSettings, dataDir: DATA_DIR, notify: publishEvent }
   const terminalManager = createTerminalManager({ dataDir: DATA_DIR, loadSettings })
+  const boxWebProxy = createBoxWebProxy()
   if (START_WORKERS) {
     startBackgroundWorkers(ctx)
     backupTimer = setInterval(() => {
@@ -97,6 +99,10 @@ async function main() {
       return
     }
 
+    if (url.pathname.startsWith('/api/box-web/proxy/')) {
+      if (boxWebProxy.handleProxy(req, res, url)) return
+    }
+
     const user = authenticate(authDb, req)
     if (!user) {
       sendJson(res, 401, { error: 'Unauthorized' })
@@ -111,6 +117,23 @@ async function main() {
 
       if (url.pathname.startsWith('/api/') && !requireScope(user, 'full_access')) {
         sendJson(res, 403, { error: 'Forbidden' })
+        return
+      }
+
+      if (url.pathname === '/api/box-web/session' && req.method === 'POST') {
+        sendJson(res, 200, { ok: true, session: boxWebProxy.createSession() })
+        return
+      }
+
+      if (url.pathname === '/api/box-web/status' && req.method === 'GET') {
+        const status = await boxWebProxy.checkStatus()
+        sendJson(res, 200, {
+          ok: true,
+          available: status.ok,
+          target: status.target,
+          statusCode: status.statusCode,
+          error: status.error,
+        })
         return
       }
 
