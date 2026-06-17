@@ -126,7 +126,7 @@ Wants=network-online.target
 Type=oneshot
 Environment=QALATRA_ROOT=$(systemd_literal "$ROOT_DIR")
 Environment=QALATRA_NODE_BIN=$(systemd_literal "$NODE_BIN")
-ExecStart=$(systemd_literal "$ROOT_DIR/scripts/auto-update.sh")
+ExecStart=/usr/bin/bash $(systemd_literal "$ROOT_DIR/scripts/auto-update.sh")
 StandardOutput=journal
 StandardError=journal
 UPDATER_SVC
