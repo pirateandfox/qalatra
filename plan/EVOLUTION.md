@@ -1,5 +1,12 @@
 # Qalatra — Evolution Notes
 
+## 1.9.10 — Agent worker diagnostics and template quoting (2026-06-18)
+
+- Fixed templated agent command substitution for shell-sensitive task text. `{title}` and `{description}` are now shell-quoted as full arguments, so apostrophes and spaces in task titles/descriptions no longer break commands like `flightdesk register --title '{title}' --prompt '{description}'`.
+- Failed agent jobs now append sanitized launch diagnostics: cwd, worker user/home/shell, PATH, Claude config directory presence, `~/.claude.json` presence, selected Claude/FlightDesk/script binary paths, Claude version, and whether Claude/Anthropic marker env vars are present. Token values are not printed.
+- Agent launches now derive the shell from `SHELL` or the OS user shell before falling back to `/bin/zsh` or `/bin/bash`, which makes Linux user services less dependent on systemd exporting `SHELL`.
+- Added optional `agentEnv` server setting and per-agent `agent.config.env` overrides. Values support `~`, `$VAR`, and `${VAR}` expansion, allowing service-run workers to point Claude at the intended `ANTHROPIC_CONFIG_DIR` without editing the systemd unit.
+
 ## 1.9.9 — Box Web runtime API routing (2026-06-17)
 
 - Fixed dynamic Box Web apps whose JavaScript calls root-absolute API paths such as `fetch('/api/inbox')`. The iframe now injects a small runtime shim that rewrites `fetch`, `XMLHttpRequest`, `EventSource`, and `navigator.sendBeacon` calls back through the ticketed `/api/box-web/proxy/<ticket>/...` path.

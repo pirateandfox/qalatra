@@ -55,6 +55,21 @@ Existing configs still work:
 }
 ```
 
+Agents can also define process environment overrides for Qalatra-launched jobs:
+
+```json
+{
+  "name": "Remote Coder",
+  "description": "Starts a Claude remote session and registers it externally.",
+  "command": "flightdesk register --title '{title}' --prompt '{description}'",
+  "env": {
+    "ANTHROPIC_CONFIG_DIR": "$HOME/.claude"
+  }
+}
+```
+
+Values support `~`, `$VAR`, and `${VAR}` expansion against the worker process environment. Set a value to `null` to unset it. The server settings file may also contain a top-level `agentEnv` object for defaults shared by every agent; `agent.config.env` wins for a specific agent.
+
 Qalatra infers a default capability from that:
 
 - `kind = "agent"`
