@@ -32,6 +32,18 @@
   border-top: none;
 }
 
+/* When a full-screen overlay (markdown/email preview) covers the app, the
+   inline+docked terminal can't stay in flow — it would render behind the
+   overlay. Pin it to the bottom so it floats above, filling the overlay's
+   reserved padding. */
+.bottom-panel.inline.float-overlay {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: auto;
+}
+
 .bottom-panel-toolbar {
   background: var(--surface);
   border-bottom: 1px solid var(--border);

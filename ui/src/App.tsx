@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useCallback, useMemo } from 'react'
+import { lazy, Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   fetchTasks, fetchSettings, updateTask, api,
   getActiveInstance, onInstanceConfigChange,
@@ -93,6 +93,25 @@ function AppInner() {
   const openTerminal = useCallback((launch: TerminalLaunch | null = null) => {
     setTerminalLaunch(launch)
     setTerminalMode(current => current === 'closed' ? 'docked' : current)
+  }, [])
+
+  // A full-screen doc overlay (markdown/email preview) can launch the shared
+  // terminal. When the overlay closes we close that terminal too — but only if
+  // the overlay was what opened it, so a terminal you already had running in the
+  // main view survives. We capture "was a terminal open?" at overlay-open time.
+  const overlayOpen = !!(mdPath || previewPath)
+  const terminalOpenAtOverlayOpenRef = useRef(false)
+  const prevOverlayOpenRef = useRef(false)
+  useEffect(() => {
+    if (overlayOpen && !prevOverlayOpenRef.current) {
+      terminalOpenAtOverlayOpenRef.current = terminalMode !== 'closed'
+    }
+    prevOverlayOpenRef.current = overlayOpen
+  }, [overlayOpen, terminalMode])
+
+  const closeOverlay = useCallback((clear: () => void) => {
+    clear()
+    if (!terminalOpenAtOverlayOpenRef.current) setTerminalMode('closed')
   }, [])
 
   function terminalLaunchForFile(filePath: string): TerminalLaunch {
@@ -417,6 +436,7 @@ function AppInner() {
           onToggleFullscreen={() => setTerminalMode(m => m === 'fullscreen' ? 'docked' : 'fullscreen')}
           pendingLaunch={terminalLaunch}
           onCommandConsumed={() => setTerminalLaunch(null)}
+          floatOverlay={!!(mdPath || previewPath)}
         />
       </div>
 
@@ -429,7 +449,7 @@ function AppInner() {
       {previewPath && (
         <EmailPreview
           filePath={previewPath}
-          onClose={() => setPreviewPath(null)}
+          onClose={() => closeOverlay(() => setPreviewPath(null))}
           terminalOpen={terminalMode !== 'closed'}
           onTerminalToggle={(fp) => toggleTerminal(terminalLaunchForFile(fp))}
           onChatWithDoc={chatWithDoc}
@@ -438,7 +458,7 @@ function AppInner() {
       {mdPath && (
         <MdView
           filePath={mdPath}
-          onClose={() => setMdPath(null)}
+          onClose={() => closeOverlay(() => setMdPath(null))}
           terminalOpen={terminalMode !== 'closed'}
           onTerminalToggle={(fp) => toggleTerminal(terminalLaunchForFile(fp))}
           onChatWithDoc={chatWithDoc}

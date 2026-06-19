@@ -21,6 +21,9 @@ interface Props {
   onToggleFullscreen: () => void
   pendingLaunch?: TerminalLaunch | null
   onCommandConsumed?: () => void
+  /** When a full-screen overlay (markdown/email preview) is open, the docked
+   *  terminal must float above it instead of sitting in the app's flow. */
+  floatOverlay?: boolean
 }
 
 function basename(filePath: string) {
@@ -44,7 +47,7 @@ async function terminalDefaults() {
   }
 }
 
-export default function Terminal({ mode, onClose, onToggleFullscreen, pendingLaunch, onCommandConsumed }: Props) {
+export default function Terminal({ mode, onClose, onToggleFullscreen, pendingLaunch, onCommandConsumed, floatOverlay }: Props) {
   const open = mode !== 'closed'
   const [session, setSession] = useState<TerminalSession | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -144,6 +147,7 @@ export default function Terminal({ mode, onClose, onToggleFullscreen, pendingLau
       dockedHeight={300}
       zIndex={1200}
       inline
+      floatOverlay={floatOverlay}
     >
       <ServerTerminal session={session} reconnectKey={reconnectKey} emptyText={emptyText} />
     </BottomPanel>

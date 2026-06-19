@@ -133,6 +133,10 @@
   overflow-y: auto;
   overflow-x: auto;
   height: 100%;
+  /* The global `.sidebar` (Sidebar.css) sets -webkit-app-region: drag for the
+     app's nav. Without this reset that drag region leaks in here and makes every
+     control in the style panel non-interactive in Electron. */
+  -webkit-app-region: no-drag;
 }
 
 .mdview-overlay .sidebar-section {
