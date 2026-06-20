@@ -1,5 +1,27 @@
 # Qalatra — Evolution Notes
 
+## Unreleased — Shared core extraction + Expo mobile groundwork (2026-06-20)
+
+- Introduced npm workspaces and a new `@qalatra/shared` package: the
+  platform-agnostic core (types, instance/backend management, HTTP runtime, full
+  API client, pure date/platform-detect helpers) shared between the Electron
+  desktop UI and a future Expo app. No React/DOM/Electron/Node deps — host
+  specifics are injected through a small platform adapter (synchronous storage KV
+  + capabilities + optional local-server resolver) and a tiny emitter replaces
+  the window-event change notifications.
+- Switched the desktop UI onto `@qalatra/shared` with no behavior change. The old
+  `apiRuntime.ts` split into the shared `runtime.ts` plus `ui/src/localServer.ts`
+  (Electron-only server lifecycle + the desktop attachment opener); `platform.web.ts`
+  installs a localStorage/sessionStorage pass-through adapter. `ui/` resolves the
+  package as source via a Vite alias + tsconfig path, so the install/CI/release
+  pipeline is unchanged. Verified by `npm run build`, shared typecheck, and
+  check-imports. Runtime parity still to be exercised in the running app.
+- Scaffolded the Expo app under `mobile/` (native AsyncStorage adapter with a
+  hydrate-once cache, remote-only — no local server; adaptive tablet/phone shell;
+  onboarding + today screens). Not yet installed or run on a device. `mobile/` is
+  deliberately not a workspace so the desktop `npm ci` never pulls Expo/RN.
+- Plan: `plan/EXPO_MOBILE_ROADMAP.md`.
+
 ## 1.9.10 — Agent worker diagnostics and template quoting (2026-06-18)
 
 - Fixed templated agent command substitution for shell-sensitive task text. `{title}` and `{description}` are now shell-quoted as full arguments, so apostrophes and spaces in task titles/descriptions no longer break commands like `flightdesk register --title '{title}' --prompt '{description}'`.

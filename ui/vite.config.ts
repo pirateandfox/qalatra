@@ -1,9 +1,18 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
   base: process.env.NODE_ENV === 'production' ? './' : '/',
+  resolve: {
+    alias: {
+      // Consume the shared core as source (bundled at build time). No npm link /
+      // workspace install needed, so the desktop install + release pipeline is
+      // unchanged.
+      '@qalatra/shared': fileURLToPath(new URL('../packages/shared/src/index.ts', import.meta.url)),
+    },
+  },
   server: {
     port: 5173,
     proxy: {

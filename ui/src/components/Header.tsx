@@ -7,7 +7,7 @@ import {
   onInstanceConfigChange,
   setActiveInstance,
   type QalatraInstance,
-} from '../apiRuntime'
+} from '../api'
 import type { NavSection } from './Sidebar'
 import './Header.css'
 

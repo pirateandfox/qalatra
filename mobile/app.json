@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Qalatra",
+    "slug": "qalatra",
+    "version": "0.1.0",
+    "orientation": "default",
+    "scheme": "qalatra",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.qalatra.app"
+    },
+    "android": {
+      "package": "com.qalatra.app"
+    }
+  }
+}

@@ -1,21 +1,44 @@
+// Runtime: instance/backend management, HTTP primitives, access tokens,
+// connection testing, and the server-event stream.
+//
+// This is the platform-agnostic core that the desktop UI's apiRuntime.ts used to
+// own. Storage goes through the injected platform adapter (persistent/session KV)
+// instead of localStorage/sessionStorage, change notification uses an emitter
+// instead of window events, and the local-server fallback is delegated to
+// platform.resolveLocalInstance (Electron-only; absent on mobile).
+
+import type { AccessToken, QalatraInstance, ServerEvent } from './types'
+import { getPlatform } from './platform'
+import { createEmitter } from './emitter'
+
 const INSTANCES_KEY = 'qalatra.instances'
 const ACTIVE_INSTANCE_KEY = 'qalatra.activeInstanceId'
 const DEFAULT_INSTANCE_KEY = 'qalatra.defaultInstanceId'
 const HIDE_LOCAL_INSTANCE_KEY = 'qalatra.hideLocalInstance'
-const INSTANCE_CONFIG_EVENT = 'qalatra.instanceConfigChanged'
 export const LOCAL_INSTANCE_ID = 'local-server'
 
-interface ElectronBridge {
-  invoke(channel: string, ...args: unknown[]): Promise<unknown>
+/** Keys each store owns — used to warm the native storage caches at startup. */
+const PERSISTENT_KEYS = [INSTANCES_KEY, DEFAULT_INSTANCE_KEY, HIDE_LOCAL_INSTANCE_KEY, ACTIVE_INSTANCE_KEY] as const
+const SESSION_KEYS = [ACTIVE_INSTANCE_KEY] as const
+
+const instanceConfigEmitter = createEmitter()
+
+function persistent() {
+  return getPlatform().persistent
 }
 
-export interface QalatraInstance {
-  id: string
-  name: string
-  url: string
-  token: string
-  boxWebEnabled?: boolean
-  boxWebLabel?: string
+function session() {
+  return getPlatform().session
+}
+
+/**
+ * Warm the platform storage caches. No-op on web (synchronous storage); mobile
+ * must `await` this once at startup before reading instance state synchronously.
+ */
+export async function hydrateInstances(): Promise<void> {
+  const { persistent: p, session: s } = getPlatform()
+  await p.hydrate?.(PERSISTENT_KEYS)
+  await s.hydrate?.(SESSION_KEYS)
 }
 
 function errorMessage(error: unknown) {
@@ -31,12 +54,11 @@ function normalizeUrl(url: string) {
 }
 
 function notifyInstanceConfigChanged() {
-  window.dispatchEvent(new Event(INSTANCE_CONFIG_EVENT))
+  instanceConfigEmitter.emit()
 }
 
 export function onInstanceConfigChange(listener: () => void) {
-  window.addEventListener(INSTANCE_CONFIG_EVENT, listener)
-  return () => window.removeEventListener(INSTANCE_CONFIG_EVENT, listener)
+  return instanceConfigEmitter.on(listener)
 }
 
 let defaultInstanceMigrated = false
@@ -45,11 +67,12 @@ function migrateDefaultInstance() {
   if (defaultInstanceMigrated) return
   defaultInstanceMigrated = true
 
-  const legacyActive = localStorage.getItem(ACTIVE_INSTANCE_KEY)
-  if (localStorage.getItem(DEFAULT_INSTANCE_KEY) === null && legacyActive !== null) {
-    localStorage.setItem(DEFAULT_INSTANCE_KEY, legacyActive || LOCAL_INSTANCE_ID)
+  const p = persistent()
+  const legacyActive = p.getItem(ACTIVE_INSTANCE_KEY)
+  if (p.getItem(DEFAULT_INSTANCE_KEY) === null && legacyActive !== null) {
+    p.setItem(DEFAULT_INSTANCE_KEY, legacyActive || LOCAL_INSTANCE_ID)
   }
-  localStorage.removeItem(ACTIVE_INSTANCE_KEY)
+  p.removeItem(ACTIVE_INSTANCE_KEY)
 }
 
 function storedInstanceValue(id: string | null) {
@@ -65,7 +88,7 @@ function resolveStoredInstanceId(value: string | null, onInvalid?: () => void): 
 
 export function getInstances(): QalatraInstance[] {
   try {
-    const raw = localStorage.getItem(INSTANCES_KEY)
+    const raw = persistent().getItem(INSTANCES_KEY)
     const parsed = raw ? JSON.parse(raw) : []
     return Array.isArray(parsed) ? parsed : []
   } catch {
@@ -74,15 +97,15 @@ export function getInstances(): QalatraInstance[] {
 }
 
 export function saveInstances(instances: QalatraInstance[]) {
-  localStorage.setItem(INSTANCES_KEY, JSON.stringify(instances))
+  persistent().setItem(INSTANCES_KEY, JSON.stringify(instances))
   notifyInstanceConfigChanged()
 }
 
 export function getActiveInstanceId(): string | null {
   migrateDefaultInstance()
-  const sessionActive = sessionStorage.getItem(ACTIVE_INSTANCE_KEY)
+  const sessionActive = session().getItem(ACTIVE_INSTANCE_KEY)
   if (sessionActive !== null) {
-    const activeId = resolveStoredInstanceId(sessionActive, () => sessionStorage.removeItem(ACTIVE_INSTANCE_KEY))
+    const activeId = resolveStoredInstanceId(sessionActive, () => session().removeItem(ACTIVE_INSTANCE_KEY))
     if (activeId || !sessionActive || sessionActive === LOCAL_INSTANCE_ID) return activeId
     return getDefaultInstanceId()
   }
@@ -97,31 +120,31 @@ export function getActiveInstance(): QalatraInstance | null {
 
 export function setActiveInstance(id: string | null) {
   migrateDefaultInstance()
-  sessionStorage.setItem(ACTIVE_INSTANCE_KEY, storedInstanceValue(id))
+  session().setItem(ACTIVE_INSTANCE_KEY, storedInstanceValue(id))
   notifyInstanceConfigChanged()
 }
 
 export function getDefaultInstanceId(): string | null {
   migrateDefaultInstance()
   return resolveStoredInstanceId(
-    localStorage.getItem(DEFAULT_INSTANCE_KEY),
-    () => localStorage.removeItem(DEFAULT_INSTANCE_KEY),
+    persistent().getItem(DEFAULT_INSTANCE_KEY),
+    () => persistent().removeItem(DEFAULT_INSTANCE_KEY),
   )
 }
 
 export function setDefaultInstance(id: string | null) {
   migrateDefaultInstance()
-  localStorage.setItem(DEFAULT_INSTANCE_KEY, storedInstanceValue(id))
+  persistent().setItem(DEFAULT_INSTANCE_KEY, storedInstanceValue(id))
   notifyInstanceConfigChanged()
 }
 
 export function getHideLocalInstance() {
-  return localStorage.getItem(HIDE_LOCAL_INSTANCE_KEY) === 'true'
+  return persistent().getItem(HIDE_LOCAL_INSTANCE_KEY) === 'true'
 }
 
 export function setHideLocalInstance(hidden: boolean) {
-  if (hidden) localStorage.setItem(HIDE_LOCAL_INSTANCE_KEY, 'true')
-  else localStorage.removeItem(HIDE_LOCAL_INSTANCE_KEY)
+  if (hidden) persistent().setItem(HIDE_LOCAL_INSTANCE_KEY, 'true')
+  else persistent().removeItem(HIDE_LOCAL_INSTANCE_KEY)
   notifyInstanceConfigChanged()
 }
 
@@ -155,41 +178,22 @@ export function updateInstance(id: string, patch: Partial<QalatraInstance>): Qal
 }
 
 export function removeInstance(id: string) {
-  const wasActive = sessionStorage.getItem(ACTIVE_INSTANCE_KEY) === id
-  const wasDefault = localStorage.getItem(DEFAULT_INSTANCE_KEY) === id
+  const wasActive = session().getItem(ACTIVE_INSTANCE_KEY) === id
+  const wasDefault = persistent().getItem(DEFAULT_INSTANCE_KEY) === id
   saveInstances(getInstances().filter(i => i.id !== id))
-  if (wasActive) sessionStorage.removeItem(ACTIVE_INSTANCE_KEY)
-  if (wasDefault) localStorage.removeItem(DEFAULT_INSTANCE_KEY)
+  if (wasActive) session().removeItem(ACTIVE_INSTANCE_KEY)
+  if (wasDefault) persistent().removeItem(DEFAULT_INSTANCE_KEY)
   notifyInstanceConfigChanged()
 }
 
-function activeHttpInstance() {
-  return getActiveInstance()
-}
-
-let localServerInstancePromise: Promise<QalatraInstance> | null = null
-
-async function getDefaultLocalServerInstance(): Promise<QalatraInstance> {
-  if (!localServerInstancePromise) {
-    localServerInstancePromise = getElectronAPI('start the local server').invoke('server:start')
-      .then(raw => {
-        const status = raw as LocalServerStatus & { ok?: boolean }
-        if (!status?.running || !status.token) throw new Error('Local Qalatra Server did not start')
-        return {
-          id: 'local-server',
-          name: 'Local Server',
-          url: status.url,
-          token: status.token,
-        }
-      })
-  }
-  const promise = localServerInstancePromise
-  if (!promise) throw new Error('Local Qalatra Server did not start')
-  return promise
+async function resolveLocalInstance(): Promise<QalatraInstance | null> {
+  const platform = getPlatform()
+  if (!platform.resolveLocalInstance) return null
+  return platform.resolveLocalInstance()
 }
 
 export async function currentServerInstance(): Promise<QalatraInstance> {
-  const active = activeHttpInstance() ?? await getDefaultLocalServerInstance()
+  const active = getActiveInstance() ?? (await resolveLocalInstance())
   if (!active) throw new Error('No Qalatra server is available')
   return active
 }
@@ -221,89 +225,6 @@ export function enc(value: string) {
   return encodeURIComponent(value)
 }
 
-function getElectronAPI(action = 'use Electron APIs'): ElectronBridge {
-  const electronAPI = (window as Window & { electronAPI?: ElectronBridge }).electronAPI
-  if (!electronAPI?.invoke) throw new Error(`Electron API is not available to ${action}`)
-  return electronAPI
-}
-
-async function nativeElectronInvoke<T>(channel: string, ...args: unknown[]): Promise<T> {
-  return getElectronAPI().invoke(channel, ...args) as Promise<T>
-}
-
-export interface LocalServerStatus {
-  running: boolean
-  port: number
-  url: string
-  token: string | null
-  keepServerRunning?: boolean
-  managed?: boolean
-  service?: LocalServerServiceStatus
-}
-
-export interface LocalServerServiceStatus {
-  platform: string
-  kind: string
-  name: string | null
-  label: string
-  file: string | null
-  supportsAutostart: boolean
-  supported: boolean
-  installed: boolean
-  running: boolean
-  enabled: boolean
-  disabledInDev?: boolean
-  error?: string | null
-}
-
-export function getLocalServerStatus(): Promise<LocalServerStatus> {
-  return nativeElectronInvoke<LocalServerStatus>('server:status')
-}
-
-export function startLocalServer(): Promise<LocalServerStatus & { ok: boolean }> {
-  localServerInstancePromise = null
-  return nativeElectronInvoke<LocalServerStatus & { ok: boolean }>('server:start')
-}
-
-export function stopLocalServer(): Promise<{ ok: boolean }> {
-  localServerInstancePromise = null
-  return nativeElectronInvoke<{ ok: boolean }>('server:stop')
-}
-
-export function restartLocalServer(): Promise<LocalServerStatus & { ok: boolean }> {
-  localServerInstancePromise = null
-  return nativeElectronInvoke<LocalServerStatus & { ok: boolean }>('server:restart')
-}
-
-export function getLocalServerServiceStatus(): Promise<LocalServerServiceStatus> {
-  return nativeElectronInvoke<LocalServerServiceStatus>('server:service-status')
-}
-
-export function installLocalServerService(): Promise<{ ok: boolean; status?: LocalServerServiceStatus; error?: string }> {
-  localServerInstancePromise = null
-  return nativeElectronInvoke<{ ok: boolean; status?: LocalServerServiceStatus; error?: string }>('server:service-install')
-}
-
-export function uninstallLocalServerService(): Promise<{ ok: boolean; status?: LocalServerServiceStatus; error?: string }> {
-  localServerInstancePromise = null
-  return nativeElectronInvoke<{ ok: boolean; status?: LocalServerServiceStatus; error?: string }>('server:service-uninstall')
-}
-
-export function startLocalServerService(): Promise<{ ok: boolean; status?: LocalServerServiceStatus; error?: string }> {
-  localServerInstancePromise = null
-  return nativeElectronInvoke<{ ok: boolean; status?: LocalServerServiceStatus; error?: string }>('server:service-start')
-}
-
-export function stopLocalServerService(): Promise<{ ok: boolean; status?: LocalServerServiceStatus; error?: string }> {
-  localServerInstancePromise = null
-  return nativeElectronInvoke<{ ok: boolean; status?: LocalServerServiceStatus; error?: string }>('server:service-stop')
-}
-
-export function restartLocalServerService(): Promise<{ ok: boolean; status?: LocalServerServiceStatus; error?: string }> {
-  localServerInstancePromise = null
-  return nativeElectronInvoke<{ ok: boolean; status?: LocalServerServiceStatus; error?: string }>('server:service-restart')
-}
-
 export async function testInstanceConnection(instance: Pick<QalatraInstance, 'url' | 'token'>): Promise<{ ok: boolean; name?: string; error?: string }> {
   try {
     const url = normalizeUrl(instance.url)
@@ -314,16 +235,6 @@ export async function testInstanceConnection(instance: Pick<QalatraInstance, 'ur
   } catch (error: unknown) {
     return { ok: false, error: errorMessage(error) }
   }
-}
-
-export interface AccessToken {
-  id: string
-  label: string
-  scopes: string
-  created_at: string
-  last_used_at: string | null
-  revoked_at: string | null
-  expires_at: string | null
 }
 
 function parseServerDate(value: string | null) {
@@ -366,18 +277,12 @@ export async function revokeAccessToken(id: string): Promise<void> {
   await httpJson(active, `/api/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
-export interface ServerEvent {
-  type?: string
-  taskId?: string
-  [key: string]: unknown
-}
-
 export function subscribeServerEvents(onEvent: (event: ServerEvent) => void): () => void {
   const controller = new AbortController()
   let closed = false
 
   ;(async () => {
-    const active = activeHttpInstance() ?? await getDefaultLocalServerInstance()
+    const active = getActiveInstance() ?? (await resolveLocalInstance())
     if (!active || closed) return
     const res = await fetch(`${active.url}/api/events`, {
       headers: {
@@ -416,7 +321,7 @@ export function subscribeServerEvents(onEvent: (event: ServerEvent) => void): ()
     }
   })().catch(err => {
     if (!closed && !(err instanceof DOMException && err.name === 'AbortError')) {
-      console.warn('[api] server event stream closed:', err)
+      console.warn('[qalatra] server event stream closed:', err)
     }
   })
 

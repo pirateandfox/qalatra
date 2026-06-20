@@ -10,6 +10,29 @@ the proven data + connection layer verbatim and only rebuilds the UI.
 
 ---
 
+## Status (as of the initial build-out)
+
+- **Phase 0 — workspace foundation: DONE & verified.** `npm workspaces:
+  ["packages/*"]`, empty `@qalatra/shared` linked; `electron-dev`/build intact.
+- **Phase 1 — extract `@qalatra/shared`: DONE & verified.** Types, platform
+  adapter (`platform.ts`), emitter, runtime (instances/HTTP/tokens/events), the
+  full API client, and pure logic helpers (dates, platform-detect) all extracted;
+  package typechecks standalone with no web/Electron imports.
+- **Phase 2 — desktop UI on the shared core: DONE & verified at build level.**
+  `ui/` consumes `@qalatra/shared` via a Vite alias + tsconfig path (bundled as
+  source — no install/CI/release-pipeline change). `localServer.ts` holds the
+  Electron-only bits; `platform.web.ts` installs the web adapter. `npm run build`
+  (tsc + vite), shared typecheck, and check-imports all pass. **Runtime parity
+  not yet manually exercised** (launch the app and verify instance switching).
+- **Phase 3 — Expo app: SCAFFOLDED, not yet run.** `mobile/` exists with the
+  native platform adapter, adaptive shell + `useLayout`, onboarding + today
+  screens, and monorepo Metro/tsconfig wiring. Needs `cd mobile && npm install &&
+  npx expo install --fix && npx expo start` on a machine with a simulator to
+  validate (see `mobile/README.md`). `mobile/` is intentionally NOT a workspace.
+- **Phases 4–5 — adaptive parity + push: NOT STARTED.**
+
+---
+
 ## Decisions locked
 
 | Decision | Choice | Why |

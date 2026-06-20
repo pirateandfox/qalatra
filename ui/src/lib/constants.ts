@@ -1,3 +1,9 @@
+// Pure date/time + platform-detection helpers now live in @qalatra/shared so the
+// mobile app can reuse them; re-exported here so existing `./lib/constants`
+// imports keep working. The colour/label/icon maps below are presentation and
+// stay desktop-local.
+export { PLATFORMS, detectPlatform, today, offsetDate, fmtTime } from '@qalatra/shared'
+
 export const CONTEXT_COLORS: Record<string, string> = {}
 
 export const CONTEXT_LABELS: Record<string, string> = {}
@@ -15,41 +21,4 @@ export const ENERGY_ICONS: Record<string, string> = {
   medium: '⚡',
   low: '🌿',
   async: '📬',
-}
-
-export const PLATFORMS = [
-  { key: 'asana',      pattern: /asana\.com/,            label: 'Asana' },
-  { key: 'missive',    pattern: /missiveapp\.com/,        label: 'Missive' },
-  { key: 'notion',     pattern: /notion\.so/,             label: 'Notion' },
-  { key: 'linear',     pattern: /linear\.app/,            label: 'Linear' },
-  { key: 'github',     pattern: /github\.com/,            label: 'GitHub' },
-  { key: 'slack',      pattern: /slack\.com/,             label: 'Slack' },
-  { key: 'youtube',    pattern: /youtu\.be|youtube\.com/, label: 'YouTube' },
-  { key: 'flightdesk', pattern: /flightdesk\.dev/,        label: 'FlightDesk' },
-]
-
-export function detectPlatform(url: string) {
-  return PLATFORMS.find(p => p.pattern.test(url)) ?? { key: 'link', label: '🔗' }
-}
-
-export function today(): string {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-export function offsetDate(date: string, days: number): string {
-  const d = new Date(date + 'T12:00:00')
-  d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
-}
-
-export function fmtTime(t: string | null): string {
-  if (!t) return 'All day'
-  const [h, m] = t.split(':').map(Number)
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  const h12 = h % 12 || 12
-  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`
 }

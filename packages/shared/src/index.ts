@@ -6,9 +6,15 @@
 // on React, the DOM, Electron, `window`, `localStorage`, or Node — all
 // platform-specific behavior is reached through an injected platform adapter.
 //
-// Phase 1 (in progress, see plan/EXPO_MOBILE_ROADMAP.md): domain types are
-// extracted here first. The API client, instance/backend management, platform
-// adapter, and logic helpers land in the following sub-steps. `ui/` does not yet
-// consume this package — that switch-over is Phase 2.
+// @qalatra/shared public surface (Phase 1, see plan/EXPO_MOBILE_ROADMAP.md):
+// domain types, the platform adapter seam, instance/backend management + HTTP
+// runtime, and the API client. The host (Electron desktop or Expo mobile)
+// installs a platform adapter via configurePlatform() at startup; `ui/` switches
+// over to consuming this package in Phase 2.
 
 export * from './types'
+export * from './platform'
+export * from './emitter'
+export * from './runtime'
+export * from './api'
+export * from './logic'
