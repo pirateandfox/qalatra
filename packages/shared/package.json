@@ -1,0 +1,18 @@
+{
+  "name": "@qalatra/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Platform-agnostic core shared by the Electron desktop UI and the Expo mobile app: types, API client, instance/backend management, and domain logic. No React, DOM, Electron, or Node dependencies — platform specifics are injected via a small adapter.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}

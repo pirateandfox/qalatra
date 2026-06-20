@@ -6,6 +6,9 @@
   "author": "Justin Handley",
   "type": "module",
   "main": "electron-main.js",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "kill": "pkill -9 -f 'Electron.app/Contents/MacOS/Electron' 2>/dev/null; pkill -9 -f 'electron electron-main.js' 2>/dev/null; launchctl bootout gui/$(id -u)/com.qalatra.server 2>/dev/null; launchctl bootout gui/$(id -u)/com.qalatra.mcp 2>/dev/null; lsof -ti :3456 | xargs kill -9 2>/dev/null; lsof -ti :3457 | xargs kill -9 2>/dev/null; true",
     "rebuild:electron": "node node_modules/@electron/rebuild/lib/cli.js -f -w better-sqlite3,node-pty --build-from-source",
@@ -18,6 +21,7 @@
     "build": "npm run build --prefix ui",
     "start": "npm run kill && sleep 1 && NODE_ENV=production ./node_modules/.bin/electron electron-main.js",
     "check-imports": "node scripts/check-imports.mjs",
+    "shared:typecheck": "npm run typecheck -w @qalatra/shared",
     "smoke:server": "node scripts/smoke-server.mjs",
     "ci:server": "bash -n scripts/bootstrap-linux-server.sh scripts/install-linux-server.sh scripts/install-cloudflare-tunnel.sh && node --check server/index.js && node --check server/service-manager.js && node --check scripts/rebuild-node-native.mjs && node --check scripts/smoke-server.mjs && npm run rebuild:node && npm run smoke:server",
     "dist": "npm run check-imports && npm run build && electron-builder --mac --publish never",

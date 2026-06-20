@@ -38,6 +38,7 @@ Qalatra is Justin's personal task management system: a local SQLite database own
 │   ├── AGENT_OPERATING_LAYER_ROADMAP.md ← Strategic plan for personal vs agent-node roles, external intake, handoffs, and Qalatra-to-Qalatra messaging
 │   ├── EVOLUTION.md        ← Running log of shipped features and known gaps
 │   ├── ARCHITECTURE.md     ← v2 vision (Automerge, Tauri, sync relay)
+│   ├── EXPO_MOBILE_ROADMAP.md ← Plan to add Expo iOS/iPad/Android apps via a shared @qalatra/shared core (remote-only client; desktop unchanged)
 │   └── FUTURE_IDEAS.md     ← Deferred ideas
 ├── electron-builder.yml    ← Packaging config (DMG, signing, publish). The `files:` list is **explicit** — any new root-level JS file imported by Electron entry points must be added here or the app will crash on launch. `scripts/check-imports.mjs` enforces this in CI and via `npm run check-imports`.
 ├── entitlements.mac.plist  ← macOS hardened runtime entitlements
