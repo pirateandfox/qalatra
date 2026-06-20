@@ -6,10 +6,9 @@
 // on React, the DOM, Electron, `window`, `localStorage`, or Node — all
 // platform-specific behavior is reached through an injected platform adapter.
 //
-// Phase 0 scaffold only: the real surface (types, api, instances, logic) lands
-// in Phase 1 of plan/EXPO_MOBILE_ROADMAP.md. Until then this barrel just proves
-// the workspace is linked and typechecks.
+// Phase 1 (in progress, see plan/EXPO_MOBILE_ROADMAP.md): domain types are
+// extracted here first. The API client, instance/backend management, platform
+// adapter, and logic helpers land in the following sub-steps. `ui/` does not yet
+// consume this package — that switch-over is Phase 2.
 
-/** Marker export so the workspace package resolves and typechecks before any
- *  real code is moved in. Removed once the Phase 1 barrels exist. */
-export const SHARED_PACKAGE = '@qalatra/shared'
+export * from './types'
