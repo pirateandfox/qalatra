@@ -13,29 +13,55 @@ import {
 import {
   addNote,
   api,
+  fetchContexts,
   fetchNotes,
+  fetchProjects,
   fetchSubtasks,
   fetchTask,
-  offsetDate,
   today,
   updateTask,
+  type Context,
   type Note,
+  type Project,
   type Task,
 } from '@qalatra/shared'
 import type { TaskDetailProps } from '../navigation/types'
 import { useLoader } from '../lib/useLoader'
 import { ErrorView, Loading, Screen } from '../components/ui'
+import { ButtonRow, ChipRow, type ChipOption, type ChipValue } from '../components/ChipRow'
+import { nextWeekStart, thisWeekend, tomorrow } from '../lib/dates'
 import { colors, ENERGY_ICONS, priorityColor, radius, space } from '../theme'
+
+const PRIORITY_OPTS: ChipOption[] = [
+  { value: null, label: 'None' },
+  { value: 1, label: 'P1' }, { value: 2, label: 'P2' }, { value: 3, label: 'P3' }, { value: 4, label: 'P4' }, { value: 5, label: 'P5' },
+]
+const ENERGY_OPTS: ChipOption[] = [
+  { value: null, label: 'None' },
+  { value: 'high', label: '🔥 High' }, { value: 'medium', label: '⚡ Med' }, { value: 'low', label: '🌿 Low' }, { value: 'async', label: '📬 Async' },
+]
+const RECUR_OPTS: ChipOption[] = [
+  { value: null, label: 'None' },
+  { value: 'daily', label: 'Daily' }, { value: 'weekdays', label: 'Weekdays' }, { value: 'weekly', label: 'Weekly' }, { value: 'monthly', label: 'Monthly' },
+]
+const RECUR_SHORTHANDS = ['daily', 'weekdays', 'weekly', 'monthly']
+
+function recurrenceShorthand(r: string | null): ChipValue {
+  if (!r) return null
+  return RECUR_SHORTHANDS.includes(r) ? r : null
+}
 
 export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
   const { taskId } = route.params
   const { data, loading, error, reload } = useLoader(async () => {
-    const [task, notes, subtasks] = await Promise.all([
+    const [task, notes, subtasks, contexts, projects] = await Promise.all([
       fetchTask(taskId),
       fetchNotes(taskId).catch(() => [] as Note[]),
       fetchSubtasks(taskId).catch(() => [] as Task[]),
+      fetchContexts().catch(() => [] as Context[]),
+      fetchProjects().catch(() => [] as Project[]),
     ])
-    return { task, notes, subtasks }
+    return { task, notes, subtasks, contexts, projects }
   }, [taskId])
 
   const [busy, setBusy] = useState(false)
@@ -72,11 +98,13 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
   const pColor = priorityColor(task.my_priority)
   const energy = task.energy_required ? ENERGY_ICONS[task.energy_required] : null
 
+  const contextOpts: ChipOption[] = [{ value: null, label: 'None' }, ...(data?.contexts ?? []).map(c => ({ value: c.slug, label: c.label }))]
+  const projectOpts: ChipOption[] = [{ value: null, label: 'None' }, ...(data?.projects ?? []).map(p => ({ value: p.name, label: p.name }))]
+
   return (
     <Screen>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView style={styles.flex} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          {/* Title */}
           <TextInput
             style={styles.title}
             value={title}
@@ -87,7 +115,6 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             onBlur={() => title.trim() && title !== task.title && act(() => api.updateTitle(taskId, title.trim()))}
           />
 
-          {/* Meta */}
           <View style={styles.metaRow}>
             {pColor ? <View style={[styles.pill, { borderColor: pColor }]}><Text style={[styles.pillText, { color: pColor }]}>P{task.my_priority}</Text></View> : null}
             {task.context ? <Meta text={task.context} /> : null}
@@ -97,19 +124,41 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             <Meta text={task.status} />
           </View>
 
-          {/* Actions */}
           <View style={styles.actions}>
             {done ? (
               <Action label="Uncomplete" onPress={() => act(() => api.uncomplete(taskId))} disabled={busy} />
             ) : (
               <Action label="✓ Complete" primary onPress={() => act(() => api.complete(taskId), { back: true })} disabled={busy} />
             )}
-            <Action label="Snooze 1d" onPress={() => act(() => api.snooze(taskId, offsetDate(today(), 1)), { back: true })} disabled={busy} />
             <Action label="Activate" onPress={() => act(() => api.activate(taskId))} disabled={busy} />
             <Action label="Skip" onPress={() => act(() => api.skip(taskId), { back: true })} disabled={busy} />
           </View>
 
-          {/* Description */}
+          {/* Editable properties */}
+          <ChipRow label="Priority" value={task.my_priority} options={PRIORITY_OPTS} onChange={v => act(() => updateTask(taskId, { my_priority: v }))} />
+          <ChipRow label="Energy" value={task.energy_required} options={ENERGY_OPTS} onChange={v => act(() => updateTask(taskId, { energy_required: v }))} />
+          <ChipRow label="Context" value={task.context} options={contextOpts} onChange={v => act(() => updateTask(taskId, { context: v }))} />
+          <ChipRow label="Project" value={task.project} options={projectOpts} onChange={v => act(() => updateTask(taskId, { project: v }))} />
+          <ChipRow label="Recurrence" value={recurrenceShorthand(task.recurrence)} options={RECUR_OPTS} onChange={v => act(() => api.updateRecurrence(taskId, (v as string | null)))} />
+          <ButtonRow
+            label="Due date"
+            actions={[
+              { label: 'Today', onPress: () => act(() => api.updateDueDate(taskId, today())) },
+              { label: 'Tomorrow', onPress: () => act(() => api.updateDueDate(taskId, tomorrow())) },
+              { label: 'Weekend', onPress: () => act(() => api.updateDueDate(taskId, thisWeekend())) },
+              { label: 'Next wk', onPress: () => act(() => api.updateDueDate(taskId, nextWeekStart())) },
+              { label: 'Clear', onPress: () => act(() => api.updateDueDate(taskId, null)) },
+            ]}
+          />
+          <ButtonRow
+            label="Snooze"
+            actions={[
+              { label: 'Tomorrow', onPress: () => act(() => api.snooze(taskId, tomorrow()), { back: true }) },
+              { label: 'Weekend', onPress: () => act(() => api.snooze(taskId, thisWeekend()), { back: true }) },
+              { label: 'Next wk', onPress: () => act(() => api.snooze(taskId, nextWeekStart()), { back: true }) },
+            ]}
+          />
+
           <Field label="Description">
             <TextInput
               style={styles.multiline}
@@ -122,7 +171,6 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             />
           </Field>
 
-          {/* Freeform notes */}
           <Field label="Notes">
             <TextInput
               style={styles.multiline}
@@ -135,7 +183,6 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             />
           </Field>
 
-          {/* Subtasks */}
           {data && data.subtasks.length > 0 ? (
             <Field label={`Subtasks (${data.subtasks.length})`}>
               {data.subtasks.map(st => (
@@ -152,7 +199,6 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             </Field>
           ) : null}
 
-          {/* Threaded notes log */}
           <Field label="Log">
             {data && data.notes.length > 0 ? (
               data.notes.map(n => (
@@ -231,15 +277,8 @@ const styles = StyleSheet.create({
   field: { marginTop: space.xl },
   fieldLabel: { color: colors.muted2, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: space.sm },
   multiline: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    color: colors.textDim,
-    padding: space.md,
-    fontSize: 15,
-    minHeight: 64,
-    textAlignVertical: 'top',
+    backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: radius.md,
+    color: colors.textDim, padding: space.md, fontSize: 15, minHeight: 64, textAlignVertical: 'top',
   },
   subtask: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 6 },
   checkbox: { color: colors.accent, fontSize: 18 },
@@ -251,15 +290,8 @@ const styles = StyleSheet.create({
   dim: { color: colors.muted2, fontSize: 14 },
   addNote: { marginTop: space.md, gap: space.sm },
   addNoteInput: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    color: colors.textDim,
-    padding: space.md,
-    fontSize: 15,
-    minHeight: 44,
-    textAlignVertical: 'top',
+    backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: radius.md,
+    color: colors.textDim, padding: space.md, fontSize: 15, minHeight: 44, textAlignVertical: 'top',
   },
   footer: { height: 60 },
 })
