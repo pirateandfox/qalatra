@@ -1,60 +1,54 @@
 // React Native platform adapter for @qalatra/shared.
 //
 // Importing this module configures the shared core's platform seam for mobile.
-// Two differences from the desktop (web) adapter:
 //
-//  1. Storage is asynchronous (AsyncStorage), so the persistent store wraps it in
-//     an in-memory cache. `hydrate(keys)` warms the cache once at startup; the
-//     shared instance logic then reads synchronously exactly as on desktop. The
-//     app MUST `await hydrateInstances()` before rendering instance-dependent UI.
-//  2. capabilities.canManageLocalServer is false and resolveLocalInstance is
-//     omitted — mobile is remote-only and never runs a local server.
+//  - Storage is AsyncStorage, wrapped in an in-memory cache so the shared
+//    instance logic can read synchronously. `hydrate(keys)` warms the cache once
+//    at startup; the app awaits `hydrateInstances()` before rendering.
+//  - BOTH the persistent and "session" stores are backed by AsyncStorage here:
+//    on a phone you want the active connection to survive app restarts (unlike
+//    the desktop, where "active" is intentionally session-scoped). The session
+//    store uses a separate key namespace so it doesn't collide with the legacy
+//    persistent active key the migration logic touches.
+//  - capabilities.canManageLocalServer is false and resolveLocalInstance is
+//    omitted — mobile is remote-only and never runs a local server.
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { configurePlatform, type Platform, type PlatformKV } from '@qalatra/shared'
 
-/** Persistent KV backed by AsyncStorage, served synchronously from a warmed cache. */
-function asyncStorageKV(): PlatformKV {
+function asyncStorageKV(namespace = ''): PlatformKV {
   const cache = new Map<string, string>()
   let hydrated = false
+  const storageKey = (key: string) => `${namespace}${key}`
+
   return {
     getItem: key => (cache.has(key) ? cache.get(key)! : null),
     setItem: (key, value) => {
       cache.set(key, value)
-      void AsyncStorage.setItem(key, value).catch(() => {})
+      AsyncStorage.setItem(storageKey(key), value).catch(err =>
+        console.warn('[qalatra] storage write failed for', key, err),
+      )
     },
     removeItem: key => {
       cache.delete(key)
-      void AsyncStorage.removeItem(key).catch(() => {})
+      AsyncStorage.removeItem(storageKey(key)).catch(err =>
+        console.warn('[qalatra] storage remove failed for', key, err),
+      )
     },
     hydrate: async keys => {
       if (hydrated) return
-      const pairs = await AsyncStorage.multiGet(keys as string[])
-      for (const [key, value] of pairs) {
-        if (value != null) cache.set(key, value)
+      const pairs = await AsyncStorage.multiGet(keys.map(storageKey))
+      for (const [storedKey, value] of pairs) {
+        if (value != null) cache.set(storedKey.slice(namespace.length), value)
       }
       hydrated = true
     },
   }
 }
 
-/** Session KV: in-memory only, cleared each app launch (mirrors web sessionStorage). */
-function inMemoryKV(): PlatformKV {
-  const cache = new Map<string, string>()
-  return {
-    getItem: key => (cache.has(key) ? cache.get(key)! : null),
-    setItem: (key, value) => {
-      cache.set(key, value)
-    },
-    removeItem: key => {
-      cache.delete(key)
-    },
-  }
-}
-
 const nativePlatform: Platform = {
   persistent: asyncStorageKV(),
-  session: inMemoryKV(),
+  session: asyncStorageKV('qalatra.session:'),
   capabilities: { canManageLocalServer: false },
   // No resolveLocalInstance: mobile is remote-only.
 }
