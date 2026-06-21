@@ -3,6 +3,7 @@ import './src/platform.native'
 
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/native'
 import { getActiveInstance, hydrateInstances, onInstanceConfigChange } from '@qalatra/shared'
@@ -45,6 +46,7 @@ export default function App() {
   }, [evaluate])
 
   return (
+    <GestureHandlerRootView style={styles.flex}>
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" />
       {boot === 'loading' ? (
@@ -59,9 +61,11 @@ export default function App() {
         </NavigationContainer>
       )}
     </SafeAreaProvider>
+    </GestureHandlerRootView>
   )
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
 })
