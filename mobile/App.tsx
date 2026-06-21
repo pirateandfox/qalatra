@@ -2,7 +2,8 @@
 import './src/platform.native'
 
 import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, SafeAreaView, StatusBar, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native'
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { getActiveInstance, hydrateInstances, onInstanceConfigChange } from '@qalatra/shared'
 import { OnboardingScreen } from './src/screens/OnboardingScreen'
 import { AppShell } from './src/AppShell'
@@ -32,18 +33,20 @@ export default function App() {
   }, [evaluate])
 
   return (
-    <SafeAreaView style={styles.root}>
-      <StatusBar barStyle="light-content" />
-      {boot === 'loading' ? (
-        <View style={styles.center}>
-          <ActivityIndicator />
-        </View>
-      ) : boot === 'onboarding' ? (
-        <OnboardingScreen />
-      ) : (
-        <AppShell />
-      )}
-    </SafeAreaView>
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.root}>
+        <StatusBar barStyle="light-content" />
+        {boot === 'loading' ? (
+          <View style={styles.center}>
+            <ActivityIndicator />
+          </View>
+        ) : boot === 'onboarding' ? (
+          <OnboardingScreen />
+        ) : (
+          <AppShell />
+        )}
+      </SafeAreaView>
+    </SafeAreaProvider>
   )
 }
 

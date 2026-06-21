@@ -13,6 +13,9 @@
     },
     "android": {
       "package": "com.qalatra.app"
-    }
+    },
+    "plugins": [
+      "expo-asset"
+    ]
   }
 }
