@@ -11,6 +11,8 @@ import { colors } from '../theme'
 
 type Nav = NativeStackNavigationProp<TaskStackParamList>
 
+const flexStyle = { flex: 1 }
+
 export function TaskListView({ loader, emptyMessage }: { loader: () => Promise<Task[]>; emptyMessage: string }) {
   const navigation = useNavigation<Nav>()
   const { data, loading, refreshing, error, reload, refresh } = useLoader(loader)
@@ -24,6 +26,7 @@ export function TaskListView({ loader, emptyMessage }: { loader: () => Promise<T
   return (
     <Screen>
       <FlatList
+        style={flexStyle}
         data={tasks}
         keyExtractor={t => t.id}
         renderItem={({ item }) => (

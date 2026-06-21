@@ -38,7 +38,7 @@ export function PriorityScreen() {
 
   return (
     <Screen>
-      <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.muted} />}>
+      <ScrollView style={styles.flex} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.muted} />}>
         {sections.map(s => (
           <View key={s.key} style={styles.section}>
             <Text style={styles.header}>
@@ -56,6 +56,7 @@ export function PriorityScreen() {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   section: { marginTop: space.lg },
   header: {
     color: colors.muted2,

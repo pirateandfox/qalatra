@@ -25,7 +25,7 @@ export function MoreScreen() {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
         <Text style={styles.section}>Lists</Text>
         <Row label="Backlog" onPress={() => navigation.navigate('Backlog')} />
         <Row label="Code" onPress={() => navigation.navigate('Code')} />
@@ -51,6 +51,7 @@ function Row({ label, onPress, destructive }: { label: string; onPress: () => vo
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   content: { paddingVertical: space.md },
   section: { color: colors.muted2, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, paddingHorizontal: space.lg, marginTop: space.lg, marginBottom: space.sm },
   row: {
