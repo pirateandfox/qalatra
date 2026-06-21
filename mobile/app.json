@@ -9,13 +9,21 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.qalatra.app"
+      "bundleIdentifier": "com.qalatra.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.qalatra.app"
     },
     "plugins": [
       "expo-asset"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "aada33e2-e5c5-4cf8-9ad1-c0ca22ccb0d4"
+      }
+    }
   }
 }
