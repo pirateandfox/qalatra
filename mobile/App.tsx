@@ -9,6 +9,7 @@ import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/na
 import { getActiveInstance, hydrateInstances, onInstanceConfigChange } from '@qalatra/shared'
 import { OnboardingScreen } from './src/screens/OnboardingScreen'
 import { RootNavigator } from './src/navigation/RootNavigator'
+import { ErrorBoundary } from './src/ErrorBoundary'
 import { colors } from './src/theme'
 
 const navTheme: Theme = {
@@ -48,6 +49,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.flex}>
     <SafeAreaProvider>
+      <ErrorBoundary>
       <StatusBar barStyle="light-content" />
       {boot === 'loading' ? (
         <View style={styles.center}>
@@ -60,6 +62,7 @@ export default function App() {
           <RootNavigator />
         </NavigationContainer>
       )}
+      </ErrorBoundary>
     </SafeAreaProvider>
     </GestureHandlerRootView>
   )
