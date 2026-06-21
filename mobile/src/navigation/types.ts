@@ -7,6 +7,8 @@ export type TaskStackParamList = {
   Menu: undefined
   Backlog: undefined
   Code: undefined
+  DailyNote: undefined
+  Habits: undefined
   TaskDetail: { taskId: string }
   CreateTask: undefined
 }

@@ -26,6 +26,10 @@ export function MoreScreen() {
   return (
     <Screen>
       <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
+        <Text style={styles.section}>Daily</Text>
+        <Row label="Daily Note" onPress={() => navigation.navigate('DailyNote')} />
+        <Row label="Habits" onPress={() => navigation.navigate('Habits')} />
+
         <Text style={styles.section}>Lists</Text>
         <Row label="Backlog" onPress={() => navigation.navigate('Backlog')} />
         <Row label="Code" onPress={() => navigation.navigate('Code')} />
