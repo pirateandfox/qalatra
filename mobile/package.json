@@ -19,6 +19,7 @@
     "expo": "^56.0.12",
     "expo-asset": "~56.0.17",
     "expo-status-bar": "~56.0.4",
+    "expo-updates": "~56.0.19",
     "react": "19.2.3",
     "react-native": "0.85.3",
     "react-native-safe-area-context": "~5.7.0",
