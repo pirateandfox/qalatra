@@ -14,6 +14,8 @@ import { MoreScreen } from '../screens/MoreScreen'
 import { DailyNoteScreen } from '../screens/DailyNoteScreen'
 import { HabitsScreen } from '../screens/HabitsScreen'
 import { SearchScreen } from '../screens/SearchScreen'
+import { InstancesScreen } from '../screens/InstancesScreen'
+import { AddInstanceScreen } from '../screens/AddInstanceScreen'
 
 const Stack = createNativeStackNavigator<TaskStackParamList>()
 const Tab = createBottomTabNavigator<RootTabParamList>()
@@ -73,6 +75,8 @@ function MoreStack() {
       />
       <Stack.Screen name="DailyNote" component={DailyNoteScreen} options={{ title: 'Daily Note' }} />
       <Stack.Screen name="Habits" component={HabitsScreen} options={{ title: 'Habits' }} />
+      <Stack.Screen name="Instances" component={InstancesScreen} options={{ title: 'Backends' }} />
+      <Stack.Screen name="AddInstance" component={AddInstanceScreen} options={{ title: 'Add Backend', presentation: 'modal' }} />
       <Stack.Screen name="TaskDetail" component={TaskDetailScreen} options={{ title: 'Task' }} />
       <Stack.Screen name="CreateTask" component={CreateTaskScreen} options={{ title: 'New Task', presentation: 'modal' }} />
     </Stack.Navigator>

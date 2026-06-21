@@ -9,6 +9,8 @@ export type TaskStackParamList = {
   Code: undefined
   DailyNote: undefined
   Habits: undefined
+  Instances: undefined
+  AddInstance: undefined
   TaskDetail: { taskId: string }
   CreateTask: undefined
 }

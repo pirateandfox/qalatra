@@ -39,6 +39,7 @@ export function MoreScreen() {
           <Text style={styles.name}>{active?.name ?? 'Not connected'}</Text>
           {active?.url ? <Text style={styles.url}>{active.url}</Text> : null}
         </View>
+        <Row label="Backends (switch / add)" onPress={() => navigation.navigate('Instances')} />
         <Row label="Disconnect" destructive onPress={disconnect} />
       </ScrollView>
     </Screen>
