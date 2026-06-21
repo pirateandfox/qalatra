@@ -13,6 +13,7 @@ import { ToolsScreen } from '../screens/ToolsScreen'
 import { MoreScreen } from '../screens/MoreScreen'
 import { DailyNoteScreen } from '../screens/DailyNoteScreen'
 import { HabitsScreen } from '../screens/HabitsScreen'
+import { SearchScreen } from '../screens/SearchScreen'
 
 const Stack = createNativeStackNavigator<TaskStackParamList>()
 const Tab = createBottomTabNavigator<RootTabParamList>()
@@ -52,6 +53,9 @@ function PriorityStack() {
 function ReadingStack() {
   return <TaskStack list={ReadingScreen} title="Reading" />
 }
+function SearchStack() {
+  return <TaskStack list={SearchScreen} title="Search" />
+}
 
 function MoreStack() {
   return (
@@ -90,6 +94,7 @@ export function RootNavigator() {
       }}
     >
       <Tab.Screen name="PriorityTab" component={PriorityStack} options={{ title: 'Priority', tabBarIcon: tabIcon('★') }} />
+      <Tab.Screen name="SearchTab" component={SearchStack} options={{ title: 'Search', tabBarIcon: tabIcon('🔍') }} />
       <Tab.Screen name="ReadingTab" component={ReadingStack} options={{ title: 'Reading', tabBarIcon: tabIcon('📖') }} />
       <Tab.Screen
         name="ToolsTab"

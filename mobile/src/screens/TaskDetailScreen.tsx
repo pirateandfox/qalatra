@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -13,13 +14,18 @@ import {
 import {
   addNote,
   api,
+  fetchAgentJobs,
+  fetchAttachments,
   fetchContexts,
   fetchNotes,
   fetchProjects,
   fetchSubtasks,
   fetchTask,
+  queueAgentJob,
   today,
   updateTask,
+  type AgentJob,
+  type Attachment,
   type Context,
   type Note,
   type Project,
@@ -54,14 +60,16 @@ function recurrenceShorthand(r: string | null): ChipValue {
 export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
   const { taskId } = route.params
   const { data, loading, error, reload } = useLoader(async () => {
-    const [task, notes, subtasks, contexts, projects] = await Promise.all([
+    const [task, notes, subtasks, contexts, projects, attachments, jobs] = await Promise.all([
       fetchTask(taskId),
       fetchNotes(taskId).catch(() => [] as Note[]),
       fetchSubtasks(taskId).catch(() => [] as Task[]),
       fetchContexts().catch(() => [] as Context[]),
       fetchProjects().catch(() => [] as Project[]),
+      fetchAttachments(taskId).catch(() => [] as Attachment[]),
+      fetchAgentJobs(taskId).catch(() => [] as AgentJob[]),
     ])
-    return { task, notes, subtasks, contexts, projects }
+    return { task, notes, subtasks, contexts, projects, attachments, jobs }
   }, [taskId])
 
   const [busy, setBusy] = useState(false)
@@ -227,6 +235,39 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             </View>
           </Field>
 
+          {data && data.attachments.length > 0 ? (
+            <Field label={`Attachments (${data.attachments.length})`}>
+              {data.attachments.map(a => (
+                <Pressable
+                  key={a.id}
+                  style={styles.attachment}
+                  onPress={() => a.url && Linking.openURL(a.url)}
+                  disabled={!a.url}
+                >
+                  <Text style={styles.attachmentName} numberOfLines={1}>{a.filename}</Text>
+                  {a.url ? <Text style={styles.attachmentOpen}>open ›</Text> : null}
+                </Pressable>
+              ))}
+            </Field>
+          ) : null}
+
+          {task.agent_path ? (
+            <Field label="Agent">
+              <Action label="▶ Run agent" onPress={() => act(() => queueAgentJob(taskId))} disabled={busy} />
+              {data && data.jobs.length > 0 ? (
+                data.jobs.map(j => (
+                  <View key={j.id} style={styles.job}>
+                    <Text style={styles.jobStatus}>{j.status}</Text>
+                    {j.result ? <Text style={styles.jobResult} numberOfLines={6}>{j.result}</Text> : null}
+                    <Text style={styles.jobTime}>{j.created_at}</Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.dim}>No runs yet.</Text>
+              )}
+            </Field>
+          ) : null}
+
           <View style={styles.footer} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -288,6 +329,13 @@ const styles = StyleSheet.create({
   logAuthor: { color: colors.muted2, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
   logBody: { color: colors.textDim, fontSize: 14, marginTop: 2 },
   dim: { color: colors.muted2, fontSize: 14 },
+  attachment: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  attachmentName: { color: colors.textDim, fontSize: 14, flex: 1, marginRight: space.sm },
+  attachmentOpen: { color: colors.accent, fontSize: 13 },
+  job: { marginTop: space.md, padding: space.md, backgroundColor: colors.surface, borderRadius: radius.md },
+  jobStatus: { color: colors.muted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+  jobResult: { color: colors.textDim, fontSize: 13, marginTop: 4 },
+  jobTime: { color: colors.muted2, fontSize: 11, marginTop: 4 },
   addNote: { marginTop: space.md, gap: space.sm },
   addNoteInput: {
     backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: radius.md,

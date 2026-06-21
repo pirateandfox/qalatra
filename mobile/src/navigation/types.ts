@@ -19,6 +19,7 @@ export type CreateTaskProps = NativeStackScreenProps<TaskStackParamList, 'Create
 
 export type RootTabParamList = {
   PriorityTab: undefined
+  SearchTab: undefined
   ReadingTab: undefined
   ToolsTab: undefined
   MoreTab: undefined
