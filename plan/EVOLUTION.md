@@ -1,6 +1,27 @@
 # Qalatra — Evolution Notes
 
-## Unreleased — Shared core extraction + Expo mobile groundwork (2026-06-20)
+## 1.9.11 — Markdown editor: panel fixes + font picker (2026-06-22)
+
+- **Style panel is interactive again.** A global `.sidebar` rule (the app's main
+  nav) leaked `-webkit-app-region: drag` into the markdown editor's style sidebar,
+  turning the whole region into a window-drag area that swallowed every click and
+  edit. Reset to `no-drag` on the scoped `.mdview-overlay .sidebar`.
+- **Terminal/Chat slide-up panel renders correctly.** The shared global terminal is
+  an inline (in-flow) bottom panel that sat *behind* the z-1000 markdown overlay, so
+  the reserved 300px showed only the overlay's black background. It now floats above
+  the overlay when docked, and the overlay closes a terminal it opened (but leaves a
+  terminal that was already open).
+- **Font picker overhaul** (Style → Typography): the picker is now an autocomplete
+  field — fonts are sorted alphabetically, you can type ANY custom font name, your
+  real installed system fonts are enumerated (Local Font Access API), and the full
+  Google Fonts catalog (~1500 families) is fetched in the Electron main process
+  (no renderer CORS) and cached. Font files still load lazily only when selected.
+- **Under the hood:** the data layer (types, API client, instance/backend
+  management) was extracted into a new `@qalatra/shared` package now consumed by the
+  desktop UI with no behavior change — groundwork for the in-progress Expo mobile
+  app. See the entry below + `plan/EXPO_MOBILE_ROADMAP.md`.
+
+## Shared core extraction + Expo mobile groundwork (2026-06-20)
 
 - Introduced npm workspaces and a new `@qalatra/shared` package: the
   platform-agnostic core (types, instance/backend management, HTTP runtime, full
