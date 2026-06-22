@@ -1,5 +1,30 @@
 # Qalatra — Evolution Notes
 
+## Mobile task detail redesign — summary card + sheet pickers (2026-06-22)
+
+The mobile (Expo) `TaskDetailScreen` was a wall of seven stacked, horizontally
+scrolling chip rows (Priority, Energy, Context, Project, Recurrence, Due, Snooze)
+that buried the task content and made every value a hunt-and-peck. Reworked into a
+compact, scannable summary:
+
+- **Summary card (`MetaCard`/`MetaRow`):** one tappable line per field showing the
+  current value + a chevron. Priority/Energy/Context/Project/Due/Start/Recurrence
+  all live in a single grouped card. `start_date` is now editable on mobile for the
+  first time (desktop already had it).
+- **Bottom-sheet pickers (`SelectSheet`):** tapping a row opens a styled bottom
+  sheet single-select — the mobile equivalent of the desktop dropdown — replacing
+  the inline chip rows for Priority/Energy/Context/Project/Recurrence.
+- **Native date picker (`DateSheet`):** Due/Start open a sheet with Today/Tomorrow/
+  Weekend/Next-wk quick chips above a native calendar (`@react-native-community/
+  datetimepicker`, added as a dependency — requires a native rebuild). iOS uses the
+  inline calendar; Android uses the system date dialog. Quick chips show a selected
+  state, fixing the "tapping Tomorrow does nothing" feedback gap (the value was
+  saving, but nothing near the button confirmed it).
+- **Snooze** stays as the quick-button `ButtonRow`. The redundant read-only pill row
+  at the top was removed; status is now a single small badge under the title.
+
+`ChipRow`/`ButtonRow` remain in use by `CreateTaskScreen`.
+
 ## 1.9.11 — Markdown editor: panel fixes + font picker (2026-06-22)
 
 - **Style panel is interactive again.** A global `.sidebar` rule (the app's main

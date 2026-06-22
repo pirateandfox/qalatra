@@ -13,3 +13,17 @@ export function nextWeekday(targetDow: number): string {
 export const tomorrow = () => offsetDate(today(), 1)
 export const thisWeekend = () => nextWeekday(6) // Saturday
 export const nextWeekStart = () => nextWeekday(1) // Monday
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** A short, human label for a YYYY-MM-DD date: "Today", "Tomorrow", or
+ *  "Jun 23" / "Jun 23, 2027" when the year differs from the current one. */
+export function formatDate(iso: string | null): string | null {
+  if (!iso) return null
+  if (iso === today()) return 'Today'
+  if (iso === tomorrow()) return 'Tomorrow'
+  const d = new Date(iso + 'T12:00:00')
+  const now = new Date(today() + 'T12:00:00')
+  const base = `${MONTHS[d.getMonth()]} ${d.getDate()}`
+  return d.getFullYear() === now.getFullYear() ? base : `${base}, ${d.getFullYear()}`
+}

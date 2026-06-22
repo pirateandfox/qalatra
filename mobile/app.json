@@ -18,7 +18,8 @@
       "package": "com.qalatra.app"
     },
     "plugins": [
-      "expo-asset"
+      "expo-asset",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {

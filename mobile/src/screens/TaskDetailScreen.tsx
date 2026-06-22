@@ -22,7 +22,6 @@ import {
   fetchSubtasks,
   fetchTask,
   queueAgentJob,
-  today,
   updateTask,
   type AgentJob,
   type Attachment,
@@ -34,9 +33,23 @@ import {
 import type { TaskDetailProps } from '../navigation/types'
 import { useLoader } from '../lib/useLoader'
 import { ErrorView, Loading, Screen } from '../components/ui'
-import { ButtonRow, ChipRow, type ChipOption, type ChipValue } from '../components/ChipRow'
-import { nextWeekStart, thisWeekend, tomorrow } from '../lib/dates'
-import { colors, ENERGY_ICONS, priorityColor, radius, space } from '../theme'
+import { ButtonRow, type ChipOption, type ChipValue } from '../components/ChipRow'
+import { MetaCard, MetaRow } from '../components/MetaCard'
+import { SelectSheet } from '../components/SelectSheet'
+import { DateSheet } from '../components/DateSheet'
+import { formatDate, nextWeekStart, thisWeekend, tomorrow } from '../lib/dates'
+import { colors, priorityColor, radius, space } from '../theme'
+
+/** Which metadata picker, if any, is currently open. */
+type SheetKey = 'priority' | 'energy' | 'context' | 'project' | 'recurrence'
+type DateKey = 'due' | 'start'
+
+/** The display label for a selected option value, or null when unset (so the
+ *  summary row falls back to its dimmed placeholder). */
+function valueLabel(options: ChipOption[], value: ChipValue): string | null {
+  if (value == null || value === '') return null
+  return options.find(o => o.value === value)?.label ?? String(value)
+}
 
 const PRIORITY_OPTS: ChipOption[] = [
   { value: null, label: 'None' },
@@ -55,6 +68,13 @@ const RECUR_SHORTHANDS = ['daily', 'weekdays', 'weekly', 'monthly']
 function recurrenceShorthand(r: string | null): ChipValue {
   if (!r) return null
   return RECUR_SHORTHANDS.includes(r) ? r : null
+}
+
+/** A label for the recurrence summary row: the shorthand's friendly name, or
+ *  the raw RRULE string for custom recurrences. */
+function recurrenceLabel(r: string | null): string | null {
+  if (!r) return null
+  return RECUR_OPTS.find(o => o.value === r)?.label ?? r
 }
 
 export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
@@ -77,6 +97,8 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
   const [description, setDescription] = useState('')
   const [notes, setNotes] = useState('')
   const [newNote, setNewNote] = useState('')
+  const [sheet, setSheet] = useState<SheetKey | null>(null)
+  const [dateSheet, setDateSheet] = useState<DateKey | null>(null)
 
   const task = data?.task
   useEffect(() => {
@@ -103,11 +125,12 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
   if (error || !task) return <ErrorView message={error ?? 'Task not found'} onRetry={reload} />
 
   const done = task.status === 'done'
-  const pColor = priorityColor(task.my_priority)
-  const energy = task.energy_required ? ENERGY_ICONS[task.energy_required] : null
 
   const contextOpts: ChipOption[] = [{ value: null, label: 'None' }, ...(data?.contexts ?? []).map(c => ({ value: c.slug, label: c.label }))]
   const projectOpts: ChipOption[] = [{ value: null, label: 'None' }, ...(data?.projects ?? []).map(p => ({ value: p.name, label: p.name }))]
+
+  // Apply an edit, then close whichever picker is open.
+  const setField = (fields: Record<string, unknown>) => { setSheet(null); act(() => updateTask(taskId, fields)) }
 
   return (
     <Screen>
@@ -123,13 +146,10 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             onBlur={() => title.trim() && title !== task.title && act(() => api.updateTitle(taskId, title.trim()))}
           />
 
-          <View style={styles.metaRow}>
-            {pColor ? <View style={[styles.pill, { borderColor: pColor }]}><Text style={[styles.pillText, { color: pColor }]}>P{task.my_priority}</Text></View> : null}
-            {task.context ? <Meta text={task.context} /> : null}
-            {task.project ? <Meta text={task.project} /> : null}
-            {task.due_date ? <Meta text={`due ${task.due_date}`} /> : null}
-            {energy ? <Meta text={energy} /> : null}
-            <Meta text={task.status} />
+          <View style={styles.statusRow}>
+            <View style={[styles.statusBadge, done && styles.statusBadgeDone]}>
+              <Text style={[styles.statusText, done && styles.statusTextDone]}>{task.status}</Text>
+            </View>
           </View>
 
           <View style={styles.actions}>
@@ -142,22 +162,17 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             <Action label="Skip" onPress={() => act(() => api.skip(taskId), { back: true })} disabled={busy} />
           </View>
 
-          {/* Editable properties */}
-          <ChipRow label="Priority" value={task.my_priority} options={PRIORITY_OPTS} onChange={v => act(() => updateTask(taskId, { my_priority: v }))} />
-          <ChipRow label="Energy" value={task.energy_required} options={ENERGY_OPTS} onChange={v => act(() => updateTask(taskId, { energy_required: v }))} />
-          <ChipRow label="Context" value={task.context} options={contextOpts} onChange={v => act(() => updateTask(taskId, { context: v }))} />
-          <ChipRow label="Project" value={task.project} options={projectOpts} onChange={v => act(() => updateTask(taskId, { project: v }))} />
-          <ChipRow label="Recurrence" value={recurrenceShorthand(task.recurrence)} options={RECUR_OPTS} onChange={v => act(() => api.updateRecurrence(taskId, (v as string | null)))} />
-          <ButtonRow
-            label="Due date"
-            actions={[
-              { label: 'Today', onPress: () => act(() => api.updateDueDate(taskId, today())) },
-              { label: 'Tomorrow', onPress: () => act(() => api.updateDueDate(taskId, tomorrow())) },
-              { label: 'Weekend', onPress: () => act(() => api.updateDueDate(taskId, thisWeekend())) },
-              { label: 'Next wk', onPress: () => act(() => api.updateDueDate(taskId, nextWeekStart())) },
-              { label: 'Clear', onPress: () => act(() => api.updateDueDate(taskId, null)) },
-            ]}
-          />
+          {/* Editable metadata — tap a row to open its picker */}
+          <MetaCard>
+            <MetaRow label="Priority" value={valueLabel(PRIORITY_OPTS, task.my_priority)} placeholder="None" valueColor={priorityColor(task.my_priority)} onPress={() => setSheet('priority')} />
+            <MetaRow label="Energy" value={valueLabel(ENERGY_OPTS, task.energy_required)} placeholder="None" onPress={() => setSheet('energy')} />
+            <MetaRow label="Context" value={valueLabel(contextOpts, task.context)} placeholder="None" onPress={() => setSheet('context')} />
+            <MetaRow label="Project" value={valueLabel(projectOpts, task.project)} placeholder="None" onPress={() => setSheet('project')} />
+            <MetaRow label="Due" value={formatDate(task.due_date)} placeholder="No date" onPress={() => setDateSheet('due')} />
+            <MetaRow label="Start" value={formatDate(task.start_date)} placeholder="No date" onPress={() => setDateSheet('start')} />
+            <MetaRow label="Recurrence" value={recurrenceLabel(task.recurrence)} placeholder="None" onPress={() => setSheet('recurrence')} />
+          </MetaCard>
+
           <ButtonRow
             label="Snooze"
             actions={[
@@ -271,12 +286,63 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
           <View style={styles.footer} />
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <SelectSheet
+        visible={sheet === 'priority'}
+        title="Priority"
+        options={PRIORITY_OPTS}
+        value={task.my_priority}
+        onSelect={v => setField({ my_priority: v == null ? null : Number(v) })}
+        onClose={() => setSheet(null)}
+      />
+      <SelectSheet
+        visible={sheet === 'energy'}
+        title="Energy"
+        options={ENERGY_OPTS}
+        value={task.energy_required}
+        onSelect={v => setField({ energy_required: v })}
+        onClose={() => setSheet(null)}
+      />
+      <SelectSheet
+        visible={sheet === 'context'}
+        title="Context"
+        options={contextOpts}
+        value={task.context}
+        onSelect={v => setField({ context: v })}
+        onClose={() => setSheet(null)}
+      />
+      <SelectSheet
+        visible={sheet === 'project'}
+        title="Project"
+        options={projectOpts}
+        value={task.project}
+        onSelect={v => setField({ project: v })}
+        onClose={() => setSheet(null)}
+      />
+      <SelectSheet
+        visible={sheet === 'recurrence'}
+        title="Recurrence"
+        options={RECUR_OPTS}
+        value={recurrenceShorthand(task.recurrence)}
+        onSelect={v => { setSheet(null); act(() => api.updateRecurrence(taskId, v as string | null)) }}
+        onClose={() => setSheet(null)}
+      />
+      <DateSheet
+        visible={dateSheet === 'due'}
+        title="Due date"
+        value={task.due_date}
+        onChange={iso => act(() => api.updateDueDate(taskId, iso))}
+        onClose={() => setDateSheet(null)}
+      />
+      <DateSheet
+        visible={dateSheet === 'start'}
+        title="Start date"
+        value={task.start_date}
+        onChange={iso => act(() => updateTask(taskId, { start_date: iso }))}
+        onClose={() => setDateSheet(null)}
+      />
     </Screen>
   )
-}
-
-function Meta({ text }: { text: string }) {
-  return <View style={styles.metaPill}><Text style={styles.metaPillText}>{text}</Text></View>
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -304,11 +370,11 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   content: { padding: space.lg },
   title: { color: colors.text, fontSize: 22, fontWeight: '600', lineHeight: 28 },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.md },
-  metaPill: { backgroundColor: colors.surface, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 3 },
-  metaPillText: { color: colors.muted, fontSize: 12 },
-  pill: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 3 },
-  pillText: { fontSize: 12, fontWeight: '700' },
+  statusRow: { flexDirection: 'row', marginTop: space.md },
+  statusBadge: { backgroundColor: colors.surface, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 3 },
+  statusBadgeDone: { backgroundColor: colors.selected },
+  statusText: { color: colors.muted, fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
+  statusTextDone: { color: colors.success },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.lg },
   action: { borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radius.sm, paddingHorizontal: space.md, paddingVertical: space.sm },
   actionPrimary: { backgroundColor: colors.accentStrong, borderColor: colors.accentStrong },
