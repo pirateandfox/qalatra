@@ -87,6 +87,26 @@ export function isGoogleFont(family: string): boolean {
   return GOOGLE_FONTS.includes(family)
 }
 
+const GENERIC_FAMILIES = new Set([
+  'serif', 'sans-serif', 'monospace', 'cursive', 'fantasy',
+  'system-ui', 'ui-sans-serif', 'ui-serif', 'ui-monospace',
+])
+
+/**
+ * Whether a font should be loaded from Google Fonts: the curated list PLUS any
+ * custom font the user typed — i.e. a specific (non-stack), non-system,
+ * non-generic family. System fonts and generic CSS families are left to the OS.
+ * A custom name that isn't actually on Google fails its stylesheet request
+ * harmlessly and falls back to a locally-installed font of the same name.
+ */
+export function loadsFromGoogle(family: string): boolean {
+  const f = family.trim()
+  if (!f || f.includes(',')) return false
+  if (FONT_OPTIONS.includes(f)) return false
+  if (GENERIC_FAMILIES.has(f.toLowerCase())) return false
+  return true
+}
+
 export const PAGE_DIMS = {
   letter: { width: 816, height: 1056 },
   a4: { width: 794, height: 1123 },

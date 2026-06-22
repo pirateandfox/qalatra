@@ -1,5 +1,5 @@
 import { marked } from 'marked'
-import { type StyleConfig, PAGE_DIMS, isGoogleFont, googleFontUrl } from '../types'
+import { type StyleConfig, PAGE_DIMS, loadsFromGoogle, googleFontUrl } from '../types'
 import { resolveColors } from './contentStyles'
 import { type PageData } from './pagination'
 
@@ -140,7 +140,7 @@ export function buildPagedExportHTML(
     })
     .join('\n')
 
-  const googleLink = isGoogleFont(style.fontFamily)
+  const googleLink = loadsFromGoogle(style.fontFamily)
     ? `<link rel="stylesheet" href="${googleFontUrl(style.fontFamily)}">`
     : ''
   return `<!DOCTYPE html>

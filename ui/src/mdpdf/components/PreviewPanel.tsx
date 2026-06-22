@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import DOMPurify from 'dompurify'
-import { type StyleConfig, PAGE_DIMS, isGoogleFont, googleFontUrl } from '../types'
+import { type StyleConfig, PAGE_DIMS, loadsFromGoogle, googleFontUrl } from '../types'
 import { resolveColors } from '../utils/contentStyles'
 import { parseMarkdownToBlocks, measureBlockHeights, buildPages, type PageData } from '../utils/pagination'
 
@@ -109,7 +109,7 @@ export function PreviewPanel({ markdown, style, onInsertBreakAfter, onRemoveBrea
   useEffect(() => {
     const linkId = '__topdf_gfont__'
     const existing = document.getElementById(linkId)
-    if (isGoogleFont(style.fontFamily)) {
+    if (loadsFromGoogle(style.fontFamily)) {
       const url = googleFontUrl(style.fontFamily)
       if (existing instanceof HTMLLinkElement && existing.href === url) return
       existing?.remove()

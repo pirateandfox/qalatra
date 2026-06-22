@@ -717,6 +717,25 @@ function setupLocalApiIpc(dbDir) {
   ipcMain.handle('server:service-start', () => startLocalServerService(dbDir))
   ipcMain.handle('server:service-stop', () => stopLocalServerService(dbDir))
   ipcMain.handle('server:service-restart', () => restartLocalServerService(dbDir))
+
+  // Full Google Fonts family list for the markdown editor's font picker. Fetched
+  // in the main process to avoid renderer CORS, parsed from Google's metadata
+  // endpoint, and cached for the session. Returns [] on failure so the renderer
+  // falls back to its curated list.
+  let cachedGoogleFonts = null
+  ipcMain.handle('fonts:google', async () => {
+    if (cachedGoogleFonts) return cachedGoogleFonts
+    try {
+      const res = await fetch('https://fonts.google.com/metadata/fonts')
+      const text = await res.text()
+      const json = JSON.parse(text.slice(text.indexOf('{')))
+      const families = (json.familyMetadataList || []).map(f => f.family).filter(Boolean)
+      if (families.length) cachedGoogleFonts = families
+      return families
+    } catch {
+      return []
+    }
+  })
 }
 
 app.whenReady().then(async () => {

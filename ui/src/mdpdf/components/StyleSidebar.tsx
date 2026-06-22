@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { type StyleConfig, FONT_OPTIONS, GOOGLE_FONTS, COLOR_PRESETS } from '../types'
 
 interface Props {
@@ -53,7 +53,42 @@ function ColorRow({ label, value, onChange }: { label: string; value: string; on
   )
 }
 
+const SORTED_SYSTEM_FONTS = [...FONT_OPTIONS].sort((a, b) => a.localeCompare(b))
+const SORTED_GOOGLE_FONTS = [...GOOGLE_FONTS].sort((a, b) => a.localeCompare(b))
+
 export function StyleSidebar({ style, onChange }: Props) {
+  const [fontDraft, setFontDraft] = useState<string | null>(null)
+  // Real installed fonts (Local Font Access API) + the full Google catalog
+  // (fetched in the Electron main process to dodge CORS). Both fall back to the
+  // curated static lists if unavailable.
+  const [systemFonts, setSystemFonts] = useState<string[]>(SORTED_SYSTEM_FONTS)
+  const [googleFonts, setGoogleFonts] = useState<string[]>(SORTED_GOOGLE_FONTS)
+  useEffect(() => {
+    let cancelled = false
+    const w = window as Window & {
+      queryLocalFonts?: () => Promise<Array<{ family: string }>>
+      electronAPI?: { invoke?: (channel: string) => Promise<unknown> }
+    }
+    if (typeof w.queryLocalFonts === 'function') {
+      w.queryLocalFonts()
+        .then(fonts => {
+          if (cancelled) return
+          const fams = [...new Set(fonts.map(f => f.family))].sort((a, b) => a.localeCompare(b))
+          if (fams.length) setSystemFonts(fams)
+        })
+        .catch(() => {})
+    }
+    if (w.electronAPI?.invoke) {
+      w.electronAPI.invoke('fonts:google')
+        .then(list => {
+          if (cancelled || !Array.isArray(list) || !list.length) return
+          setGoogleFonts([...(list as string[])].sort((a, b) => a.localeCompare(b)))
+        })
+        .catch(() => {})
+    }
+    return () => { cancelled = true }
+  }, [])
+  const knownFonts = useMemo(() => new Set([...systemFonts, ...googleFonts]), [systemFonts, googleFonts])
   function update(partial: Partial<StyleConfig>) { onChange({ ...style, ...partial }) }
   function updateMargin(side: keyof StyleConfig['margins'], value: number) {
     onChange({ ...style, margins: { ...style.margins, [side]: value } })
@@ -71,14 +106,35 @@ export function StyleSidebar({ style, onChange }: Props) {
       <div className="sidebar-section">
         <div className="sidebar-label">Typography</div>
         <div style={{ marginBottom: 10 }}>
-          <select value={style.fontFamily} onChange={(e) => update({ fontFamily: e.target.value })}>
-            <optgroup label="System Fonts">
-              {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
-            </optgroup>
-            <optgroup label="Google Fonts">
-              {GOOGLE_FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
-            </optgroup>
-          </select>
+          <input
+            list="md-font-options"
+            value={fontDraft !== null ? fontDraft : style.fontFamily}
+            placeholder="Pick or type any font…"
+            spellCheck={false}
+            style={{ width: '100%', background: '#27272a', color: '#e4e4e7', border: '1px solid #3f3f46',
+              borderRadius: 4, padding: '6px 8px', fontSize: 13, outline: 'none', fontFamily: 'inherit' }}
+            onChange={(e) => {
+              const v = e.target.value
+              // Selecting a known font commits immediately; typing a custom name
+              // stays a draft until blur/Enter so the preview doesn't churn.
+              if (knownFonts.has(v)) { update({ fontFamily: v }); setFontDraft(null) }
+              else setFontDraft(v)
+            }}
+            onBlur={() => {
+              if (fontDraft !== null) {
+                if (fontDraft.trim()) update({ fontFamily: fontDraft.trim() })
+                setFontDraft(null)
+              }
+            }}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+          />
+          <datalist id="md-font-options">
+            {systemFonts.map((f) => <option key={`s-${f}`} value={f} />)}
+            {googleFonts.map((f) => <option key={`g-${f}`} value={f} />)}
+          </datalist>
+          <div style={{ fontSize: 11, color: '#71717a', marginTop: 4 }}>
+            Pick from the list, or type any installed or Google font.
+          </div>
         </div>
         <Slider label="Body size" value={style.fontSize} min={8} max={18} step={0.5} unit="pt" onChange={(v) => update({ fontSize: v })} />
         <Slider label="Line height" value={style.lineHeight} min={1.0} max={2.5} step={0.05} onChange={(v) => update({ lineHeight: v })} />
