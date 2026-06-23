@@ -24,6 +24,7 @@
     "expo-file-system": "~56.0.8",
     "expo-image-picker": "~56.0.18",
     "expo-sharing": "~56.0.18",
+    "expo-splash-screen": "~56.0.10",
     "expo-status-bar": "~56.0.4",
     "expo-updates": "~56.0.19",
     "punycode": "^2.3.1",

@@ -7,6 +7,7 @@
     "scheme": "qalatra",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.qalatra.app",
@@ -15,7 +16,11 @@
       }
     },
     "android": {
-      "package": "com.qalatra.app"
+      "package": "com.qalatra.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0d0e18"
+      }
     },
     "plugins": [
       "expo-asset",
@@ -26,7 +31,16 @@
           "photosPermission": "Attach photos and screenshots to your tasks."
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#0d0e18"
+        }
+      ]
     ],
     "extra": {
       "eas": {
