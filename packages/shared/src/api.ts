@@ -110,6 +110,20 @@ export async function removeTerminalSession(id: string): Promise<void> {
   await httpJson(active, `/api/terminal/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
+/** Upload an image (dragged/pasted into the terminal) to the backend, which
+ *  writes it to a temp file ON THE SERVER and returns that path. The path is
+ *  reachable by the pty/CLI — which on a remote backend runs on a different
+ *  machine than the client — unlike a client-local file path. */
+export async function saveTerminalImage(id: string, bytes: Uint8Array, ext: string): Promise<string> {
+  const active = await currentServerInstance()
+  const data = await httpJson(active, `/api/terminal/sessions/${encodeURIComponent(id)}/image?ext=${encodeURIComponent(ext)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: bytes as unknown as BodyInit,
+  })
+  return data.path as string
+}
+
 export async function terminalSocketUrl(id: string, cols: number, rows: number): Promise<string> {
   const active = await currentServerInstance()
   const url = new URL(active.url)

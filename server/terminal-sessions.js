@@ -255,6 +255,21 @@ export function createTerminalManager({ dataDir, loadSettings }) {
     })
   }
 
+  // Persist an image (dragged/pasted into the terminal UI) to a temp file ON THE
+  // SERVER, so the path is reachable by the pty/CLI running here — which on a
+  // remote backend is a different machine than the Electron client. Returns the
+  // absolute server-side path to insert at the prompt.
+  function saveImage(id, buffer, ext) {
+    getSession(id) // authorize: throws if the session doesn't exist
+    if (!buffer || !buffer.length) throw new Error('Empty image payload')
+    const dir = path.join(os.tmpdir(), 'qalatra-terminal-images')
+    fs.mkdirSync(dir, { recursive: true })
+    const safeExt = /^[a-z0-9]{1,5}$/i.test(String(ext || '')) ? ext : 'png'
+    const file = path.join(dir, `paste-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${safeExt}`)
+    fs.writeFileSync(file, buffer)
+    return { path: file }
+  }
+
   function close() {
     for (const proc of activePtys) {
       try { proc.kill() } catch {}
@@ -269,6 +284,7 @@ export function createTerminalManager({ dataDir, loadSettings }) {
     updateSession,
     killSession,
     attachWebSocket,
+    saveImage,
     close,
   }
 }

@@ -232,6 +232,11 @@ async function main() {
           sendJson(res, 200, terminalManager.killSession(id))
           return
         }
+        if (action === 'image' && req.method === 'POST') {
+          const buffer = await parseRawBody(req)
+          sendJson(res, 200, { ok: true, ...terminalManager.saveImage(id, buffer, url.searchParams.get('ext')) })
+          return
+        }
       }
 
       if (url.pathname === '/api/attachments' && req.method === 'GET') {

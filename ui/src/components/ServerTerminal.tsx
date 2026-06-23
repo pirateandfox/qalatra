@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { terminalSocketUrl, type TerminalSession } from '../api'
+import { saveTerminalImage, terminalSocketUrl, type TerminalSession } from '../api'
 import './ServerTerminal.css'
 
 interface Props {
@@ -15,11 +15,14 @@ interface Props {
 type TerminalElectronAPI = {
   writeClipboard?: (text: string) => void
   getPathForFile?: (file: File) => string
-  saveTerminalImage?: (bytes: Uint8Array, ext: string) => Promise<string | null>
 }
 
 function electronAPI(): TerminalElectronAPI | undefined {
   return (window as Window & { electronAPI?: TerminalElectronAPI }).electronAPI
+}
+
+async function fileBytes(file: File): Promise<Uint8Array> {
+  return new Uint8Array(await file.arrayBuffer())
 }
 
 /** Single-quote a path for safe insertion at a shell prompt (handles spaces and
@@ -45,6 +48,10 @@ export default function ServerTerminal({
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  // The xterm mount effect runs once (session is null then), so drop/paste
+  // handlers read the live session id from this ref instead of a stale closure.
+  const sessionIdRef = useRef<string | null>(null)
+  sessionIdRef.current = session?.id ?? null
 
   const sendResize = useCallback(() => {
     const term = termRef.current
@@ -127,8 +134,23 @@ export default function ServerTerminal({
       return true
     })
 
-    // Drag an image (or any file) onto the terminal → insert its path at the
-    // prompt, like iTerm/Warp. Claude Code & friends then read it as an image.
+    // Persist an image to the SERVER (where the pty/CLI runs — a different box on
+    // a remote backend) and return its server-side path, or null on failure.
+    const uploadImage = async (file: File): Promise<string | null> => {
+      const id = sessionIdRef.current
+      if (!id) return null
+      try {
+        return await saveTerminalImage(id, await fileBytes(file), extForType(file.type))
+      } catch (err) {
+        console.error('[terminal] image upload failed:', err)
+        return null
+      }
+    }
+
+    // Drag an image (or any file) onto the terminal → insert a path at the prompt,
+    // like iTerm/Warp. Images upload to the server so the path is reachable by the
+    // (possibly remote) pty; other files fall back to their local path (only valid
+    // when the backend runs on this machine).
     const onDragOver = (e: DragEvent) => {
       if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
         e.preventDefault()
@@ -144,19 +166,18 @@ export default function ServerTerminal({
       void (async () => {
         const paths: string[] = []
         for (const file of files) {
-          const direct = api?.getPathForFile?.(file)
-          if (direct) { paths.push(direct); continue }
-          // No on-disk path (e.g. dragged from a browser) — persist image bytes.
-          if (file.type.startsWith('image/') && api?.saveTerminalImage) {
-            const buf = new Uint8Array(await file.arrayBuffer())
-            const saved = await api.saveTerminalImage(buf, extForType(file.type))
+          if (file.type.startsWith('image/')) {
+            const saved = await uploadImage(file)
             if (saved) paths.push(saved)
+          } else {
+            const direct = api?.getPathForFile?.(file)
+            if (direct) paths.push(direct)
           }
         }
         insertPaths(paths)
       })()
     }
-    // Paste a screenshot (clipboard image, no file on disk) → temp file → path.
+    // Paste a screenshot (clipboard image) → upload to server → insert path.
     // Non-image pastes fall through to xterm so bracketed text paste is preserved.
     const onPaste = (e: ClipboardEvent) => {
       const imageItem = Array.from(e.clipboardData?.items ?? [])
@@ -166,11 +187,8 @@ export default function ServerTerminal({
       if (!file) return
       e.preventDefault()
       e.stopPropagation()
-      const api = electronAPI()
       void (async () => {
-        if (!api?.saveTerminalImage) return
-        const buf = new Uint8Array(await file.arrayBuffer())
-        const saved = await api.saveTerminalImage(buf, extForType(file.type))
+        const saved = await uploadImage(file)
         if (saved) insertPaths([saved])
       })()
     }
