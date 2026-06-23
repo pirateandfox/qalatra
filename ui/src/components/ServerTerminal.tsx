@@ -142,7 +142,10 @@ export default function ServerTerminal({
       try {
         return await saveTerminalImage(id, await fileBytes(file), extForType(file.type))
       } catch (err) {
-        console.error('[terminal] image upload failed:', err)
+        const msg = err instanceof Error ? err.message : String(err)
+        // Surface failures in the terminal (display-only) instead of dropping
+        // silently — e.g. when the backend hasn't been updated with the endpoint.
+        term.write(`\r\n\x1b[31m⚠ Image upload failed: ${msg}\x1b[0m\r\n`)
         return null
       }
     }
