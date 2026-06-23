@@ -45,7 +45,7 @@ import { ButtonRow, type ChipOption, type ChipValue } from '../components/ChipRo
 import { MetaCard, MetaRow } from '../components/MetaCard'
 import { SelectSheet } from '../components/SelectSheet'
 import { DateSheet } from '../components/DateSheet'
-import { isHttpUrl, isMarkdownLink, linkLabel, parseLinks } from '../lib/links'
+import { isHttpUrl, isMarkdownLink, isServiceLink, linkLabel, parseLinks, serviceLabel } from '../lib/links'
 import { formatDate, nextWeekStart, thisWeekend, tomorrow } from '../lib/dates'
 import { colors, priorityColor, radius, space } from '../theme'
 
@@ -179,7 +179,11 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
   if (error || !task) return <ErrorView message={error ?? 'Task not found'} onRetry={reload} />
 
   const done = task.status === 'done'
-  const links = parseLinks(task.links)
+  // Mirror the desktop split: recognized-platform links become "Links" chips;
+  // plain URLs and .md/doc files go in the Attachments list alongside uploads.
+  const allLinks = parseLinks(task.links)
+  const serviceLinks = allLinks.filter(l => isServiceLink(l.url))
+  const docLinks = allLinks.filter(l => !isServiceLink(l.url))
 
   const contextOpts: ChipOption[] = [{ value: null, label: 'None' }, ...(data?.contexts ?? []).map(c => ({ value: c.slug, label: c.label }))]
   const projectOpts: ChipOption[] = [{ value: null, label: 'None' }, ...(data?.projects ?? []).map(p => ({ value: p.name, label: p.name }))]
@@ -249,28 +253,20 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             />
           </Field>
 
-          {links.length > 0 ? (
+          {serviceLinks.length > 0 || task.source_url ? (
             <Field label="Links">
-              {links.map((link, i) => {
-                // Render server-side .md files in the native reader; everything
-                // else (URLs, remote .md) opens in the system browser.
-                const md = isMarkdownLink(link.url) && !isHttpUrl(link.url)
-                return (
-                  <Pressable
-                    key={`${link.url}-${i}`}
-                    style={styles.link}
-                    onPress={() =>
-                      md
-                        ? navigation.navigate('MarkdownViewer', { path: link.url, title: linkLabel(link) })
-                        : Linking.openURL(link.url).catch(() => {})
-                    }
-                  >
-                    <Text style={styles.linkIcon}>{md ? '📄' : '🔗'}</Text>
-                    <Text style={styles.linkText} numberOfLines={1}>{linkLabel(link)}</Text>
-                    <Text style={styles.linkOpen}>{md ? 'read ›' : 'open ↗'}</Text>
+              <View style={styles.linkChips}>
+                {task.source_url ? (
+                  <Pressable style={styles.linkChip} onPress={() => Linking.openURL(task.source_url!).catch(() => {})}>
+                    <Text style={styles.linkChipText}>{serviceLabel({ url: task.source_url })}</Text>
                   </Pressable>
-                )
-              })}
+                ) : null}
+                {serviceLinks.map((link, i) => (
+                  <Pressable key={`${link.url}-${i}`} style={styles.linkChip} onPress={() => Linking.openURL(link.url).catch(() => {})}>
+                    <Text style={styles.linkChipText}>{serviceLabel(link)}</Text>
+                  </Pressable>
+                ))}
+              </View>
             </Field>
           ) : null}
 
@@ -330,7 +326,26 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             </View>
           </Field>
 
-          <Field label={`Attachments${data && data.attachments.length ? ` (${data.attachments.length})` : ''}`}>
+          <Field label={`Attachments${docLinks.length + (data?.attachments.length ?? 0) ? ` (${docLinks.length + (data?.attachments.length ?? 0)})` : ''}`}>
+            {docLinks.map((link, i) => {
+              // Server-side .md files open in the native reader; everything else
+              // (web URLs, remote .md) opens in the system browser.
+              const md = isMarkdownLink(link.url) && !isHttpUrl(link.url)
+              return (
+                <Pressable
+                  key={`doc-${link.url}-${i}`}
+                  style={styles.attachment}
+                  onPress={() =>
+                    md
+                      ? navigation.navigate('MarkdownViewer', { path: link.url, title: linkLabel(link) })
+                      : Linking.openURL(link.url).catch(() => {})
+                  }
+                >
+                  <Text style={styles.attachmentName} numberOfLines={1}>{md ? '📄 ' : '🔗 '}{linkLabel(link)}</Text>
+                  <Text style={styles.attachmentOpen}>{md ? 'read ›' : 'open ↗'}</Text>
+                </Pressable>
+              )
+            })}
             {data?.attachments.map(a => (
               <View key={a.id} style={styles.attachment}>
                 <Pressable
@@ -490,10 +505,9 @@ const styles = StyleSheet.create({
   logAuthor: { color: colors.muted2, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
   logBody: { color: colors.textDim, fontSize: 14, marginTop: 2 },
   dim: { color: colors.muted2, fontSize: 14 },
-  link: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-  linkIcon: { fontSize: 15 },
-  linkText: { color: colors.textDim, fontSize: 15, flex: 1 },
-  linkOpen: { color: colors.accent, fontSize: 13 },
+  linkChips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  linkChip: { borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radius.sm, paddingHorizontal: space.md, paddingVertical: space.sm, backgroundColor: colors.surface },
+  linkChipText: { color: colors.muted, fontSize: 13, fontWeight: '600' },
   attachment: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   attachmentMain: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   attachmentName: { color: colors.textDim, fontSize: 14, flex: 1, marginRight: space.sm },

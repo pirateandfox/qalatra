@@ -1,3 +1,5 @@
+import { detectPlatform } from '@qalatra/shared'
+
 /** Task links are stored as a JSON array of strings or { url, label } objects —
  *  this mirrors the desktop DetailPanel's parsing and `.md` detection so the two
  *  clients treat the same data identically. */
@@ -33,4 +35,16 @@ export function linkLabel(link: TaskLink): string {
   if (link.label) return link.label
   if (isHttpUrl(link.url)) return link.url.replace(/^https?:\/\//i, '')
   return link.url.split(/[\\/]/).filter(Boolean).pop() || link.url
+}
+
+/** A recognized-platform link (Slack, GitHub, Asana…) shown as a quick chip under
+ *  "Links" — matching the desktop split. Everything else (plain URLs, .md/doc
+ *  files) is a "doc link" that belongs in the Attachments list. Mirrors desktop. */
+export function isServiceLink(url: string): boolean {
+  return detectPlatform(url).key !== 'link' && !isMarkdownLink(url)
+}
+
+/** Label for a service-link chip: explicit label, else the platform name. */
+export function serviceLabel(link: TaskLink): string {
+  return link.label ?? detectPlatform(link.url).label
 }
