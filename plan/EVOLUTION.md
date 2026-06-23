@@ -1,5 +1,30 @@
 # Qalatra — Evolution Notes
 
+## Mobile: full markdown editor via WebView + attachment upload (2026-06-23)
+
+**Full mdpdf editor on mobile/iPad (step 2 of the markdown plan).** Rather than
+rebuild the desktop editor's paginated preview + PDF natively (an inherently-web
+layout engine), the exact `MdView` is reused inside a WebView:
+- `ui/src/mdpdf-webview/main.tsx` is a standalone entry that mounts only `MdView`,
+  seeds the active backend (URL + token, injected by the RN host) into the shared
+  API client so `/api/files` calls authenticate, and posts page errors/close back
+  to the host. Built to ONE self-contained HTML via `vite-plugin-singlefile`
+  (`vite.mdpdf.config.ts`, `npm run build:mdpdf`).
+- The server serves it at `GET /mdpdf` (unauthenticated shell; data calls carry the
+  bearer token). The built artifact is committed at `server/static/mdpdf.html` so a
+  headless server serves it after `git pull` with no UI build step.
+- Mobile `MarkdownEditorScreen` loads `${backend}/mdpdf` in a WebView, injecting
+  `{ serverUrl, token, path }` before load — same-origin, so it works against local
+  or remote backends. Reached via an "⤢ Editor" button in the native reader; the
+  native reader/editor stays the fast default. Build-verified; device test pending.
+
+**Attachment upload + delete on mobile.** The Attachments section was read-only;
+it now has "＋ File" (expo-document-picker) and "📷 Photo" (expo-image-picker,
+camera roll) actions that read the picked file's bytes (`expo-file-system` `new
+File(uri).arrayBuffer()`) and POST to the existing `uploadAttachment` endpoint,
+plus per-item delete (`deleteAttachment`). app.json gains the image-picker
+photo-permission plugin.
+
 ## Mobile: file links + native markdown reader (2026-06-23)
 
 Step 1 of the mobile markdown plan (see EXPO_MOBILE_ROADMAP.md → "Markdown editor

@@ -51,10 +51,13 @@ export function MarkdownViewerScreen({ route, navigation }: MarkdownViewerProps)
             <HeaderButton label={saving ? 'Saving…' : 'Save'} onPress={save} disabled={saving} />
           </HeaderActions>
         ) : data != null ? (
-          <HeaderButton label="Edit" onPress={startEdit} />
+          <HeaderActions>
+            <HeaderButton label="⤢ Editor" muted onPress={() => navigation.navigate('MarkdownEditor', { path, title })} />
+            <HeaderButton label="Edit" onPress={startEdit} />
+          </HeaderActions>
         ) : null,
     })
-  }, [navigation, title, editing, saving, data, startEdit, cancelEdit, save])
+  }, [navigation, title, path, editing, saving, data, startEdit, cancelEdit, save])
 
   if (loading) return <Loading />
   if (error || data == null) return <ErrorView message={error ?? 'Could not load file'} onRetry={reload} />

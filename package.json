@@ -19,6 +19,7 @@
     "electron-dev": "npm run kill && npm run rebuild:electron && sleep 1 && NODE_ENV=development concurrently --names vite,electron --prefix-colors green,magenta \"npm run dev --prefix ui\" \"./node_modules/.bin/electron electron-main.js\"",
     "restart": "npm run kill && sleep 1 && NODE_ENV=development ./node_modules/.bin/electron electron-main.js",
     "build": "npm run build --prefix ui",
+    "build:mdpdf": "npm run build:mdpdf --prefix ui && cp ui/dist-mdpdf/mdpdf.html server/static/mdpdf.html",
     "start": "npm run kill && sleep 1 && NODE_ENV=production ./node_modules/.bin/electron electron-main.js",
     "check-imports": "node scripts/check-imports.mjs",
     "shared:typecheck": "npm run typecheck -w @qalatra/shared",

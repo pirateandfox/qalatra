@@ -103,6 +103,19 @@ async function main() {
       if (boxWebProxy.handleProxy(req, res, url)) return
     }
 
+    // Markdown editor app shell for the mobile/iPad WebView. Served WITHOUT auth
+    // on purpose — it's just static client code; its data calls (/api/files) carry
+    // the bearer token the WebView host injects. Same-origin, so those calls work.
+    if (url.pathname === '/mdpdf' && req.method === 'GET') {
+      const file = path.join(__dirname, 'static', 'mdpdf.html')
+      if (fs.existsSync(file)) {
+        streamFile(req, res, file)
+      } else {
+        sendJson(res, 404, { error: 'mdpdf editor bundle not built (run npm run build:mdpdf)' })
+      }
+      return
+    }
+
     const user = authenticate(authDb, req)
     if (!user) {
       sendJson(res, 401, { error: 'Unauthorized' })

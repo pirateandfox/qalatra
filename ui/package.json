@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:mdpdf": "vite build --config vite.mdpdf.config.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -42,7 +43,8 @@
     "globals": "^17.4.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "^8.0.0"
+    "vite": "^8.0.0",
+    "vite-plugin-singlefile": "^2.3.3"
   },
   "overrides": {
     "dompurify": "^3.4.7"
