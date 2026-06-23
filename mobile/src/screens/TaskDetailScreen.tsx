@@ -11,11 +11,19 @@ import {
   TextInput,
   View,
 } from 'react-native'
+import * as DocumentPicker from 'expo-document-picker'
+import * as ImagePicker from 'expo-image-picker'
+import * as Sharing from 'expo-sharing'
+import { File } from 'expo-file-system'
+import * as FileSystem from 'expo-file-system/legacy'
 import {
   addNote,
   api,
+  currentServerInstance,
+  deleteAttachment,
   fetchAgentJobs,
   fetchAttachments,
+  uploadAttachment,
   fetchContexts,
   fetchNotes,
   fetchProjects,
@@ -120,6 +128,51 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
     } finally {
       setBusy(false)
     }
+  }
+
+  /** Pick a file (or photo) and upload it as a task attachment. Reads the picked
+   *  file's bytes locally and sends them to the existing /api/attachments endpoint. */
+  async function pickAndUploadAttachment() {
+    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true })
+    if (result.canceled || !result.assets?.length) return
+    const asset = result.assets[0]
+    const bytes = Array.from(new Uint8Array(await new File(asset.uri).arrayBuffer()))
+    await uploadAttachment(taskId, asset.name, asset.mimeType ?? 'application/octet-stream', bytes)
+  }
+
+  /** Attach a photo/screenshot from the camera roll — the most common mobile case. */
+  async function pickAndUploadPhoto() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Allow photo access in Settings to attach images.')
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 1 })
+    if (result.canceled || !result.assets?.length) return
+    const asset = result.assets[0]
+    const bytes = Array.from(new Uint8Array(await new File(asset.uri).arrayBuffer()))
+    await uploadAttachment(taskId, asset.fileName ?? 'photo.jpg', asset.mimeType ?? 'image/jpeg', bytes)
+  }
+
+  /** Open an attachment. S3-hosted files have a public URL; locally-stored files
+   *  (no URL) are downloaded via the authenticated content endpoint, then handed
+   *  to the system share/preview sheet. */
+  async function openAttachment(att: Attachment) {
+    if (att.url) {
+      await Linking.openURL(att.url)
+      return
+    }
+    const inst = await currentServerInstance()
+    const dir = FileSystem.cacheDirectory
+    if (!dir) throw new Error('No cache directory available')
+    const safeName = (att.filename || 'attachment').replace(/[^\w.\-]+/g, '_')
+    const { uri } = await FileSystem.downloadAsync(
+      `${inst.url.replace(/\/$/, '')}/api/attachments/${encodeURIComponent(att.id)}/content`,
+      `${dir}${safeName}`,
+      { headers: { Authorization: `Bearer ${inst.token}` } },
+    )
+    if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri)
+    else Alert.alert('Downloaded', uri)
   }
 
   if (loading) return <Loading />
@@ -277,21 +330,36 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             </View>
           </Field>
 
-          {data && data.attachments.length > 0 ? (
-            <Field label={`Attachments (${data.attachments.length})`}>
-              {data.attachments.map(a => (
+          <Field label={`Attachments${data && data.attachments.length ? ` (${data.attachments.length})` : ''}`}>
+            {data?.attachments.map(a => (
+              <View key={a.id} style={styles.attachment}>
                 <Pressable
-                  key={a.id}
-                  style={styles.attachment}
-                  onPress={() => a.url && Linking.openURL(a.url)}
-                  disabled={!a.url}
+                  style={styles.attachmentMain}
+                  onPress={() => act(() => openAttachment(a))}
+                  disabled={busy}
                 >
                   <Text style={styles.attachmentName} numberOfLines={1}>{a.filename}</Text>
-                  {a.url ? <Text style={styles.attachmentOpen}>open ›</Text> : null}
+                  <Text style={styles.attachmentOpen}>open ›</Text>
                 </Pressable>
-              ))}
-            </Field>
-          ) : null}
+                <Pressable
+                  onPress={() =>
+                    Alert.alert('Delete attachment?', a.filename, [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Delete', style: 'destructive', onPress: () => act(() => deleteAttachment(a.id)) },
+                    ])
+                  }
+                  hitSlop={8}
+                  disabled={busy}
+                >
+                  <Text style={styles.attachmentDelete}>✕</Text>
+                </Pressable>
+              </View>
+            ))}
+            <View style={styles.attachmentActions}>
+              <Action label="＋ File" onPress={() => act(() => pickAndUploadAttachment())} disabled={busy} />
+              <Action label="📷 Photo" onPress={() => act(() => pickAndUploadPhoto())} disabled={busy} />
+            </View>
+          </Field>
 
           {task.agent_path ? (
             <Field label="Agent">
@@ -426,9 +494,12 @@ const styles = StyleSheet.create({
   linkIcon: { fontSize: 15 },
   linkText: { color: colors.textDim, fontSize: 15, flex: 1 },
   linkOpen: { color: colors.accent, fontSize: 13 },
-  attachment: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  attachment: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  attachmentMain: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   attachmentName: { color: colors.textDim, fontSize: 14, flex: 1, marginRight: space.sm },
   attachmentOpen: { color: colors.accent, fontSize: 13 },
+  attachmentDelete: { color: colors.muted2, fontSize: 16, paddingLeft: space.md },
+  attachmentActions: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
   job: { marginTop: space.md, padding: space.md, backgroundColor: colors.surface, borderRadius: radius.md },
   jobStatus: { color: colors.muted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
   jobResult: { color: colors.textDim, fontSize: 13, marginTop: 4 },

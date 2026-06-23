@@ -19,7 +19,14 @@
     },
     "plugins": [
       "expo-asset",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Attach photos and screenshots to your tasks."
+        }
+      ],
+      "expo-sharing"
     ],
     "extra": {
       "eas": {
