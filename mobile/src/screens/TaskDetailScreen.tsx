@@ -37,6 +37,7 @@ import { ButtonRow, type ChipOption, type ChipValue } from '../components/ChipRo
 import { MetaCard, MetaRow } from '../components/MetaCard'
 import { SelectSheet } from '../components/SelectSheet'
 import { DateSheet } from '../components/DateSheet'
+import { isHttpUrl, isMarkdownLink, linkLabel, parseLinks } from '../lib/links'
 import { formatDate, nextWeekStart, thisWeekend, tomorrow } from '../lib/dates'
 import { colors, priorityColor, radius, space } from '../theme'
 
@@ -125,6 +126,7 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
   if (error || !task) return <ErrorView message={error ?? 'Task not found'} onRetry={reload} />
 
   const done = task.status === 'done'
+  const links = parseLinks(task.links)
 
   const contextOpts: ChipOption[] = [{ value: null, label: 'None' }, ...(data?.contexts ?? []).map(c => ({ value: c.slug, label: c.label }))]
   const projectOpts: ChipOption[] = [{ value: null, label: 'None' }, ...(data?.projects ?? []).map(p => ({ value: p.name, label: p.name }))]
@@ -193,6 +195,31 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
               onBlur={() => description !== (task.description ?? '') && act(() => api.updateDescription(taskId, description))}
             />
           </Field>
+
+          {links.length > 0 ? (
+            <Field label="Links">
+              {links.map((link, i) => {
+                // Render server-side .md files in the native reader; everything
+                // else (URLs, remote .md) opens in the system browser.
+                const md = isMarkdownLink(link.url) && !isHttpUrl(link.url)
+                return (
+                  <Pressable
+                    key={`${link.url}-${i}`}
+                    style={styles.link}
+                    onPress={() =>
+                      md
+                        ? navigation.navigate('MarkdownViewer', { path: link.url, title: linkLabel(link) })
+                        : Linking.openURL(link.url).catch(() => {})
+                    }
+                  >
+                    <Text style={styles.linkIcon}>{md ? '📄' : '🔗'}</Text>
+                    <Text style={styles.linkText} numberOfLines={1}>{linkLabel(link)}</Text>
+                    <Text style={styles.linkOpen}>{md ? 'read ›' : 'open ↗'}</Text>
+                  </Pressable>
+                )
+              })}
+            </Field>
+          ) : null}
 
           <Field label="Notes">
             <TextInput
@@ -395,6 +422,10 @@ const styles = StyleSheet.create({
   logAuthor: { color: colors.muted2, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
   logBody: { color: colors.textDim, fontSize: 14, marginTop: 2 },
   dim: { color: colors.muted2, fontSize: 14 },
+  link: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  linkIcon: { fontSize: 15 },
+  linkText: { color: colors.textDim, fontSize: 15, flex: 1 },
+  linkOpen: { color: colors.accent, fontSize: 13 },
   attachment: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   attachmentName: { color: colors.textDim, fontSize: 14, flex: 1, marginRight: space.sm },
   attachmentOpen: { color: colors.accent, fontSize: 13 },

@@ -1,5 +1,23 @@
 # Qalatra — Evolution Notes
 
+## Mobile: file links + native markdown reader (2026-06-23)
+
+Step 1 of the mobile markdown plan (see EXPO_MOBILE_ROADMAP.md → "Markdown editor
+& file links"). The mobile task detail had no Links section at all; now:
+
+- **Links section** on `TaskDetailScreen` — parses `task.links` (same JSON
+  string-or-`{url,label}` model as the desktop DetailPanel, via `lib/links.ts`)
+  and lists each as a tappable row.
+- **Native markdown reader** (`MarkdownViewerScreen`) — tapping a server-side
+  `.md` link opens it in-app, rendered natively with `react-native-markdown-
+  display` (pure JS, no native rebuild). Content loads over the shared
+  `/api/files` endpoint, so it works against any backend.
+- Routing: server `.md` paths → native reader; URLs and remote `.md` → system
+  browser. Registered `MarkdownViewer` in the Task and More stacks.
+
+The full editor/PDF (WebView reuse of `MdView`) remains step 2; this reader is
+deliberately the read-only front door and is not throwaway toward it.
+
 ## Mobile task detail redesign — summary card + sheet pickers (2026-06-22)
 
 The mobile (Expo) `TaskDetailScreen` was a wall of seven stacked, horizontally

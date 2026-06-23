@@ -9,6 +9,7 @@ import { PriorityScreen } from '../screens/PriorityScreen'
 import { BacklogScreen, CodeScreen, ReadingScreen } from '../screens/lists'
 import { TaskDetailScreen } from '../screens/TaskDetailScreen'
 import { CreateTaskScreen } from '../screens/CreateTaskScreen'
+import { MarkdownViewerScreen } from '../screens/MarkdownViewerScreen'
 import { ToolsScreen } from '../screens/ToolsScreen'
 import { MoreScreen } from '../screens/MoreScreen'
 import { DailyNoteScreen } from '../screens/DailyNoteScreen'
@@ -45,6 +46,7 @@ function TaskStack({ list, title }: { list: ComponentType; title: string }) {
       />
       <Stack.Screen name="TaskDetail" component={TaskDetailScreen} options={{ title: 'Task' }} />
       <Stack.Screen name="CreateTask" component={CreateTaskScreen} options={{ title: 'New Task', presentation: 'modal' }} />
+      <Stack.Screen name="MarkdownViewer" component={MarkdownViewerScreen} options={{ title: 'Document' }} />
     </Stack.Navigator>
   )
 }
@@ -79,6 +81,7 @@ function MoreStack() {
       <Stack.Screen name="AddInstance" component={AddInstanceScreen} options={{ title: 'Add Backend', presentation: 'modal' }} />
       <Stack.Screen name="TaskDetail" component={TaskDetailScreen} options={{ title: 'Task' }} />
       <Stack.Screen name="CreateTask" component={CreateTaskScreen} options={{ title: 'New Task', presentation: 'modal' }} />
+      <Stack.Screen name="MarkdownViewer" component={MarkdownViewerScreen} options={{ title: 'Document' }} />
     </Stack.Navigator>
   )
 }
