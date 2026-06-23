@@ -1,25 +1,83 @@
-import { useEffect } from 'react'
-import { ScrollView, StyleSheet } from 'react-native'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import Markdown from 'react-native-markdown-display'
-import { readTextFile } from '@qalatra/shared'
+import { readTextFile, writeTextFile } from '@qalatra/shared'
 import type { MarkdownViewerProps } from '../navigation/types'
 import { useLoader } from '../lib/useLoader'
 import { ErrorView, Loading, Screen } from '../components/ui'
-import { colors, space } from '../theme'
+import { colors, radius, space } from '../theme'
 
-/** Read-only native renderer for a `.md` file opened from a task's links. Loads
- *  the content over the shared /api/files endpoint (works on any backend) and
- *  renders it with native components — no WebView. The full editor comes later. */
+/** Renders a `.md` file opened from a task's links. Read mode renders natively
+ *  with react-native-markdown-display; Edit mode is a native source editor that
+ *  saves over the shared /api/files endpoint. No WebView — the full mdpdf editor
+ *  (CodeMirror + paginated preview + PDF) is a later, WebView-based step. */
 export function MarkdownViewerScreen({ route, navigation }: MarkdownViewerProps) {
   const { path, title } = route.params
   const { data, loading, error, reload } = useLoader(() => readTextFile(path), [path])
 
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const draftRef = useRef('')
+  draftRef.current = draft
+
+  const startEdit = useCallback(() => {
+    setDraft(data ?? '')
+    setEditing(true)
+  }, [data])
+
+  const cancelEdit = useCallback(() => setEditing(false), [])
+
+  const save = useCallback(async () => {
+    setSaving(true)
+    try {
+      await writeTextFile(path, draftRef.current)
+      setEditing(false)
+      await reload()
+    } catch (err) {
+      Alert.alert('Save failed', err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }, [path, reload])
+
   useEffect(() => {
-    if (title) navigation.setOptions({ title })
-  }, [navigation, title])
+    navigation.setOptions({
+      title: title ?? 'Document',
+      headerRight: () =>
+        editing ? (
+          <HeaderActions>
+            <HeaderButton label="Cancel" onPress={cancelEdit} muted disabled={saving} />
+            <HeaderButton label={saving ? 'Saving…' : 'Save'} onPress={save} disabled={saving} />
+          </HeaderActions>
+        ) : data != null ? (
+          <HeaderButton label="Edit" onPress={startEdit} />
+        ) : null,
+    })
+  }, [navigation, title, editing, saving, data, startEdit, cancelEdit, save])
 
   if (loading) return <Loading />
   if (error || data == null) return <ErrorView message={error ?? 'Could not load file'} onRetry={reload} />
+
+  if (editing) {
+    return (
+      <Screen>
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <TextInput
+            style={styles.editor}
+            value={draft}
+            onChangeText={setDraft}
+            multiline
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="Markdown…"
+            placeholderTextColor={colors.muted2}
+            textAlignVertical="top"
+          />
+        </KeyboardAvoidingView>
+      </Screen>
+    )
+  }
 
   return (
     <Screen>
@@ -30,8 +88,34 @@ export function MarkdownViewerScreen({ route, navigation }: MarkdownViewerProps)
   )
 }
 
+function HeaderActions({ children }: { children: React.ReactNode }) {
+  return <View style={styles.headerActions}>{children}</View>
+}
+
+function HeaderButton({ label, onPress, disabled, muted }: { label: string; onPress: () => void; disabled?: boolean; muted?: boolean }) {
+  return (
+    <Pressable onPress={onPress} disabled={disabled} hitSlop={8}>
+      <Text style={[styles.headerBtn, muted && styles.headerBtnMuted, disabled && styles.headerBtnDim]}>{label}</Text>
+    </Pressable>
+  )
+}
+
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   content: { padding: space.lg, paddingBottom: 60 },
+  editor: {
+    flex: 1,
+    color: colors.textDim,
+    backgroundColor: colors.bg,
+    fontFamily: 'Menlo',
+    fontSize: 14,
+    lineHeight: 20,
+    padding: space.lg,
+  },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: space.lg },
+  headerBtn: { color: colors.accent, fontSize: 16, fontWeight: '600', marginLeft: space.lg },
+  headerBtnMuted: { color: colors.muted, fontWeight: '400' },
+  headerBtnDim: { opacity: 0.5 },
 })
 
 // react-native-markdown-display merges these over its defaults (keys are AST
@@ -52,11 +136,11 @@ const mdStyles = {
     paddingVertical: space.xs,
     marginBottom: space.md,
   },
-  code_inline: { backgroundColor: colors.surface2, color: colors.textDim, borderRadius: 4, paddingHorizontal: 4, fontFamily: mono, fontSize: 14 },
-  fence: { backgroundColor: colors.surface, color: colors.textDim, borderColor: colors.border, borderWidth: 1, borderRadius: 8, padding: space.md, fontFamily: mono, fontSize: 13 },
-  code_block: { backgroundColor: colors.surface, color: colors.textDim, borderColor: colors.border, borderWidth: 1, borderRadius: 8, padding: space.md, fontFamily: mono, fontSize: 13 },
+  code_inline: { backgroundColor: colors.surface2, color: colors.textDim, borderRadius: radius.sm, paddingHorizontal: 4, fontFamily: mono, fontSize: 14 },
+  fence: { backgroundColor: colors.surface, color: colors.textDim, borderColor: colors.border, borderWidth: 1, borderRadius: radius.md, padding: space.md, fontFamily: mono, fontSize: 13 },
+  code_block: { backgroundColor: colors.surface, color: colors.textDim, borderColor: colors.border, borderWidth: 1, borderRadius: radius.md, padding: space.md, fontFamily: mono, fontSize: 13 },
   hr: { backgroundColor: colors.border, height: StyleSheet.hairlineWidth, marginVertical: space.md },
-  table: { borderColor: colors.border, borderWidth: 1, borderRadius: 6, marginBottom: space.md },
+  table: { borderColor: colors.border, borderWidth: 1, borderRadius: radius.sm, marginBottom: space.md },
   thead: { backgroundColor: colors.surface },
   th: { borderColor: colors.border, padding: space.sm, color: colors.text },
   td: { borderColor: colors.border, padding: space.sm },
