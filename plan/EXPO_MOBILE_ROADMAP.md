@@ -191,7 +191,7 @@ becomes `emitter.on('instance-config', cb)`. React (both platforms) subscribes v
       schedule; add device-token registration + a send path). This is the headline
       mobile-only win.
 - [ ] Port heavier views adapted for tablet (projects dashboard, habits, daily
-      note; markdown editor on iPad if worthwhile).
+      note; markdown editor — see "Markdown editor & file links" below).
 - [ ] Offline read cache (optional, later) — the data layer is already a clean
       client, so a cache layer can sit under `api.ts` without screen changes.
 
@@ -200,9 +200,79 @@ becomes `emitter.on('instance-config', cb)`. React (both platforms) subscribes v
 ## Explicitly NOT ported to mobile (at least initially)
 - **Embedded terminal** (`node-pty` / tmux WebSocket) — desktop/server-only.
 - **Local server lifecycle** — mobile is remote-only by design.
-- **PDF export / print pipeline** — desktop-oriented; revisit for iPad if needed.
+- ~~**PDF export / print pipeline**~~ — superseded: the markdown editor (incl. its
+  PDF pipeline) IS planned for mobile/iPad via WebView reuse. See the next section.
 
-These stay in `ui/` and never enter `@qalatra/shared`.
+The first two stay in `ui/` and never enter `@qalatra/shared`.
+
+---
+
+## Markdown editor & file links on mobile
+
+The desktop "markdown editor" is the **mdpdf overlay (`ui/src/mdpdf/MdView.tsx`)**
+that opens when you click a `.md` file/link. (Distinct from the plain workspace file
+editor, `ui/src/components/WorkspaceFilesView.tsx`.) Two related gaps on mobile:
+
+1. **File links are entirely absent on mobile.** The mobile `TaskDetailScreen`
+   renders *attachments* but has no Links section at all — so the desktop "click a
+   file link → open it (and `.md` → editor)" flow doesn't exist yet.
+2. **No markdown rendering or editor** of any kind on mobile (description/notes are
+   plain `TextInput`; raw markdown shows as raw text).
+
+### What the desktop editor actually is (sized by reading the code)
+
+- **Editor pane (`MarkdownEditor.tsx`, ~120 lines): basic.** CodeMirror configured
+  minimally — line numbers, markdown syntax coloring, undo/redo, line-wrap, an
+  "insert page break" command. Effectively a styled textarea. A native `TextInput`
+  replicates ~all of it. **This is not the hard part.**
+- **Preview pane (`PreviewPanel.tsx` + `utils/pagination.ts` + `contentStyles.ts`):
+  the whole value, and irreducibly web.** It's a small **HTML layout + pagination
+  engine**: parses markdown → HTML blocks, *measures their pixel heights in the DOM*
+  (`measureBlockHeights`) to decide page breaks, flows them into fixed-size pages
+  (Letter/A4 @ 96 DPI) with margins, applies per-page generated CSS (font family
+  incl. Google Fonts, size, heading scale, colors, line height), and draws scaled
+  page cards with hover-to-insert break zones.
+- **PDF export is that same HTML/CSS** sent to print (`utils/printHTML.ts`).
+
+**Key conclusion:** rebuilding the *preview/pagination/PDF* natively in RN means
+re-implementing a layout engine against RN primitives — high effort, perpetual
+drift, and it **won't match** the desktop/PDF output. That's the one path to avoid.
+Reading markdown, by contrast, needs none of that machinery.
+
+### File I/O is already portable (de-risks the WebView path)
+
+`MdView` loads/saves via `readTextFile`/`writeTextFile`, which in `@qalatra/shared`
+are plain HTTP calls to `GET`/`PUT /api/files?path=…` — **not** Electron fs. So the
+editor already works against a remote backend; a WebView just needs the server URL +
+bearer token injected and it behaves exactly like desktop. Phase 1 therefore needs
+**almost no RN↔web bridge** — RN just opens the WebView at the right URL with the
+token.
+
+### Build order (decided)
+
+1. **Native reader (separate, independent track).** Add the **Links section** to the
+   mobile task detail + a native `react-native-markdown-display` viewer for tapping a
+   `.md` link to read it. Reading is the common action and native is strictly better
+   here (real native scroll/selection/perf, no pagination engine, no WebView). No new
+   native build beyond what's already pending.
+2. **Hoist the whole `MdView` into a WebView.** Reuse editor + preview + page breaks +
+   fonts/colors + PDF verbatim. **Serve the mdpdf bundle from the Qalatra server**
+   (it already serves `ui/`) so the WebView loads `https://<server>/mdpdf?path=…`
+   with the token — bonus: editor improvements ship server-side, no App Store rebuild.
+   This front-loads the only real risk (preview/pagination/PDF/auth inside a WebView)
+   and gives full parity on iPad immediately.
+3. **Native `TextInput` editor — only if needed, and only then.** The sole reason to
+   add it is *editing feel* (caret/selection, keyboard-open scroll, autocorrect can
+   feel webby). On **iPad** with a keyboard the WebView editor is likely fine as the
+   final answer. On **phone**, evaluate after using #2; if it bugs you, swap the
+   editor pane for a native `TextInput` bridged (postMessage) to the WebView preview.
+   This is **additive** — the preview/PDF stays in the WebView forever, so nothing
+   from #2 is thrown away. Build #2's content load/save as a clean message protocol
+   so this swap is a drop-in.
+
+**Why this order:** max reuse, proves the risky pipeline first, no throwaway, and the
+complexity (the native-editor bridge + the fiddly page-break zones that live in the
+preview but edit the source) is deferred until it's proven necessary.
 
 ---
 
