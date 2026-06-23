@@ -58,7 +58,7 @@ export default function Terminal({ mode, onClose, onToggleFullscreen, pendingLau
 
   const cleanupSession = useCallback(async (target: TerminalSession | null) => {
     if (!target) return
-    try { await removeTerminalSession(target.id) } catch {}
+    try { await removeTerminalSession(target.id) } catch { /* best-effort cleanup */ }
   }, [])
 
   useEffect(() => {

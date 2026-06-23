@@ -102,7 +102,7 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
     setHideLocalInstanceState(getHideLocalInstance())
   }
 
-  function useInstance(id: string | null) {
+  function selectInstance(id: string | null) {
     setActiveInstance(id)
     refreshInstances()
     window.location.reload()
@@ -160,7 +160,7 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
               <button
                 className="settings-save"
                 style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)' }}
-                onClick={() => useInstance(null)}
+                onClick={() => selectInstance(null)}
               >
                 Use Local Server
               </button>
@@ -253,7 +253,7 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
             <button
               className="settings-save"
               style={{ background: !activeInstanceId ? 'var(--accent)' : 'transparent', border: '1px solid var(--border)', color: !activeInstanceId ? '#fff' : 'var(--muted)' }}
-              onClick={() => useInstance(null)}
+              onClick={() => selectInstance(null)}
             >
               Local Server
             </button>
@@ -262,7 +262,7 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
                 key={instance.id}
                 className="settings-save"
                 style={{ background: activeInstanceId === instance.id ? 'var(--accent)' : 'transparent', border: '1px solid var(--border)', color: activeInstanceId === instance.id ? '#fff' : 'var(--muted)' }}
-                onClick={() => useInstance(instance.id)}
+                onClick={() => selectInstance(instance.id)}
               >
                 {instance.name}
               </button>

@@ -93,7 +93,7 @@ export default function ServerTerminal({
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(containerRef.current)
-    try { fit.fit() } catch {}
+    try { fit.fit() } catch { /* fit can throw before the term is attached */ }
     termRef.current = term
     fitRef.current = fit
 
@@ -208,7 +208,7 @@ export default function ServerTerminal({
     })
 
     const resizeObserver = new ResizeObserver(() => {
-      try { fit.fit() } catch {}
+      try { fit.fit() } catch { /* fit can throw before the term is attached */ }
       sendResize()
     })
     resizeObserver.observe(containerRef.current)
@@ -312,7 +312,7 @@ export default function ServerTerminal({
 
   useEffect(() => {
     setTimeout(() => {
-      try { fitRef.current?.fit() } catch {}
+      try { fitRef.current?.fit() } catch { /* fit can throw before the term is attached */ }
       sendResize()
       termRef.current?.focus()
     }, 100)
