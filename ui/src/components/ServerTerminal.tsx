@@ -12,6 +12,29 @@ interface Props {
   emptyText?: string
 }
 
+type TerminalElectronAPI = {
+  writeClipboard?: (text: string) => void
+  getPathForFile?: (file: File) => string
+  saveTerminalImage?: (bytes: Uint8Array, ext: string) => Promise<string | null>
+}
+
+function electronAPI(): TerminalElectronAPI | undefined {
+  return (window as Window & { electronAPI?: TerminalElectronAPI }).electronAPI
+}
+
+/** Single-quote a path for safe insertion at a shell prompt (handles spaces and
+ *  embedded quotes), matching how iTerm/Warp insert dragged file paths. */
+function shellQuote(p: string): string {
+  return `'${p.replace(/'/g, `'\\''`)}'`
+}
+
+function extForType(mime: string): string {
+  if (mime === 'image/jpeg') return 'jpg'
+  if (mime === 'image/gif') return 'gif'
+  if (mime === 'image/webp') return 'webp'
+  return 'png'
+}
+
 export default function ServerTerminal({
   session,
   reconnectKey = 0,
@@ -29,6 +52,22 @@ export default function ServerTerminal({
     if (!term || !ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
   }, [])
+
+  /** Type text into the pty as if the user had entered it. */
+  const sendInput = useCallback((data: string) => {
+    const ws = wsRef.current
+    if (!data || ws?.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: 'input', data }))
+  }, [])
+
+  /** Insert one or more file paths at the prompt (space-separated, trailing
+   *  space), so a CLI like Claude Code can pick them up as image attachments. */
+  const insertPaths = useCallback((paths: string[]) => {
+    const usable = paths.filter(Boolean)
+    if (!usable.length) return
+    sendInput(usable.map(shellQuote).join(' ') + ' ')
+    termRef.current?.focus()
+  }, [sendInput])
 
   useEffect(() => {
     if (!containerRef.current || termRef.current) return
@@ -88,6 +127,58 @@ export default function ServerTerminal({
       return true
     })
 
+    // Drag an image (or any file) onto the terminal → insert its path at the
+    // prompt, like iTerm/Warp. Claude Code & friends then read it as an image.
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+      }
+    }
+    const onDrop = (e: DragEvent) => {
+      const files = Array.from(e.dataTransfer?.files ?? [])
+      if (!files.length) return
+      e.preventDefault()
+      e.stopPropagation()
+      const api = electronAPI()
+      void (async () => {
+        const paths: string[] = []
+        for (const file of files) {
+          const direct = api?.getPathForFile?.(file)
+          if (direct) { paths.push(direct); continue }
+          // No on-disk path (e.g. dragged from a browser) — persist image bytes.
+          if (file.type.startsWith('image/') && api?.saveTerminalImage) {
+            const buf = new Uint8Array(await file.arrayBuffer())
+            const saved = await api.saveTerminalImage(buf, extForType(file.type))
+            if (saved) paths.push(saved)
+          }
+        }
+        insertPaths(paths)
+      })()
+    }
+    // Paste a screenshot (clipboard image, no file on disk) → temp file → path.
+    // Non-image pastes fall through to xterm so bracketed text paste is preserved.
+    const onPaste = (e: ClipboardEvent) => {
+      const imageItem = Array.from(e.clipboardData?.items ?? [])
+        .find(it => it.kind === 'file' && it.type.startsWith('image/'))
+      if (!imageItem) return
+      const file = imageItem.getAsFile()
+      if (!file) return
+      e.preventDefault()
+      e.stopPropagation()
+      const api = electronAPI()
+      void (async () => {
+        if (!api?.saveTerminalImage) return
+        const buf = new Uint8Array(await file.arrayBuffer())
+        const saved = await api.saveTerminalImage(buf, extForType(file.type))
+        if (saved) insertPaths([saved])
+      })()
+    }
+    const dropTarget = containerRef.current
+    dropTarget.addEventListener('dragover', onDragOver)
+    dropTarget.addEventListener('drop', onDrop)
+    dropTarget.addEventListener('paste', onPaste, true) // capture: beat xterm for images
+
     term.onResize(({ cols, rows }) => {
       const ws = wsRef.current
       if (ws?.readyState === WebSocket.OPEN) {
@@ -103,12 +194,15 @@ export default function ServerTerminal({
 
     return () => {
       resizeObserver.disconnect()
+      dropTarget.removeEventListener('dragover', onDragOver)
+      dropTarget.removeEventListener('drop', onDrop)
+      dropTarget.removeEventListener('paste', onPaste, true)
       wsRef.current?.close()
       term.dispose()
       termRef.current = null
       fitRef.current = null
     }
-  }, [sendResize])
+  }, [insertPaths, sendResize])
 
   useEffect(() => {
     if (!termRef.current) return

@@ -681,6 +681,25 @@ function setupTerminalIpc(win) {
   // Clipboard writes must go through the main process: the preload runs sandboxed,
   // where require('electron') does not expose the `clipboard` module.
   ipcMain.on('clipboard:write', (_, text) => { try { clipboard.writeText(String(text ?? '')) } catch {} })
+
+  // Persist a dropped/pasted image (raw bytes from the renderer) to a temp file
+  // and return its path, so the terminal can hand the path to a CLI like Claude
+  // Code — mirroring how iTerm/Warp insert a file path on image drag-drop/paste.
+  ipcMain.handle('terminal:save-image-temp', async (_, bytes, ext) => {
+    try {
+      const buf = Buffer.from(bytes)
+      if (!buf.length) return null
+      const dir = path.join(os.tmpdir(), 'qalatra-terminal-images')
+      fs.mkdirSync(dir, { recursive: true })
+      const safeExt = /^[a-z0-9]{1,5}$/i.test(String(ext || '')) ? ext : 'png'
+      const file = path.join(dir, `paste-${Date.now()}-${Math.floor(Math.random() * 1e6)}.${safeExt}`)
+      fs.writeFileSync(file, buf)
+      return file
+    } catch (err) {
+      console.error('[terminal] save-image-temp failed:', err?.message ?? err)
+      return null
+    }
+  })
 }
 
 function setupUpdaterIpc() {

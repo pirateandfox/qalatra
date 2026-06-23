@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
   onOpenFile: (callback) => {
@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('terminal:exit', handler)
   },
   writeClipboard: (text) => ipcRenderer.send('clipboard:write', text),
+  // Resolve a dragged-in File to its absolute path (File.path was removed in
+  // modern Electron; webUtils is the sandbox-safe replacement).
+  getPathForFile: (file) => { try { return webUtils.getPathForFile(file) } catch { return '' } },
+  // Persist pasted/dropped image bytes to a temp file; returns the path or null.
+  saveTerminalImage: (bytes, ext) => ipcRenderer.invoke('terminal:save-image-temp', bytes, ext),
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   downloadUpdate: () => ipcRenderer.invoke('updater:download'),
   installUpdate: () => ipcRenderer.invoke('updater:install'),
