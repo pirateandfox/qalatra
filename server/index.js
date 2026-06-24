@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import http from 'http'
+import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
