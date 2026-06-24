@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { KeyboardAvoidingView, Platform, StyleSheet } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { createTerminalSession, currentServerInstance, listTerminalSessions, terminalSocketUrl } from '@qalatra/shared'
@@ -24,12 +24,15 @@ export function TerminalScreen({ navigation }: TerminalProps) {
     return { base: inst.url.replace(/\/$/, ''), wsUrl, title: session.title }
   }, [])
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   useEffect(() => {
     if (data?.title) navigation.setOptions({ title: data.title })
   }, [navigation, data?.title])
 
   if (loading) return <Loading />
   if (error || !data) return <ErrorView message={error ?? 'No terminal available'} onRetry={reload} />
+  if (loadError) return <ErrorView message={loadError} onRetry={() => { setLoadError(null); reload() }} />
 
   const injected = `window.__QALATRA_TERM__ = ${JSON.stringify({ wsUrl: data.wsUrl })};\ntrue;`
 
@@ -43,6 +46,14 @@ export function TerminalScreen({ navigation }: TerminalProps) {
         keyboardDisplayRequiresUserAction={false}
         startInLoadingState
         renderLoading={() => <Loading />}
+        onError={({ nativeEvent }) => setLoadError(`Terminal failed to load: ${nativeEvent.description || 'unknown error'}`)}
+        onHttpError={({ nativeEvent }) =>
+          setLoadError(
+            nativeEvent.statusCode === 401 || nativeEvent.statusCode === 404
+              ? 'Terminal not found on this backend (the /terminal route). Deploy the server build that serves it (git pull + restart on the box), then retry.'
+              : `Terminal request failed (HTTP ${nativeEvent.statusCode}).`,
+          )
+        }
         style={styles.flex}
       />
     </KeyboardAvoidingView>
