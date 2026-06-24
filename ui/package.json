@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:mdpdf": "vite build --config vite.mdpdf.config.ts",
+    "build:terminal": "vite build --config vite.terminal.config.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },

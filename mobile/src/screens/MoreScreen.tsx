@@ -34,6 +34,9 @@ export function MoreScreen() {
         <Row label="Backlog" onPress={() => navigation.navigate('Backlog')} />
         <Row label="Code" onPress={() => navigation.navigate('Code')} />
 
+        <Text style={styles.section}>Box</Text>
+        <Row label="Terminal" onPress={() => navigation.navigate('Terminal')} />
+
         <Text style={styles.section}>Connection</Text>
         <View style={styles.card}>
           <Text style={styles.name}>{active?.name ?? 'Not connected'}</Text>

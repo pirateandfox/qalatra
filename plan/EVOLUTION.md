@@ -1,5 +1,18 @@
 # Qalatra — Evolution Notes
 
+## Mobile: terminal via WebView (2026-06-23)
+
+A real shell on the backend from the phone/iPad — for troubleshooting box-local
+services (e.g. the Box Web tool) on the go. Same WebView pattern as the mdpdf
+editor: xterm.js bundled to one self-contained HTML (vite.terminal.config.ts,
+`npm run build:terminal` → server/static/terminal.html), served at GET /terminal
+(unauth shell; the pty WebSocket carries the token in its URL). The RN
+TerminalScreen reuses a running tmux session (or creates one) via the shared
+terminal API, computes `terminalSocketUrl`, and injects it; the bundle wires
+xterm to that socket with reconnect + a mobile key bar (esc/tab/^C/^D/^Z/arrows)
+for keys a soft keyboard can't send. Reached via More → Box → Terminal. Uses the
+already-present react-native-webview, so no native rebuild — JS/OTA only.
+
 ## Mobile: full markdown editor via WebView + attachment upload (2026-06-23)
 
 **Full mdpdf editor on mobile/iPad (step 2 of the markdown plan).** Rather than

@@ -116,6 +116,19 @@ async function main() {
       return
     }
 
+    // xterm.js terminal app shell for the mobile/iPad WebView. Like /mdpdf it's
+    // an unauthenticated static shell; the actual pty WebSocket it opens carries
+    // the token in its URL (terminalSocketUrl).
+    if (url.pathname === '/terminal' && req.method === 'GET') {
+      const file = path.join(__dirname, 'static', 'terminal.html')
+      if (fs.existsSync(file)) {
+        streamFile(req, res, file)
+      } else {
+        sendJson(res, 404, { error: 'terminal bundle not built (run npm run build:terminal)' })
+      }
+      return
+    }
+
     const user = authenticate(authDb, req)
     if (!user) {
       sendJson(res, 401, { error: 'Unauthorized' })

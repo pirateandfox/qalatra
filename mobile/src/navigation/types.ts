@@ -15,6 +15,7 @@ export type TaskStackParamList = {
   CreateTask: undefined
   MarkdownViewer: { path: string; title?: string }
   MarkdownEditor: { path: string; title?: string }
+  Terminal: undefined
 }
 
 export type ListProps = NativeStackScreenProps<TaskStackParamList, 'List'>
@@ -22,6 +23,7 @@ export type TaskDetailProps = NativeStackScreenProps<TaskStackParamList, 'TaskDe
 export type CreateTaskProps = NativeStackScreenProps<TaskStackParamList, 'CreateTask'>
 export type MarkdownViewerProps = NativeStackScreenProps<TaskStackParamList, 'MarkdownViewer'>
 export type MarkdownEditorProps = NativeStackScreenProps<TaskStackParamList, 'MarkdownEditor'>
+export type TerminalProps = NativeStackScreenProps<TaskStackParamList, 'Terminal'>
 
 export type RootTabParamList = {
   PriorityTab: undefined

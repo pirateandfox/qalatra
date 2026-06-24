@@ -24,3 +24,4 @@ dist-ssr
 *.sw?
 .claude/**
 dist-mdpdf
+dist-terminal
