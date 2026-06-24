@@ -17,3 +17,6 @@ assets/ElectronIcon.icon/
 # Secrets
 .env
 .claude/**
+# ...except shared, checked-in skills (portable across machines)
+!.claude/skills/
+!.claude/skills/**
