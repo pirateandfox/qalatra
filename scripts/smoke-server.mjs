@@ -65,6 +65,14 @@ async function main() {
     const health = await waitForJson(`http://127.0.0.1:${apiPort}/health`)
     if (!health.res.ok || health.data.ok !== true) throw new Error(`Health check failed: ${health.res.status}`)
 
+    // Unauthenticated static shells the mobile WebView loads. They run BEFORE auth,
+    // so a route-level error (e.g. a missing import) crashes the whole process —
+    // exactly the 1.9.13 regression. Hit them so that fails the smoke, not the fleet.
+    for (const route of ['/terminal', '/mdpdf']) {
+      const res = await fetch(`http://127.0.0.1:${apiPort}${route}`)
+      if (res.status !== 200) throw new Error(`${route} expected 200, got ${res.status}`)
+    }
+
     const tokenPath = path.join(dataDir, 'admin-token.txt')
     const token = fs.readFileSync(tokenPath, 'utf8').trim()
     if (!token.startsWith('qalatra_')) throw new Error('Bootstrap token was not written')
