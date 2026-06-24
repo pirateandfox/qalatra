@@ -14,6 +14,7 @@ import { MarkdownEditorScreen } from '../screens/MarkdownEditorScreen'
 import { TerminalListScreen } from '../screens/TerminalListScreen'
 import { TerminalSessionScreen } from '../screens/TerminalSessionScreen'
 import { CreateTerminalScreen } from '../screens/CreateTerminalScreen'
+import { FileBrowserScreen } from '../screens/FileBrowserScreen'
 import { ToolsScreen } from '../screens/ToolsScreen'
 import { MoreScreen } from '../screens/MoreScreen'
 import { DailyNoteScreen } from '../screens/DailyNoteScreen'
@@ -85,6 +86,7 @@ function MoreStack() {
       <Stack.Screen name="Terminal" component={TerminalListScreen} options={{ title: 'Terminals' }} />
       <Stack.Screen name="TerminalSession" component={TerminalSessionScreen} options={{ title: 'Terminal' }} />
       <Stack.Screen name="CreateTerminal" component={CreateTerminalScreen} options={{ title: 'New Terminal' }} />
+      <Stack.Screen name="FileBrowser" component={FileBrowserScreen} options={{ title: 'Files' }} />
       <Stack.Screen name="Instances" component={InstancesScreen} options={{ title: 'Backends' }} />
       <Stack.Screen name="AddInstance" component={AddInstanceScreen} options={{ title: 'Add Backend', presentation: 'modal' }} />
       <Stack.Screen name="TaskDetail" component={TaskDetailScreen} options={{ title: 'Task' }} />

@@ -18,6 +18,7 @@ export type TaskStackParamList = {
   Terminal: undefined
   TerminalSession: { sessionId: string; title?: string }
   CreateTerminal: undefined
+  FileBrowser: { path?: string; title?: string } | undefined
 }
 
 export type ListProps = NativeStackScreenProps<TaskStackParamList, 'List'>
@@ -28,6 +29,7 @@ export type MarkdownEditorProps = NativeStackScreenProps<TaskStackParamList, 'Ma
 export type TerminalListProps = NativeStackScreenProps<TaskStackParamList, 'Terminal'>
 export type TerminalSessionProps = NativeStackScreenProps<TaskStackParamList, 'TerminalSession'>
 export type CreateTerminalProps = NativeStackScreenProps<TaskStackParamList, 'CreateTerminal'>
+export type FileBrowserProps = NativeStackScreenProps<TaskStackParamList, 'FileBrowser'>
 
 export type RootTabParamList = {
   PriorityTab: undefined

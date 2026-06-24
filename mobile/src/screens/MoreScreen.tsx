@@ -36,6 +36,7 @@ export function MoreScreen() {
 
         <Text style={styles.section}>Box</Text>
         <Row label="Terminal" onPress={() => navigation.navigate('Terminal')} />
+        <Row label="Files" onPress={() => navigation.navigate('FileBrowser')} />
 
         <Text style={styles.section}>Connection</Text>
         <View style={styles.card}>

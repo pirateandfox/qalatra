@@ -1,5 +1,14 @@
 # Qalatra — Evolution Notes
 
+## Mobile: workspace file browser (2026-06-23)
+
+A native file manager over the existing /api/files endpoints (no server change).
+More → Box → Files lists workspace roots, then browses directories (`listDirectory`).
+Folders push deeper; `.md` files open in the in-app reader/editor; any other file
+downloads (`/api/files/content`, bearer auth) and opens in the iOS share/preview
+sheet (QuickLook). Reuses expo-file-system + expo-sharing (already added for
+attachments) — pure JS, no native rebuild.
+
 ## Mobile: terminal via WebView (2026-06-23)
 
 A real shell on the backend from the phone/iPad — for troubleshooting box-local
