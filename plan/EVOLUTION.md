@@ -1,5 +1,20 @@
 # Qalatra — Evolution Notes
 
+## Mobile: terminal scrollback scrolling (2026-06-24)
+
+The mobile terminal (`/terminal` WebView) couldn't be scrolled by touch — xterm.js
+translates wheel events to scrollback but ignores finger swipes, so on the phone
+there was no way to read back through a long Claude Code conversation (the keybar
+arrows send escape sequences to the shell, not the scrollback). Fix in
+`ui/src/terminal-webview/main.ts` + `terminal.css`: single-finger touch-drag now
+scrolls `.xterm-viewport.scrollTop` directly (the same element wheel scrolling
+drives, so xterm re-renders the visible rows), with a small slop threshold so taps
+still fall through to focus and pinch/multi-touch is left alone; `#root` gets
+`touch-action: none` so the browser's own gestures don't fight the drag. Scrollback
+also raised from the 1000-line default to 10000 so long sessions stay in buffer.
+Rebuild with `npm run build:terminal` (regenerates the committed
+`server/static/terminal.html`).
+
 ## Mobile: workspace file browser (2026-06-23)
 
 A native file manager over the existing /api/files endpoints (no server change).

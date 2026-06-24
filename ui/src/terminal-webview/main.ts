@@ -26,6 +26,8 @@ const term = new Terminal({
   fontSize: 13,
   lineHeight: 1.3,
   cursorBlink: true,
+  // Long Claude Code sessions need a deep buffer to scroll back through.
+  scrollback: 10000,
 })
 const fit = new FitAddon()
 term.loadAddon(fit)
@@ -78,6 +80,36 @@ term.onResize(sendResize)
 const ro = new ResizeObserver(() => { try { fit.fit() } catch { /* ignore */ } sendResize() })
 ro.observe(root)
 root.addEventListener('click', () => term.focus())
+
+// Touch-drag scrolling: xterm translates wheel events to scrollback but ignores
+// touch swipes, so on mobile there's no way to scroll up through history. We drag
+// the .xterm-viewport's scrollTop directly (the same element wheel scrolling drives,
+// so xterm re-renders the visible rows in response). Only single-finger drags that
+// actually move past a small threshold scroll; taps still fall through to focus, and
+// multi-touch (pinch/zoom) is left alone.
+let touchY = 0
+let touchScrolling = false
+const TOUCH_SLOP = 4 // px before a drag counts as a scroll, not a tap
+function viewport(): HTMLElement | null {
+  return root.querySelector('.xterm-viewport')
+}
+root.addEventListener('touchstart', e => {
+  if (e.touches.length !== 1) return
+  touchY = e.touches[0].clientY
+  touchScrolling = false
+}, { passive: true })
+root.addEventListener('touchmove', e => {
+  if (e.touches.length !== 1) return
+  const vp = viewport()
+  if (!vp) return
+  const y = e.touches[0].clientY
+  const dy = touchY - y
+  if (!touchScrolling && Math.abs(dy) < TOUCH_SLOP) return
+  touchScrolling = true
+  touchY = y
+  vp.scrollTop += dy
+  e.preventDefault() // we own the gesture; stop the page/keyboard from also moving
+}, { passive: false })
 
 // Mobile key bar: buttons carry data-key; map to the bytes a terminal expects.
 const KEYS: Record<string, string> = {
