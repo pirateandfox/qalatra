@@ -110,7 +110,7 @@ async function main() {
     if (url.pathname === '/mdpdf' && req.method === 'GET') {
       const file = path.join(__dirname, 'static', 'mdpdf.html')
       if (fs.existsSync(file)) {
-        streamFile(req, res, file)
+        streamFile(req, res, file, { 'Cache-Control': 'no-store, max-age=0' })
       } else {
         sendJson(res, 404, { error: 'mdpdf editor bundle not built (run npm run build:mdpdf)' })
       }
@@ -123,7 +123,9 @@ async function main() {
     if (url.pathname === '/terminal' && req.method === 'GET') {
       const file = path.join(__dirname, 'static', 'terminal.html')
       if (fs.existsSync(file)) {
-        streamFile(req, res, file)
+        // Never let the WebView cache the shell — it changes every release, and a
+        // stale cached copy means fixes silently never reach the device.
+        streamFile(req, res, file, { 'Cache-Control': 'no-store, max-age=0' })
       } else {
         sendJson(res, 404, { error: 'terminal bundle not built (run npm run build:terminal)' })
       }

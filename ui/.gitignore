@@ -25,3 +25,4 @@ dist-ssr
 .claude/**
 dist-mdpdf
 dist-terminal
+dist-harness

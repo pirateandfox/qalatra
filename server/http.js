@@ -78,7 +78,7 @@ export async function parseRawBody(req) {
   })
 }
 
-export function streamFile(req, res, filePath) {
+export function streamFile(req, res, filePath, extraHeaders = {}) {
   const stat = fs.statSync(filePath)
   const mimeType = mimeTypeForPath(filePath)
   const baseHeaders = {
@@ -86,6 +86,7 @@ export function streamFile(req, res, filePath) {
     'Accept-Ranges': 'bytes',
     ...CORS_HEADERS,
     'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(path.basename(filePath))}`,
+    ...extraHeaders,
   }
   const range = req.headers.range
   if (range) {

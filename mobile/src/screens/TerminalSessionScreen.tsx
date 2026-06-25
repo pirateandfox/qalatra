@@ -15,7 +15,9 @@ export function TerminalSessionScreen({ route, navigation }: TerminalSessionProp
   const { data, loading, error, reload } = useLoader(async () => {
     const inst = await currentServerInstance()
     const wsUrl = await terminalSocketUrl(sessionId, 80, 24)
-    return { base: inst.url.replace(/\/$/, ''), wsUrl }
+    // Changes every time the screen loads, so the WebView always fetches a fresh
+    // terminal.html instead of a cached one.
+    return { base: inst.url.replace(/\/$/, ''), wsUrl, shellVersion: String(Date.now()) }
   }, [sessionId])
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -32,7 +34,10 @@ export function TerminalSessionScreen({ route, navigation }: TerminalSessionProp
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <WebView
-        source={{ uri: `${data.base}/terminal` }}
+        // Cache-bust per mount so the WebView can never reuse a stale terminal.html
+        // (the shell changes every release; a cached copy hides fixes). Paired with
+        // the server's no-store header on /terminal.
+        source={{ uri: `${data.base}/terminal?v=${data.shellVersion}` }}
         injectedJavaScriptBeforeContentLoaded={injected}
         originWhitelist={['*']}
         javaScriptEnabled
