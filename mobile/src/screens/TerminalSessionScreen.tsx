@@ -37,6 +37,12 @@ export function TerminalSessionScreen({ route, navigation }: TerminalSessionProp
         originWhitelist={['*']}
         javaScriptEnabled
         keyboardDisplayRequiresUserAction={false}
+        // The terminal page drives its own scrollback via in-page touch handlers.
+        // Leave native scrolling on and iOS's WKWebView UIScrollView eats the
+        // drag gesture and rubber-bands the whole frame instead — so turn it off
+        // and let xterm own the gesture. (bounces=false kills overscroll on iOS.)
+        scrollEnabled={false}
+        bounces={false}
         startInLoadingState
         renderLoading={() => <Loading />}
         onError={({ nativeEvent }) => setLoadError(`Terminal failed to load: ${nativeEvent.description || 'unknown error'}`)}

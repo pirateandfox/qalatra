@@ -102,13 +102,17 @@ root.addEventListener('touchmove', e => {
   if (e.touches.length !== 1) return
   const vp = viewport()
   if (!vp) return
+  // Claim every single-finger move up front. iOS WKWebView locks the gesture to
+  // its own scroll view on the first touchmove and ignores a later preventDefault,
+  // so deferring it until we pass the slop threshold lets the frame scroll instead
+  // of the terminal. Taps don't move enough to matter; click still fires for focus.
+  e.preventDefault()
   const y = e.touches[0].clientY
   const dy = touchY - y
   if (!touchScrolling && Math.abs(dy) < TOUCH_SLOP) return
   touchScrolling = true
   touchY = y
   vp.scrollTop += dy
-  e.preventDefault() // we own the gesture; stop the page/keyboard from also moving
 }, { passive: false })
 
 // Mobile key bar: buttons carry data-key; map to the bytes a terminal expects.
