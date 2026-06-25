@@ -20,11 +20,27 @@ term.scrollToBottom()
 
 attachTouchScroll(root, term)
 
+// Capture everything xterm would send to the pty (mouse sequences show up here).
+const onDataLog: string[] = []
+term.onData(d => onDataLog.push(d))
+
 // Hooks for the Playwright driver.
 ;(window as unknown as { __h: unknown }).__h = {
   viewportY: () => term.buffer.active.viewportY,
   baseY: () => term.buffer.active.baseY,
   rows: () => term.rows,
+  scrollBy: (n: number) => term.scrollLines(n),
   screenHeight: () => (root.querySelector('.xterm-screen') as HTMLElement | null)?.clientHeight ?? 0,
+  // Make xterm enter mouse mode the way tmux/a TUI does (request SGR mouse).
+  enableMouse: () => term.write('\x1b[?1000h\x1b[?1006h'),
+  bufferType: () => term.buffer.active.type,
+  onData: () => onDataLog.slice(),
+  clearData: () => { onDataLog.length = 0 },
+  dispatchWheel: (sel: string, deltaY: number) => {
+    const el = sel === 'term.element' ? term.element : document.querySelector(sel)
+    if (!el) return 'no-element'
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY, deltaMode: 0, bubbles: true, cancelable: true }))
+    return 'dispatched'
+  },
 }
 ;(window as unknown as { __ready: boolean }).__ready = true

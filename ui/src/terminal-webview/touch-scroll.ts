@@ -1,61 +1,57 @@
 import type { Terminal } from '@xterm/xterm'
 
-// Touch-drag scrolling for xterm on mobile. xterm translates wheel events to
-// scrollback but ignores touch swipes, so on a touchscreen there's no way to
-// scroll up through history.
+// Touch-drag scrolling. xterm ignores touch swipes, so we translate a single-finger
+// drag into wheel events and dispatch them at xterm — exactly what a trackpad does.
 //
-// IMPORTANT: in xterm v6 the viewport scrolls through an internal
-// ScrollableElement — it no longer listens to the DOM element's `scroll` event,
-// so setting `.xterm-viewport.scrollTop` is a no-op (it worked in v5). We must
-// drive the public `term.scrollLines()` API instead, converting drag pixels to
-// whole rows. Only single-finger drags past a small threshold scroll; taps fall
-// through to focus, and multi-touch (pinch/zoom) is left alone.
+// Why wheel and not term.scrollLines(): the terminal almost always runs tmux / a
+// full-screen TUI, which lives in the *alternate* screen buffer. That buffer has no
+// xterm scrollback, so scrollLines() has nothing to move (it silently does nothing).
+// A wheel event instead goes through xterm's own wheel handler, which forwards it to
+// the app's mouse mode (tmux scrolls its history) — and falls back to scrollback when
+// there's no mouse mode. So dispatching wheel works for BOTH plain shells and tmux,
+// and matches the trackpad behavior that already worked. Verified on the iOS Simulator.
 //
-// `root` is the element xterm was opened into. Returns a disposer for tests.
+// Returns a disposer for tests.
 export function attachTouchScroll(root: HTMLElement, term: Terminal): () => void {
-  let startY = 0
   let lastY = 0
-  let touchScrolling = false
-  let scrollAccumPx = 0 // leftover sub-line pixels carried between moves
-  const TOUCH_SLOP = 6 // px of travel before a drag counts as a scroll, not a tap
+  let active = false
+  const SPEED = 2 // wheel pixels per finger pixel (tuned on-device)
 
-  // Pixels per terminal row, measured from the rendered screen (no private API).
-  function lineHeightPx(): number {
-    const screen = root.querySelector('.xterm-screen') as HTMLElement | null
-    if (screen && term.rows > 0 && screen.clientHeight > 0) return screen.clientHeight / term.rows
-    return 17 // sane fallback before first layout
+  // The element xterm listens to for wheel; fall back outward if not found yet.
+  function wheelTarget(): Element {
+    return (
+      root.querySelector('.xterm-viewport') ||
+      root.querySelector('.xterm-screen') ||
+      term.element ||
+      root
+    )
   }
 
   function onTouchStart(e: TouchEvent) {
-    if (e.touches.length !== 1) return
-    startY = lastY = e.touches[0].clientY
-    touchScrolling = false
-    scrollAccumPx = 0
+    active = e.touches.length === 1
+    if (active) lastY = e.touches[0].clientY
   }
   function onTouchMove(e: TouchEvent) {
-    if (e.touches.length !== 1) return
-    // Claim every single-finger move up front. iOS WKWebView locks the gesture to
-    // its own scroll view on the first touchmove and ignores a later preventDefault,
-    // so deferring it until we pass the slop threshold lets the frame scroll instead
-    // of the terminal. Taps don't move enough to matter; click still fires for focus.
+    if (!active || e.touches.length !== 1) return
+    // Own the single-finger gesture so the WebView never scrolls/bounces the frame.
     if (e.cancelable) e.preventDefault()
     const y = e.touches[0].clientY
-    if (!touchScrolling && Math.abs(y - startY) < TOUCH_SLOP) { lastY = y; return }
-    touchScrolling = true
-    scrollAccumPx += lastY - y // finger up => positive => scroll toward newer output
+    const dy = y - lastY
     lastY = y
-    const lh = lineHeightPx()
-    const lines = Math.trunc(scrollAccumPx / lh)
-    if (lines !== 0) {
-      term.scrollLines(lines)
-      scrollAccumPx -= lines * lh
-    }
+    if (dy === 0) return
+    // Finger down (dy>0) reveals older output => scroll up => negative deltaY.
+    wheelTarget().dispatchEvent(
+      new WheelEvent('wheel', { deltaY: -dy * SPEED, deltaMode: 0, bubbles: true, cancelable: true }),
+    )
   }
+  function onTouchEnd() { active = false }
 
   root.addEventListener('touchstart', onTouchStart, { passive: true })
   root.addEventListener('touchmove', onTouchMove, { passive: false })
+  root.addEventListener('touchend', onTouchEnd, { passive: true })
   return () => {
     root.removeEventListener('touchstart', onTouchStart)
     root.removeEventListener('touchmove', onTouchMove)
+    root.removeEventListener('touchend', onTouchEnd)
   }
 }
