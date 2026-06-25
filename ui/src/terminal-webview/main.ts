@@ -82,37 +82,49 @@ ro.observe(root)
 root.addEventListener('click', () => term.focus())
 
 // Touch-drag scrolling: xterm translates wheel events to scrollback but ignores
-// touch swipes, so on mobile there's no way to scroll up through history. We drag
-// the .xterm-viewport's scrollTop directly (the same element wheel scrolling drives,
-// so xterm re-renders the visible rows in response). Only single-finger drags that
-// actually move past a small threshold scroll; taps still fall through to focus, and
-// multi-touch (pinch/zoom) is left alone.
-let touchY = 0
+// touch swipes, so on mobile there's no way to scroll up through history.
+// IMPORTANT: in xterm v6 the viewport scrolls through an internal ScrollableElement
+// — it no longer listens to the DOM element's scroll event, so setting
+// .xterm-viewport.scrollTop does nothing. We must drive the public scrollLines()
+// API instead, converting drag pixels to whole lines. Only single-finger drags
+// past a small threshold scroll; taps fall through to focus, multi-touch is left alone.
+let startY = 0
+let lastY = 0
 let touchScrolling = false
-const TOUCH_SLOP = 4 // px before a drag counts as a scroll, not a tap
-function viewport(): HTMLElement | null {
-  return root.querySelector('.xterm-viewport')
+let scrollAccumPx = 0 // leftover sub-line pixels carried between moves
+const TOUCH_SLOP = 6 // px of travel before a drag counts as a scroll, not a tap
+
+// Pixels per terminal row, measured from the rendered screen (no private xterm API).
+function lineHeightPx(): number {
+  const screen = root.querySelector('.xterm-screen') as HTMLElement | null
+  if (screen && term.rows > 0 && screen.clientHeight > 0) return screen.clientHeight / term.rows
+  return 17 // sane fallback before first layout
 }
+
 root.addEventListener('touchstart', e => {
   if (e.touches.length !== 1) return
-  touchY = e.touches[0].clientY
+  startY = lastY = e.touches[0].clientY
   touchScrolling = false
+  scrollAccumPx = 0
 }, { passive: true })
 root.addEventListener('touchmove', e => {
   if (e.touches.length !== 1) return
-  const vp = viewport()
-  if (!vp) return
   // Claim every single-finger move up front. iOS WKWebView locks the gesture to
   // its own scroll view on the first touchmove and ignores a later preventDefault,
   // so deferring it until we pass the slop threshold lets the frame scroll instead
   // of the terminal. Taps don't move enough to matter; click still fires for focus.
   e.preventDefault()
   const y = e.touches[0].clientY
-  const dy = touchY - y
-  if (!touchScrolling && Math.abs(dy) < TOUCH_SLOP) return
+  if (!touchScrolling && Math.abs(y - startY) < TOUCH_SLOP) { lastY = y; return }
   touchScrolling = true
-  touchY = y
-  vp.scrollTop += dy
+  scrollAccumPx += lastY - y // finger up => positive => scroll toward newer output
+  lastY = y
+  const lh = lineHeightPx()
+  const lines = Math.trunc(scrollAccumPx / lh)
+  if (lines !== 0) {
+    term.scrollLines(lines)
+    scrollAccumPx -= lines * lh
+  }
 }, { passive: false })
 
 // Mobile key bar: buttons carry data-key; map to the bytes a terminal expects.
