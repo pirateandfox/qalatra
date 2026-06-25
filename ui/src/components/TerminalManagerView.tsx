@@ -3,7 +3,6 @@ import {
   createTerminalSession,
   fetchAgents,
   fetchSettings,
-  killTerminalSession,
   listTerminalSessions,
   listWorkspaceRoots,
   removeTerminalSession,
@@ -157,12 +156,13 @@ export default function TerminalManagerView() {
     }
   }
 
-  async function killSelected(remove = false) {
+  async function removeSelected() {
     if (!selectedSession) return
     setError(null)
     try {
-      if (remove) await removeTerminalSession(selectedSession.id)
-      else await killTerminalSession(selectedSession.id)
+      // One action: DELETE kills the tmux process if it's still running and drops
+      // the session from the store either way — no separate kill-then-remove step.
+      await removeTerminalSession(selectedSession.id)
       await reload()
     } catch (err: any) {
       setError(err?.message ?? String(err))
@@ -235,8 +235,9 @@ export default function TerminalManagerView() {
             {sessions.length === 0 && <div className="ide-empty">No terminal sessions yet.</div>}
           </div>
           <div className="ide-button-row">
-            <button className="ide-button" disabled={!selectedSession} onClick={() => killSelected(false)}>Kill</button>
-            <button className="ide-button danger" disabled={!selectedSession} onClick={() => killSelected(true)}>Remove</button>
+            <button className="ide-button danger" disabled={!selectedSession} onClick={removeSelected}>
+              {selectedSession?.status === 'running' ? 'Kill & Remove' : 'Remove'}
+            </button>
             <button className="ide-button" disabled={!selectedSession} onClick={startRename}>Rename</button>
             <button className="ide-button" onClick={reload}>Refresh</button>
           </div>

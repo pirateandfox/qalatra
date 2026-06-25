@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { killTerminalSession, listTerminalSessions, type TerminalSession } from '@qalatra/shared'
+import { listTerminalSessions, removeTerminalSession, type TerminalSession } from '@qalatra/shared'
 import type { TerminalListProps } from '../navigation/types'
 import { useLoader } from '../lib/useLoader'
 import { EmptyView, ErrorView, Loading, Screen } from '../components/ui'
@@ -46,7 +46,9 @@ export function TerminalListScreen({ navigation }: TerminalListProps) {
           onPress: async () => {
             setBusy(true)
             try {
-              await killTerminalSession(s.id)
+              // One action, fully gone: DELETE kills the tmux process if it's still
+              // running and drops the session from the store either way.
+              await removeTerminalSession(s.id)
               await reload()
             } catch (err) {
               Alert.alert('Error', err instanceof Error ? err.message : String(err))
