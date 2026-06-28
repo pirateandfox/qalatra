@@ -64,6 +64,12 @@
   font-size: 12px;
 }
 
+.box-web-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .box-web-button:hover:not(:disabled) {
   color: var(--text);
   border-color: var(--accent);

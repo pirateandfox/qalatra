@@ -841,6 +841,8 @@ _All resolved._
 
 ## Shipped
 
+- **Tools refresh without losing path** (2026-06-28) — Mobile Tools now has a header refresh action that reloads the embedded WebView in place, disables WebView cache for that surface, and preserves the current proxied path when reconnecting after an expired ticket. Desktop Tools now separates route-preserving Refresh from Reconnect/new-session. The Box Web proxy sends no-store headers and accepts a Qalatra refresh message from the parent iframe.
+
 - **Done events stay in Events section** (2026-06-04) — When an event is auto-completed (or manually marked done), it stays pinned in the Events section at the top of Today view rather than falling into "Done Today" with regular tasks. Done events are rendered grayed out (45% opacity) with a strikethrough title and a green ✓ check instead of the mark-done button. The `doneToday` query now excludes events (`task_type != 'event'`); the `events` query no longer filters by `status != 'done'`.
 
 - **Events are records, not tasks** (2026-03-13) — Events (`task_type = 'event'`) are treated as permanent dated records, not action items. `task_type != 'event'` is now applied universally across all active task queries: overdue, due_today, active_count, by_context, still_active, get_todays_tasks, get_overdue_tasks, end_of_day_triage. Events stay pinned to their date indefinitely with no status transitions needed. Added `end_time` (HH:MM) field to schema for start/end metadata and future calendar-sync readiness.

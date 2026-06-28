@@ -1,3 +1,4 @@
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 
 /** Every section tab is a stack with the same shape: a list, a task detail, and
@@ -38,3 +39,5 @@ export type RootTabParamList = {
   ToolsTab: undefined
   MoreTab: undefined
 }
+
+export type ToolsTabProps = BottomTabScreenProps<RootTabParamList, 'ToolsTab'>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createBoxWebSession, getBoxWebStatus, type BoxWebSession, type BoxWebStatus } from '../api'
 import './BoxWebView.css'
 
@@ -11,6 +11,7 @@ interface Props {
 }
 
 export default function BoxWebView({ label }: Props) {
+  const frameRef = useRef<HTMLIFrameElement>(null)
   const [session, setSession] = useState<BoxWebSession | null>(null)
   const [status, setStatus] = useState<BoxWebStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -41,6 +42,13 @@ export default function BoxWebView({ label }: Props) {
     load()
   }, [load])
 
+  const refreshFrame = useCallback(() => {
+    if (!session) return
+    const frame = frameRef.current
+    if (!frame?.contentWindow) return
+    frame.contentWindow.postMessage({ type: 'qalatra-box-web:refresh' }, new URL(session.url).origin)
+  }, [session])
+
   return (
     <div className="box-web-view">
       <header className="box-web-toolbar">
@@ -52,9 +60,14 @@ export default function BoxWebView({ label }: Props) {
           <code>{status?.target ?? session?.target ?? 'http://127.0.0.1:8080'}</code>
           {session?.expiresAt && <span>session until {new Date(session.expiresAt).toLocaleTimeString()}</span>}
         </div>
-        <button className="box-web-button" onClick={load} disabled={loading} title="Reload Box Web App">
-          {loading ? 'Loading...' : 'Reload'}
-        </button>
+        <div className="box-web-actions">
+          <button className="box-web-button" onClick={refreshFrame} disabled={loading || !session} title={`Refresh ${label} without changing the current path`}>
+            Refresh
+          </button>
+          <button className="box-web-button" onClick={load} disabled={loading} title={`Create a new ${label} session`}>
+            {loading ? 'Loading...' : 'Reconnect'}
+          </button>
+        </div>
       </header>
 
       <div className="box-web-body">
@@ -73,6 +86,7 @@ export default function BoxWebView({ label }: Props) {
           </div>
         ) : session ? (
           <iframe
+            ref={frameRef}
             key={`${session.url}:${frameKey}`}
             className="box-web-frame"
             title={label}
