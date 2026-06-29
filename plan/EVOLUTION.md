@@ -841,7 +841,9 @@ _All resolved._
 
 ## Shipped
 
-- **Tools refresh without losing path** (2026-06-28) — Mobile Tools now has a header refresh action that reloads the embedded WebView in place, disables WebView cache for that surface, and preserves the current proxied path when reconnecting after an expired ticket. Desktop Tools now separates route-preserving Refresh from Reconnect/new-session. The Box Web proxy sends no-store headers and accepts a Qalatra refresh message from the parent iframe.
+- **Mobile agent assignment** (2026-06-29) — Mobile task detail now has an editable Agent row even when no agent is assigned, backed by a searchable bottom-sheet picker filtered by the task's context/project. Mobile task creation also loads agents and can set `agent_path` at creation time, matching the desktop create/detail assignment path.
+
+- **Tools reconnect replaces stale refresh** (2026-06-29) — Mobile and desktop Tools now use one reconnect action that creates a fresh Box Web proxy session and remaps the current proxied path onto the new ticket. This avoids the previous stale-ticket reload path, which could show 401/Unauthorized after server restarts or expired sessions. The WebView/iframe remains no-store so cached tool shells do not survive releases.
 
 - **Done events stay in Events section** (2026-06-04) — When an event is auto-completed (or manually marked done), it stays pinned in the Events section at the top of Today view rather than falling into "Done Today" with regular tasks. Done events are rendered grayed out (45% opacity) with a strikethrough title and a green ✓ check instead of the mark-done button. The `doneToday` query now excludes events (`task_type != 'event'`); the `events` query no longer filters by `status != 'done'`.
 

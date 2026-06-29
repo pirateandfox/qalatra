@@ -10,6 +10,25 @@ interface Props {
   label: string
 }
 
+function remapSessionUrl(currentUrl: string | null, nextSession: BoxWebSession) {
+  if (!currentUrl) return nextSession.url
+  try {
+    const current = new URL(currentUrl)
+    const next = new URL(nextSession.url)
+    const match = current.pathname.match(/^\/api\/box-web\/proxy\/[^/]+(\/.*)?$/)
+    if (!match) return nextSession.url
+
+    const basePath = next.pathname.replace(/\/$/, '')
+    const suffix = match[1] || '/'
+    next.pathname = suffix === '/' ? `${basePath}/` : `${basePath}${suffix}`
+    next.search = current.search
+    next.hash = current.hash
+    return next.toString()
+  } catch {
+    return nextSession.url
+  }
+}
+
 export default function BoxWebView({ label }: Props) {
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [session, setSession] = useState<BoxWebSession | null>(null)
@@ -18,7 +37,18 @@ export default function BoxWebView({ label }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [frameKey, setFrameKey] = useState(0)
 
-  const load = useCallback(async () => {
+  const currentFrameUrl = useCallback(() => {
+    const frame = frameRef.current
+    if (!frame) return null
+    try {
+      return frame.contentWindow?.location.href ?? frame.src ?? null
+    } catch {
+      return frame.src || null
+    }
+  }, [])
+
+  const load = useCallback(async ({ preservePath = false }: { preservePath?: boolean } = {}) => {
+    const currentUrl = preservePath ? currentFrameUrl() : null
     setLoading(true)
     setError(null)
     try {
@@ -28,7 +58,8 @@ export default function BoxWebView({ label }: Props) {
         setSession(null)
         return
       }
-      setSession(await createBoxWebSession())
+      const nextSession = await createBoxWebSession()
+      setSession({ ...nextSession, url: remapSessionUrl(currentUrl, nextSession) })
       setFrameKey(key => key + 1)
     } catch (err: unknown) {
       setSession(null)
@@ -36,18 +67,11 @@ export default function BoxWebView({ label }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [currentFrameUrl])
 
   useEffect(() => {
     load()
   }, [load])
-
-  const refreshFrame = useCallback(() => {
-    if (!session) return
-    const frame = frameRef.current
-    if (!frame?.contentWindow) return
-    frame.contentWindow.postMessage({ type: 'qalatra-box-web:refresh' }, new URL(session.url).origin)
-  }, [session])
 
   return (
     <div className="box-web-view">
@@ -61,10 +85,7 @@ export default function BoxWebView({ label }: Props) {
           {session?.expiresAt && <span>session until {new Date(session.expiresAt).toLocaleTimeString()}</span>}
         </div>
         <div className="box-web-actions">
-          <button className="box-web-button" onClick={refreshFrame} disabled={loading || !session} title={`Refresh ${label} without changing the current path`}>
-            Refresh
-          </button>
-          <button className="box-web-button" onClick={load} disabled={loading} title={`Create a new ${label} session`}>
+          <button className="box-web-button" onClick={() => load({ preservePath: true })} disabled={loading} title={`Create a fresh ${label} session and keep the current path`}>
             {loading ? 'Loading...' : 'Reconnect'}
           </button>
         </div>

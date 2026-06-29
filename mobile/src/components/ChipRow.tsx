@@ -2,7 +2,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { colors, radius, space } from '../theme'
 
 export type ChipValue = string | number | null
-export type ChipOption = { value: ChipValue; label: string }
+export type ChipOption = { value: ChipValue; label: string; sublabel?: string }
 
 /** A labeled, horizontally-scrolling single-select chip row. */
 export function ChipRow({ label, options, value, onChange }: {

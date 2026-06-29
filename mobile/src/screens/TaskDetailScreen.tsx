@@ -22,6 +22,7 @@ import {
   currentServerInstance,
   deleteAttachment,
   fetchAgentJobs,
+  fetchAgents,
   fetchAttachments,
   uploadAttachment,
   fetchContexts,
@@ -31,6 +32,7 @@ import {
   fetchTask,
   queueAgentJob,
   updateTask,
+  type Agent,
   type AgentJob,
   type Attachment,
   type Context,
@@ -47,10 +49,11 @@ import { SelectSheet } from '../components/SelectSheet'
 import { DateSheet } from '../components/DateSheet'
 import { isHttpUrl, isMarkdownLink, isServiceLink, linkLabel, parseLinks, serviceLabel } from '../lib/links'
 import { formatDate, nextWeekStart, thisWeekend, tomorrow } from '../lib/dates'
+import { agentLabel, agentOptions, agentsForDetail } from '../lib/agents'
 import { colors, priorityColor, radius, space } from '../theme'
 
 /** Which metadata picker, if any, is currently open. */
-type SheetKey = 'priority' | 'energy' | 'context' | 'project' | 'recurrence'
+type SheetKey = 'priority' | 'energy' | 'context' | 'project' | 'agent' | 'recurrence'
 type DateKey = 'due' | 'start'
 
 /** The display label for a selected option value, or null when unset (so the
@@ -89,16 +92,17 @@ function recurrenceLabel(r: string | null): string | null {
 export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
   const { taskId } = route.params
   const { data, loading, error, reload } = useLoader(async () => {
-    const [task, notes, subtasks, contexts, projects, attachments, jobs] = await Promise.all([
+    const [task, notes, subtasks, contexts, projects, agents, attachments, jobs] = await Promise.all([
       fetchTask(taskId),
       fetchNotes(taskId).catch(() => [] as Note[]),
       fetchSubtasks(taskId).catch(() => [] as Task[]),
       fetchContexts().catch(() => [] as Context[]),
       fetchProjects().catch(() => [] as Project[]),
+      fetchAgents().catch(() => [] as Agent[]),
       fetchAttachments(taskId).catch(() => [] as Attachment[]),
       fetchAgentJobs(taskId).catch(() => [] as AgentJob[]),
     ])
-    return { task, notes, subtasks, contexts, projects, attachments, jobs }
+    return { task, notes, subtasks, contexts, projects, agents, attachments, jobs }
   }, [taskId])
 
   const [busy, setBusy] = useState(false)
@@ -187,6 +191,8 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
 
   const contextOpts: ChipOption[] = [{ value: null, label: 'None' }, ...(data?.contexts ?? []).map(c => ({ value: c.slug, label: c.label }))]
   const projectOpts: ChipOption[] = [{ value: null, label: 'None' }, ...(data?.projects ?? []).map(p => ({ value: p.name, label: p.name }))]
+  const filteredAgents = agentsForDetail(data?.agents ?? [], task.context, task.project, task.agent_path)
+  const agentOpts = agentOptions(filteredAgents, task.agent_path)
 
   // Apply an edit, then close whichever picker is open.
   const setField = (fields: Record<string, unknown>) => { setSheet(null); act(() => updateTask(taskId, fields)) }
@@ -227,6 +233,7 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
             <MetaRow label="Energy" value={valueLabel(ENERGY_OPTS, task.energy_required)} placeholder="None" onPress={() => setSheet('energy')} />
             <MetaRow label="Context" value={valueLabel(contextOpts, task.context)} placeholder="None" onPress={() => setSheet('context')} />
             <MetaRow label="Project" value={valueLabel(projectOpts, task.project)} placeholder="None" onPress={() => setSheet('project')} />
+            <MetaRow label="Agent" value={agentLabel(data?.agents ?? [], task.agent_path)} placeholder="None" onPress={() => setSheet('agent')} />
             <MetaRow label="Due" value={formatDate(task.due_date)} placeholder="No date" onPress={() => setDateSheet('due')} />
             <MetaRow label="Start" value={formatDate(task.start_date)} placeholder="No date" onPress={() => setDateSheet('start')} />
             <MetaRow label="Recurrence" value={recurrenceLabel(task.recurrence)} placeholder="None" onPress={() => setSheet('recurrence')} />
@@ -428,6 +435,17 @@ export function TaskDetailScreen({ route, navigation }: TaskDetailProps) {
         value={task.project}
         onSelect={v => setField({ project: v })}
         onClose={() => setSheet(null)}
+      />
+      <SelectSheet
+        visible={sheet === 'agent'}
+        title="Agent"
+        options={agentOpts}
+        value={task.agent_path}
+        onSelect={v => setField({ agent_path: v })}
+        onClose={() => setSheet(null)}
+        searchable
+        searchPlaceholder="Search agents…"
+        emptyText="No agents match this task"
       />
       <SelectSheet
         visible={sheet === 'recurrence'}
