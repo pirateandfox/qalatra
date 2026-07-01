@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import { WebView, type WebViewNavigation } from 'react-native-webview'
+import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes'
 import { createBoxWebSession, type BoxWebSession } from '@qalatra/shared'
 import type { ToolsTabProps } from '../navigation/types'
 import { useLoader } from '../lib/useLoader'
@@ -33,6 +34,26 @@ const URL_BRIDGE = `
 })();
 true;
 `
+
+/** Schemes that are always safe to keep inside the WebView (blob email previews,
+ *  inline data, the injected URL bridge, etc.). */
+const INTERNAL_SCHEME = /^(about:|blob:|data:|javascript:)/i
+
+/** Decide whether a navigation should stay in the Tools WebView or be handed off
+ *  to the system browser/mail client. Same-origin navigations (the Box Web tools
+ *  surface itself) stay in the WebView; external http(s)/mailto/tel links — the
+ *  ones inside rendered emails — open externally, mirroring the desktop app's
+ *  `will-navigate` → `shell.openExternal` interceptor in electron-main.js. */
+function shouldOpenExternally(url: string, baseUrl: string | null): boolean {
+  if (!url || INTERNAL_SCHEME.test(url)) return false
+  try {
+    const target = new URL(url)
+    if (baseUrl && target.origin === new URL(baseUrl).origin) return false
+    return /^(https?:|mailto:|tel:)/i.test(target.protocol)
+  } catch {
+    return false
+  }
+}
 
 function remapSessionUrl(currentUrl: string | null, nextSession: BoxWebSession) {
   if (!currentUrl) return nextSession.url
@@ -79,6 +100,17 @@ export function ToolsScreen({ navigation }: ToolsTabProps) {
     currentUrlRef.current = nav.url
   }, [])
 
+  const onShouldStartLoadWithRequest = useCallback(
+    (request: ShouldStartLoadRequest) => {
+      if (shouldOpenExternally(request.url, currentUrlRef.current ?? sourceUrl)) {
+        Linking.openURL(request.url).catch(() => {})
+        return false
+      }
+      return true
+    },
+    [sourceUrl],
+  )
+
   const onMessage = useCallback((event: { nativeEvent: { data: string } }) => {
     try {
       const data = JSON.parse(event.nativeEvent.data)
@@ -124,6 +156,8 @@ export function ToolsScreen({ navigation }: ToolsTabProps) {
         cacheEnabled={false}
         domStorageEnabled
         injectedJavaScript={URL_BRIDGE}
+        setSupportMultipleWindows={false}
+        onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         onMessage={onMessage}
         onNavigationStateChange={onNavigationStateChange}
         onError={({ nativeEvent }) => {
