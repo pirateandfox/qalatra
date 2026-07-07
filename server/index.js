@@ -34,6 +34,30 @@ let mcpProcess = null
 let backupTimer = null
 const eventClients = new Set()
 
+function crashLogPath() {
+  return path.join(DATA_DIR, 'server-crash.log')
+}
+
+function formatError(value) {
+  if (value instanceof Error) return value.stack || value.message
+  return String(value)
+}
+
+function logProcessProblem(label, value) {
+  const message = `[${new Date().toISOString()}] ${label}: ${formatError(value)}\n`
+  console.error(message.trim())
+  try { fs.appendFileSync(crashLogPath(), message) } catch {}
+}
+
+process.on('unhandledRejection', reason => {
+  logProcessProblem('unhandledRejection', reason)
+})
+
+process.on('uncaughtException', err => {
+  logProcessProblem('uncaughtException', err)
+  process.exit(1)
+})
+
 function publishEvent(event) {
   const payload = `data: ${JSON.stringify(event)}\n\n`
   for (const res of eventClients) {
@@ -334,6 +358,7 @@ async function main() {
   })
 
   const terminalWss = new WebSocketServer({ noServer: true })
+  terminalWss.on('error', err => logProcessProblem('terminal websocket server error', err))
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host || `${API_HOST}:${API_PORT}`}`)
     const match = url.pathname.match(/^\/api\/terminal\/sessions\/([^/]+)\/socket$/)
@@ -359,6 +384,16 @@ async function main() {
         ws.close()
       }
     })
+  })
+
+  server.on('error', err => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[server] API port ${API_PORT} in use; retrying in 30s`)
+      setTimeout(() => server.listen(API_PORT, API_HOST), 30_000)
+      return
+    }
+    logProcessProblem('http server error', err)
+    process.exit(1)
   })
 
   server.listen(API_PORT, API_HOST, () => {

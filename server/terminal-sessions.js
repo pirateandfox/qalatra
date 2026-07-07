@@ -253,6 +253,12 @@ export function createTerminalManager({ dataDir, loadSettings }) {
       activePtys.delete(proc)
       touchSession(id)
     })
+    ws.on('error', err => {
+      console.error(`[terminal] websocket error for ${id}: ${err.message}`)
+      try { proc.kill() } catch {}
+      activePtys.delete(proc)
+      touchSession(id)
+    })
   }
 
   // Persist an image (dragged/pasted into the terminal UI) to a temp file ON THE

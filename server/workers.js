@@ -181,6 +181,32 @@ export async function runAgentScan({ dbCall, loadSettings }) {
   return agents
 }
 
+async function finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId }) {
+  try {
+    await dbCall('finishAgentJob', job.id, status, result, sessionId)
+  } catch (err) {
+    console.error(`[workers] failed to persist agent job ${job.id}: ${err.message}`)
+    return
+  }
+
+  if (status === 'done' && job.task_id) {
+    try {
+      const noteResult = await dbCall('insertAgentNote', uuidv4(), job.task_id, result, job.id)
+      if (noteResult?.auto_attach_error) {
+        console.error(`[workers] auto-attach failed for job ${job.id}: ${noteResult.auto_attach_error}`)
+      }
+    } catch (err) {
+      console.error(`[workers] failed to insert agent note for job ${job.id}: ${err.message}`)
+    }
+  }
+
+  try {
+    notify({ type: 'agent-job:complete', taskId: job.task_id, jobId: job.id })
+  } catch (err) {
+    console.error(`[workers] failed to publish agent completion for job ${job.id}: ${err.message}`)
+  }
+}
+
 async function processAgentJobs({ dbCall, loadSettings, notify }) {
   if (runningJobs >= MAX_CONCURRENT_JOBS) return
   const jobs = await dbCall('getQueuedJobs', MAX_CONCURRENT_JOBS - runningJobs)
@@ -272,7 +298,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     proc.stderr.on('data', d => { stderr += d })
     const timeout = setTimeout(() => { timedOut = true; proc.kill('SIGKILL') }, (cfg?.timeout_minutes ?? 15) * 60 * 1000)
 
-    proc.on('close', async code => {
+    proc.on('close', code => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
@@ -305,12 +331,11 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         })
       }
 
-      await dbCall('finishAgentJob', job.id, status, result, sessionId)
-      if (status === 'done' && job.task_id) await dbCall('insertAgentNote', uuidv4(), job.task_id, result, job.id)
-      notify({ type: 'agent-job:complete', taskId: job.task_id, jobId: job.id })
+      finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId })
+        .catch(err => console.error(`[workers] agent completion handler failed for job ${job.id}: ${err.message}`))
     })
 
-    proc.on('error', async err => {
+    proc.on('error', err => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
@@ -319,7 +344,8 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
         { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, commandMode: isTemplateCommand ? 'template' : 'prompt' },
       )
-      await dbCall('finishAgentJob', job.id, 'failed', result, null)
+      finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null })
+        .catch(err => console.error(`[workers] agent error handler failed for job ${job.id}: ${err.message}`))
     })
   }
 }

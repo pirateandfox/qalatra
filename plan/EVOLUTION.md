@@ -1,5 +1,29 @@
 # Qalatra — Evolution Notes
 
+## Server idle-crash hardening (2026-07-06)
+
+Qalatra Server now guards the idle/background paths that could terminate the
+process with code 1 after unattended use:
+
+- Terminal WebSocket attaches now register an `error` listener and clean up the
+  backing tmux attach pty on socket errors, so sleep/network drops do not become
+  uncaught exceptions.
+- Agent worker child-process `close`/`error` handlers no longer leave async DB
+  writes as unhandled promise rejections. Job completion, note insertion,
+  auto-attach, and event publish failures are logged without taking down the
+  server.
+- Agent result auto-attachment is non-fatal after the note has been written; a
+  bad filesystem mention reports `auto_attach_error` instead of failing the
+  whole `insertAgentNote` call.
+- The API server writes unhandled rejection/exception details to
+  `server-crash.log` in the data directory, and explicitly handles HTTP listen
+  errors including retrying `EADDRINUSE`.
+- When Electron owns the local API child process, unexpected exits now schedule
+  a restart after 2 seconds instead of leaving the UI connected to a dead server.
+- `scripts/smoke-server.mjs` now records early child-process exits before
+  cleanup, so a server that dies during boot reports the failure instead of
+  accidentally letting Node finish with exit code 0.
+
 ## Mobile: terminal scrollback scrolling (2026-06-24)
 
 The mobile terminal (`/terminal` WebView) couldn't be scrolled by touch — xterm.js

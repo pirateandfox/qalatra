@@ -1035,8 +1035,12 @@ function insertAgentNote(id, taskId, result, jobId) {
   const job = jobId ? db.prepare('SELECT agent_path FROM agent_jobs WHERE id = ?').get(jobId) : null
   const task = db.prepare('SELECT agent_path FROM tasks WHERE id = ?').get(taskId)
   const baseDirs = [job?.agent_path, task?.agent_path].filter(Boolean)
-  const attachments = autoAttachMentionedFiles(db, { taskId, text: result, baseDirs })
-  return { ok: true, auto_attached: attachments.length, attachments }
+  try {
+    const attachments = autoAttachMentionedFiles(db, { taskId, text: result, baseDirs })
+    return { ok: true, auto_attached: attachments.length, attachments }
+  } catch (err) {
+    return { ok: true, auto_attached: 0, attachments: [], auto_attach_error: err.message }
+  }
 }
 function resetStuckJobs() {
   // Jobs stuck for less than the 15-min timeout window were likely orphaned by an app crash — re-queue them.

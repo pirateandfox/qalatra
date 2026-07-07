@@ -58,8 +58,10 @@ async function main() {
   })
 
   let output = ''
+  let childExit = null
   child.stdout.on('data', chunk => { output += chunk.toString() })
   child.stderr.on('data', chunk => { output += chunk.toString() })
+  child.once('exit', (code, signal) => { childExit = { code, signal } })
 
   try {
     const health = await waitForJson(`http://127.0.0.1:${apiPort}/health`)
@@ -99,10 +101,13 @@ async function main() {
     console.log(`Server smoke passed on port ${apiPort}`)
   } catch (e) {
     console.error(output)
+    if (childExit) console.error(`Server process exited early: code=${childExit.code} signal=${childExit.signal}`)
     throw e
   } finally {
-    child.kill('SIGTERM')
-    await new Promise(resolve => child.once('exit', resolve))
+    if (!childExit) {
+      child.kill('SIGTERM')
+      await new Promise(resolve => child.once('exit', resolve))
+    }
     fs.rmSync(dataDir, { recursive: true, force: true })
   }
 }

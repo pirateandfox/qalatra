@@ -24,6 +24,8 @@ const DEV_PORT = 5173
 let apiProcess = null
 let activeDbDir = null
 let ptyProcess = null
+let appIsQuitting = false
+let apiRestartTimer = null
 
 // ── Port check ────────────────────────────────────────────────────────────────
 
@@ -351,13 +353,29 @@ async function startLocalApiServer(dbDir, { restart = false } = {}) {
     pipeToLog(apiProcess, 'api')
     apiProcess.on('exit', (code, signal) => {
       apiProcess = null
-      if (signal === 'SIGTERM') return
+      if (signal === 'SIGTERM' || appIsQuitting) return
       console.error(`[api] exited: code=${code} signal=${signal}`)
+      scheduleLocalApiRestart(dbDir)
     })
   }
 
   const ready = await waitForLocalApi(apiPort)
   return { ...(await localApiStatus(dbDir)), ok: ready, running: ready }
+}
+
+function scheduleLocalApiRestart(dbDir) {
+  if (apiRestartTimer || appIsQuitting) return
+  apiRestartTimer = setTimeout(async () => {
+    apiRestartTimer = null
+    if (apiProcess || appIsQuitting) return
+    console.log('[api] restarting local server after unexpected exit')
+    try {
+      await startLocalApiServer(dbDir, { restart: true })
+    } catch (err) {
+      console.error('[api] restart failed:', err.message)
+      scheduleLocalApiRestart(dbDir)
+    }
+  }, 2000)
 }
 
 async function runLocalServerBackup(dbDir) {
@@ -378,6 +396,10 @@ async function runLocalServerBackup(dbDir) {
 }
 
 async function stopLocalApiServer(dbDir, { clearAnyProcessOnPort = false } = {}) {
+  if (apiRestartTimer) {
+    clearTimeout(apiRestartTimer)
+    apiRestartTimer = null
+  }
   if (apiProcess) {
     apiProcess.kill('SIGTERM')
     apiProcess = null
@@ -789,6 +811,7 @@ app.on('window-all-closed', () => {
 let quitFinalized = false
 app.on('before-quit', (event) => {
   if (quitFinalized) return
+  appIsQuitting = true
   try { ptyProcess?.kill() } catch {}
   event.preventDefault()
   const keepRunning = activeDbDir ? shouldKeepServerRunning(activeDbDir) : false

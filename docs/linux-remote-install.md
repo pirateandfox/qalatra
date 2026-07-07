@@ -138,6 +138,21 @@ If the machine uses a public API tunnel, check that service too:
 systemctl --user status qalatra-cloudflared.service --no-pager -l
 ```
 
+### Crash logs
+
+Qalatra Server writes unhandled rejection/exception details to:
+
+```bash
+~/.local/share/qalatra/db/server-crash.log
+```
+
+If an unattended server exits or restarts, check this file alongside journald:
+
+```bash
+journalctl --user -u qalatra-server.service -n 160 --no-pager
+tail -n 120 ~/.local/share/qalatra/db/server-crash.log
+```
+
 ## Smoke Tests
 
 Run these on the Linux server:

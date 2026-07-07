@@ -128,6 +128,8 @@ See [Linux Headless Server and Remote Access](docs/linux-remote-install.md) for 
 
 Remote boxes can also expose one private tools page inside the desktop sidebar. Serve a dashboard or root `www` page on `127.0.0.1:8080` on the box, then enable it from Settings -> Instances -> Box Web Apps. A public tools hostname remains optional for access outside Qalatra.
 
+Server crash details are written to `server-crash.log` in the active data directory (`~/Library/Application Support/Qalatra/db` on macOS desktop, `~/.local/share/qalatra/db` on Linux headless installs). Include that file when reporting unattended exits.
+
 ---
 
 ## Run from source
