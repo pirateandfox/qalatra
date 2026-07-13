@@ -215,7 +215,17 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
   for (const job of jobs) {
     runningJobs++
     // Atomic claim (bug C6): skip the job if another worker/instance already took it.
-    const claim = await dbCall('startAgentJob', job.id)
+    // Guarded (bug C21): a rejected dbCall here (e.g. SQLITE_BUSY/IO) must decrement the slot,
+    // otherwise the increment above leaks a permanent concurrency slot and eventually wedges the
+    // whole worker (runningJobs never falls back below MAX_CONCURRENT_JOBS).
+    let claim
+    try {
+      claim = await dbCall('startAgentJob', job.id)
+    } catch (err) {
+      runningJobs--
+      console.error(`[workers] failed to claim agent job ${job.id}: ${err.message}`)
+      continue
+    }
     if (claim && claim.claimed === false) {
       runningJobs--
       continue
@@ -235,7 +245,10 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     } catch {}
 
     if (cfg?.coding && job.task_id) {
-      await dbCall('updateTask', job.task_id, { task_type: 'coding' })
+      // Non-fatal + guarded (bug C21): a rejection here must not escape the loop and leak the
+      // slot; the job can still run without the coding-type update.
+      try { await dbCall('updateTask', job.task_id, { task_type: 'coding' }) }
+      catch (err) { console.error(`[workers] failed to set coding type for job ${job.id}: ${err.message}`) }
     }
 
     const shellBin = defaultShell()
