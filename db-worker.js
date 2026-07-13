@@ -33,15 +33,24 @@ function offsetDate(dateStr, days) {
   return d.toISOString().slice(0, 10)
 }
 const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 86400000)
-function nextRecurrenceDate(fromDate, rule) {
+function nextRecurrenceDate(baseDate, rule) {
   if (!rule) return null
   const SHORTHANDS = { daily: 'FREQ=DAILY', weekdays: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', weekly: 'FREQ=WEEKLY', monthly: 'FREQ=MONTHLY' }
   try {
-    // Anchor to midnight UTC on the day after fromDate — purely date-based, no current time involved.
-    // This means completing at 1AM or 11PM gives the same next-day result.
-    const dtstart = new Date(offsetDate(fromDate, 1) + 'T00:00:00Z')
-    const r = rrulestr(`RRULE:${SHORTHANDS[rule] || rule}`, { dtstart })
-    const next = r.after(dtstart, true) // inclusive: first occurrence on or after dtstart
+    let rruleStr = SHORTHANDS[rule] || rule
+    // Anchor to midnight UTC on baseDate (the task's own schedule anchor), then use exclusive
+    // after() so we get the NEXT occurrence strictly after baseDate without shifting the
+    // weekday/monthday anchor. Using day+1 with inclusive after() collapsed bare FREQ=WEEKLY /
+    // FREQ=MONTHLY to next-day, because dtstart itself is the rule's first occurrence (bug C1).
+    const dtstart = new Date(baseDate + 'T00:00:00Z')
+    // FREQ=MONTHLY without BYMONTHDAY anchors to dtstart's day-of-month, causing 1-day drift on
+    // each completion. Explicitly anchor to baseDate's day-of-month.
+    if (rruleStr === 'FREQ=MONTHLY') {
+      const dom = parseInt(baseDate.slice(8, 10), 10)
+      rruleStr = `FREQ=MONTHLY;BYMONTHDAY=${dom}`
+    }
+    const r = rrulestr(`RRULE:${rruleStr}`, { dtstart })
+    const next = r.after(dtstart, false) // exclusive: first occurrence strictly after baseDate
     return next ? next.toISOString().slice(0, 10) : null
   } catch { return null }
 }
