@@ -98,6 +98,40 @@ async function main() {
     })
     if (rpc.status !== 404) throw new Error(`/api/rpc expected 404, got ${rpc.status}`)
 
+    const authJson = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+
+    // C16: PATCH/DELETE of a nonexistent task must be 404, not 200 { ok:true }.
+    const patchMissing = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/does-not-exist`, {
+      method: 'PATCH', headers: authJson, body: JSON.stringify({ title: 'x' }),
+    })
+    if (patchMissing.status !== 404) throw new Error(`PATCH missing task expected 404, got ${patchMissing.status}`)
+    const deleteMissing = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/does-not-exist`, {
+      method: 'DELETE', headers: authJson,
+    })
+    if (deleteMissing.status !== 404) throw new Error(`DELETE missing task expected 404, got ${deleteMissing.status}`)
+
+    // C17: validation errors must be 4xx, not 500.
+    const badCreate = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks`, {
+      method: 'POST', headers: authJson, body: JSON.stringify({}),
+    })
+    if (badCreate.status !== 400) throw new Error(`POST task with no title expected 400, got ${badCreate.status}`)
+    const badPort = await fetch(`http://127.0.0.1:${apiPort}/api/v1/mcp`, {
+      method: 'PUT', headers: authJson, body: JSON.stringify({ port: 999999 }),
+    })
+    if (badPort.status !== 400) throw new Error(`PUT mcp bad port expected 400, got ${badPort.status}`)
+    const badSettings = await fetch(`http://127.0.0.1:${apiPort}/api/v1/settings/import`, {
+      method: 'POST', headers: authJson, body: JSON.stringify({ json: 'not json' }),
+    })
+    if (badSettings.status !== 400) throw new Error(`POST settings/import bad json expected 400, got ${badSettings.status}`)
+
+    // Sanity: a valid create still returns 200 (proves the 400s above are input-specific, not a
+    // blanket failure). NB: not exercising DELETE of a real task here — with MCP disabled the
+    // sync_log table is absent (unfixed low C19), which is orthogonal to the C16/C17 checks above.
+    const goodCreate = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks`, {
+      method: 'POST', headers: authJson, body: JSON.stringify({ title: 'smoke task' }),
+    }).then(async r => ({ res: r, data: await r.json().catch(() => ({})) }))
+    if (!goodCreate.res.ok || !goodCreate.data.task?.id) throw new Error('valid task create failed')
+
     console.log(`Server smoke passed on port ${apiPort}`)
   } catch (e) {
     console.error(output)

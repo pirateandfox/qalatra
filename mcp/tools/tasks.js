@@ -506,7 +506,19 @@ export const handlers = {
     updates.task_id = args.task_id;
     db.prepare(`UPDATE tasks SET ${setClauses.join(', ')} WHERE id = @task_id`).run(updates);
 
-    return { task_id: args.task_id, updated_fields: Object.keys(updates).filter(k => k !== 'task_id') };
+    // bug C14: setting status='done' on a recurring task via update_task must preserve the chain,
+    // exactly like complete_task — otherwise the series silently dies (nothing rolls a done
+    // recurring task forward). Set outcome, queue the sync entry, and spawn the next occurrence.
+    let spawned = null;
+    if (args.status === 'done' && task.status !== 'done' && task.recurrence) {
+      db.prepare(`UPDATE tasks SET outcome = 'completed' WHERE id = ?`).run(args.task_id);
+      if (task.source && task.source !== 'manual') {
+        queueSyncEntry(db, args.task_id, task.source, 'completed', { title: task.title });
+      }
+      spawned = spawnNextOccurrence(db, task, now);
+    }
+
+    return { task_id: args.task_id, updated_fields: Object.keys(updates).filter(k => k !== 'task_id'), ...(spawned ?? {}) };
   },
 
   get_task(args) {

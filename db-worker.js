@@ -36,6 +36,9 @@ function appendAiContext(existing, note) {
   const entry = `[${today()}] ${note}`
   return existing ? `${existing}\n${entry}` : entry
 }
+// Validation error carrying an HTTP status (bug C17). The status survives the worker boundary
+// (db-worker serializes err.status; db-client rehydrates it) so index.js emits 400, not 500.
+function validationError(message) { const e = new Error(message); e.status = 400; return e }
 function offsetDate(dateStr, days) {
   const d = new Date(dateStr + 'T12:00:00Z')
   d.setUTCDate(d.getUTCDate() + days)
@@ -576,7 +579,7 @@ function searchTasks(args = {}) {
 }
 
 function createTask(body) {
-  if (!body.title) throw new Error('title required')
+  if (!body.title) throw validationError('title required')
   const id = crypto.randomUUID(); const now = nowIso()
   db.prepare(`INSERT INTO tasks (id, title, status, context, project, my_priority, due_date, hard_deadline, agent_path, task_type, source, ai_context, created_at, updated_at, last_reviewed_at) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, 'task', 'manual', ?, ?, ?, ?)`)
     .run(id, body.title, body.context ?? 'personal', body.project ?? null, body.my_priority ?? null, body.due_date || null, body.hard_deadline ? 1 : 0, body.agent_path || null, body.ai_context ? `[${now.slice(0, 10)}] ${body.ai_context}` : null, now, now, now)
@@ -585,6 +588,8 @@ function createTask(body) {
 }
 
 function updateTask(id, body) {
+  const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
+  if (!existing) return { ok: false, reason: 'not_found' } // bug C16: 0-row PATCH must not report success
   const MUTABLE = ['title','description','status','my_priority','energy_required','context','project','tags','source_url','due_date','hard_deadline','start_date','surface_after','task_type','event_time','end_time','recurrence','parent_id','agent_path','agent_resume','agent_autorun','agent_autorun_time','outcome','notes','inbox','time_estimate']
   const now = nowIso()
   if (body.links !== undefined) db.prepare("UPDATE tasks SET links = ?, updated_at = datetime('now'), last_reviewed_at = ? WHERE id = ?").run(JSON.stringify(body.links), now, id)
@@ -596,10 +601,20 @@ function updateTask(id, body) {
     db.prepare(`UPDATE tasks SET ${sets.join(', ')}, last_reviewed_at = @last_reviewed_at, updated_at = datetime('now') WHERE id = @id`).run(params)
   }
   if (body.project) db.prepare(`INSERT OR IGNORE INTO projects (name) VALUES (?)`).run(body.project)
+  // bug C14: completing a recurring task through a status update must preserve the chain, exactly
+  // like completeTask — otherwise the series silently ends (autoRolloverRecurring only sweeps
+  // status='active', so a done recurring task is never recovered).
+  if (body.status === 'done' && existing.status !== 'done' && existing.recurrence) {
+    if (body.outcome === undefined) db.prepare(`UPDATE tasks SET outcome = 'completed' WHERE id = ?`).run(id)
+    const nextDate = nextRecurrenceDate(existing.due_date ?? existing.start_date ?? today(), existing.recurrence)
+    if (nextDate) spawnRecurrence(existing, nextDate, now, `Recurred from task ${id}`)
+  }
   return { ok: true }
 }
 
 function deleteTask(id) {
+  const exists = db.prepare('SELECT id FROM tasks WHERE id = ?').get(id)
+  if (!exists) return { ok: false, reason: 'not_found' } // bug C16: DELETE of a missing task must 404
   const subtaskIds = db.prepare('SELECT id FROM tasks WHERE parent_id = ?').all(id).map(r => r.id)
   const allIds = [id, ...subtaskIds]
   const ph = allIds.map(() => '?').join(',')
@@ -682,10 +697,11 @@ function snoozeTask(id, until) {
   return { ok: true }
 }
 
-function updateTaskTitle(id, title) { const now = nowIso(); db.prepare('UPDATE tasks SET title = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(title, now, now, id); return { ok: true } }
-function updateTaskDescription(id, description) { const now = nowIso(); db.prepare('UPDATE tasks SET description = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(description ?? null, now, now, id); return { ok: true } }
-function updateTaskDueDate(id, dueDate) { const now = nowIso(); db.prepare('UPDATE tasks SET due_date = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(dueDate || null, now, now, id); return { ok: true } }
-function updateTaskRecurrence(id, recurrence) { const now = nowIso(); db.prepare('UPDATE tasks SET recurrence = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(recurrence || null, now, now, id); return { ok: true } }
+// bug C16: return not_found (mapped to 404) instead of {ok:true} when the row doesn't exist.
+function updateTaskTitle(id, title) { const now = nowIso(); const info = db.prepare('UPDATE tasks SET title = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(title, now, now, id); if (info.changes === 0) return { ok: false, reason: 'not_found' }; return { ok: true } }
+function updateTaskDescription(id, description) { const now = nowIso(); const info = db.prepare('UPDATE tasks SET description = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(description ?? null, now, now, id); if (info.changes === 0) return { ok: false, reason: 'not_found' }; return { ok: true } }
+function updateTaskDueDate(id, dueDate) { const now = nowIso(); const info = db.prepare('UPDATE tasks SET due_date = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(dueDate || null, now, now, id); if (info.changes === 0) return { ok: false, reason: 'not_found' }; return { ok: true } }
+function updateTaskRecurrence(id, recurrence) { const now = nowIso(); const info = db.prepare('UPDATE tasks SET recurrence = ?, last_touched_human = ?, last_reviewed_at = ? WHERE id = ?').run(recurrence || null, now, now, id); if (info.changes === 0) return { ok: false, reason: 'not_found' }; return { ok: true } }
 
 function addTaskLink(id, url) {
   const task = db.prepare('SELECT links FROM tasks WHERE id = ?').get(id)
@@ -782,7 +798,7 @@ function createSubtask(parentId, title) {
 
 function listNotes(taskId) { return db.prepare(`SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC`).all(taskId) }
 function addNote(taskId, body) {
-  if (!body?.trim()) throw new Error('body required')
+  if (!body?.trim()) throw validationError('body required')
   const id = crypto.randomUUID()
   db.prepare(`INSERT INTO notes (id, task_id, body, author) VALUES (?, ?, ?, 'user')`).run(id, taskId, body.trim())
   return { id }
@@ -807,7 +823,7 @@ function searchDailyNotesDb(args = {}) {
 
 function listContexts() { return db.prepare('SELECT * FROM contexts ORDER BY sort_order ASC NULLS LAST, label ASC').all() }
 function createContext(slug, label, color) {
-  if (!slug || !label) throw new Error('slug and label required')
+  if (!slug || !label) throw validationError('slug and label required')
   const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM contexts').get().m ?? 0
   const trimmedLabel = label.trim()
   db.prepare('INSERT INTO contexts (slug, display_name, label, color, sort_order) VALUES (?, ?, ?, ?, ?)').run(slug.trim().toLowerCase(), trimmedLabel, trimmedLabel, color ?? '#888888', maxOrder + 1)
@@ -976,7 +992,7 @@ function listHabits(date) {
   }))
 }
 function createHabit(body) {
-  if (!body.title) throw new Error('title required')
+  if (!body.title) throw validationError('title required')
   const id = crypto.randomUUID(); const now = nowIso()
   db.prepare('INSERT INTO habits (id, title, description, recurrence, recurrence_days, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)').run(id, body.title.trim(), body.description ?? null, body.recurrence ?? 'daily', body.recurrence_days ?? null, now, now)
   return { id }
@@ -1274,7 +1290,8 @@ parentPort.on('message', ({ id, method, args }) => {
   try {
     parentPort.postMessage({ id, result: fn(...(args ?? [])) })
   } catch (err) {
-    parentPort.postMessage({ id, error: err.message })
+    // Carry err.status across the boundary (bug C17) so validation errors become HTTP 4xx.
+    parentPort.postMessage({ id, error: err.message, status: err.status ?? null })
   }
 })
 

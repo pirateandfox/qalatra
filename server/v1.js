@@ -23,6 +23,23 @@ function result(value) {
   return json({ ok: true, result: value })
 }
 
+// Map a db-worker result of { ok:false, reason:'not_found' } to HTTP 404 (bug C16); otherwise
+// wrap normally. Without this, PATCH/DELETE on a missing task returned 200 { ok:true }.
+function resultOr404(value) {
+  if (value && value.ok === false && value.reason === 'not_found') {
+    return json({ error: 'Task not found' }, 404)
+  }
+  return result(value)
+}
+
+// Validation error → HTTP 400 (bug C17): thrown from v1.js handlers, honored by index.js's
+// `e.status || 500` catch, instead of surfacing malformed input as a 500.
+function badRequest(message) {
+  const e = new Error(message)
+  e.status = 400
+  return e
+}
+
 function ok(extra = {}) {
   return json({ ok: true, ...extra })
 }
@@ -114,8 +131,8 @@ export async function handleV1(req, url, ctx, { parseBody }) {
 
     if (!id) return null
     if (!action && method === 'GET') return data('task', await ctx.dbCall('getTask', id))
-    if (!action && method === 'PATCH') return result(await ctx.dbCall('updateTask', id, await parseBody(req)))
-    if (!action && method === 'DELETE') return result(await ctx.dbCall('deleteTask', id))
+    if (!action && method === 'PATCH') return resultOr404(await ctx.dbCall('updateTask', id, await parseBody(req)))
+    if (!action && method === 'DELETE') return resultOr404(await ctx.dbCall('deleteTask', id))
     if (action === 'reviewed' && (method === 'POST' || method === 'PATCH')) return result(await ctx.dbCall('markReviewed', id))
     if (action === 'dependencies' && method === 'GET') return data('dependencies', await ctx.dbCall('getTaskDependencies', id))
     if (action === 'dependencies' && method === 'POST') {
@@ -143,19 +160,19 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     }
     if (action === 'title' && method === 'PATCH') {
       const body = await parseBody(req)
-      return result(await ctx.dbCall('updateTaskTitle', id, body.title))
+      return resultOr404(await ctx.dbCall('updateTaskTitle', id, body.title))
     }
     if (action === 'description' && method === 'PATCH') {
       const body = await parseBody(req)
-      return result(await ctx.dbCall('updateTaskDescription', id, body.description ?? null))
+      return resultOr404(await ctx.dbCall('updateTaskDescription', id, body.description ?? null))
     }
     if (action === 'due-date' && method === 'PATCH') {
       const body = await parseBody(req)
-      return result(await ctx.dbCall('updateTaskDueDate', id, body.due_date ?? body.dueDate ?? null))
+      return resultOr404(await ctx.dbCall('updateTaskDueDate', id, body.due_date ?? body.dueDate ?? null))
     }
     if (action === 'recurrence' && method === 'PATCH') {
       const body = await parseBody(req)
-      return result(await ctx.dbCall('updateTaskRecurrence', id, body.recurrence ?? null))
+      return resultOr404(await ctx.dbCall('updateTaskRecurrence', id, body.recurrence ?? null))
     }
     if (action === 'links' && method === 'POST') {
       const body = await parseBody(req)
@@ -307,8 +324,9 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     if (id === 'export' && method === 'GET') return ok({ json: JSON.stringify(ctx.loadSettings(), null, 2) })
     if (id === 'import' && method === 'POST') {
       const body = await parseBody(req)
-      const parsed = JSON.parse(body.json)
-      if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid settings JSON')
+      let parsed
+      try { parsed = JSON.parse(body.json) } catch { throw badRequest('Invalid settings JSON') }
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) throw badRequest('Invalid settings JSON')
       ctx.saveSettings(parsed)
       return ok()
     }
@@ -322,7 +340,7 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     if (!id && method === 'PUT') {
       const body = await parseBody(req)
       const port = parseInt(body.port, 10)
-      if (Number.isNaN(port) || port < 1024 || port > 65535) throw new Error('Invalid port')
+      if (Number.isNaN(port) || port < 1024 || port > 65535) throw badRequest('Invalid port')
       const settings = ctx.loadSettings()
       settings.mcpPort = port
       ctx.saveSettings(settings)
