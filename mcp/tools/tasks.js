@@ -437,6 +437,9 @@ export const handlers = {
       inbox:           args.inbox ? 1 : 0,
       time_estimate:   args.time_estimate   ?? null,
     });
+    // Register the project so it appears in list/summary views (bug C22): those read exclusively
+    // FROM the projects table, whose backfill runs only at server startup. Mirror db-worker.
+    if (args.project) db.prepare(`INSERT OR IGNORE INTO projects (name) VALUES (?)`).run(args.project);
     const status = args.status ?? 'active';
     return { task_id: id, title: args.title, status, created_at: now };
   },
@@ -505,6 +508,9 @@ export const handlers = {
 
     updates.task_id = args.task_id;
     db.prepare(`UPDATE tasks SET ${setClauses.join(', ')} WHERE id = @task_id`).run(updates);
+
+    // Register a newly-assigned project (bug C22) so it shows in project listings; mirror db-worker.
+    if (args.project) db.prepare(`INSERT OR IGNORE INTO projects (name) VALUES (?)`).run(args.project);
 
     // bug C14: setting status='done' on a recurring task via update_task must preserve the chain,
     // exactly like complete_task — otherwise the series silently dies (nothing rolls a done

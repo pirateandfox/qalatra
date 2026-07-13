@@ -162,6 +162,14 @@ function initSchema(db) {
       created_at   TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS projects (
+      name       TEXT PRIMARY KEY,
+      archived   INTEGER NOT NULL DEFAULT 0,
+      is_repo    INTEGER NOT NULL DEFAULT 0,
+      context    TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TRIGGER IF NOT EXISTS tasks_updated_at
     AFTER UPDATE ON tasks
     FOR EACH ROW
@@ -348,5 +356,8 @@ export function isAgentScheduleDue(agentSchedule, lastRunAt) {
 export function appendAiContext(existing, newNote) {
   if (!newNote) return existing ?? null;
   const entry = `[${today()}] ${newNote}`;
-  return existing ? `${entry}\n${existing}` : entry;
+  // Append (chronological), matching db-worker (bug C24): this file used to PREPEND, so a task
+  // touched by both MCP and the UI ended up with day-stamped entries in mixed order, misleading
+  // readers about the latest decision. One convention: newest last.
+  return existing ? `${existing}\n${entry}` : entry;
 }
