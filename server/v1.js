@@ -8,7 +8,12 @@ import { runAgentScan } from './workers.js'
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 function today() {
-  return new Date().toISOString().slice(0, 10)
+  // Local date, not UTC (bug C23): db-worker's today() is local, so a date-less API request in the
+  // evening on a negative-UTC box used to default to tomorrow, dropping the caller into the 'future'
+  // branch (no inbox/overdue/active, and the today-only side effects skipped).
+  const d = new Date()
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
 function json(body, status = 200) {
@@ -130,7 +135,11 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     }
 
     if (!id) return null
-    if (!action && method === 'GET') return data('task', await ctx.dbCall('getTask', id))
+    if (!action && method === 'GET') {
+      const task = await ctx.dbCall('getTask', id)
+      if (!task) return json({ error: 'Task not found' }, 404) // bug C26: was 200 { task:null }
+      return data('task', task)
+    }
     if (!action && method === 'PATCH') return resultOr404(await ctx.dbCall('updateTask', id, await parseBody(req)))
     if (!action && method === 'DELETE') return resultOr404(await ctx.dbCall('deleteTask', id))
     if (action === 'reviewed' && (method === 'POST' || method === 'PATCH')) return result(await ctx.dbCall('markReviewed', id))

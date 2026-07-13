@@ -131,6 +131,17 @@ async function main() {
       method: 'POST', headers: authJson, body: JSON.stringify({ title: 'smoke task' }),
     }).then(async r => ({ res: r, data: await r.json().catch(() => ({})) }))
     if (!goodCreate.res.ok || !goodCreate.data.task?.id) throw new Error('valid task create failed')
+
+    // C26: GET a nonexistent task must be 404, not 200 { task:null }.
+    const getMissing = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/does-not-exist`, { headers: authJson })
+    if (getMissing.status !== 404) throw new Error(`GET missing task expected 404, got ${getMissing.status}`)
+
+    // C25: snooze with no `until` must be 400, not a 500 null-deref.
+    const badSnooze = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/${goodCreate.data.task.id}/actions/snooze`, {
+      method: 'POST', headers: authJson, body: JSON.stringify({}),
+    })
+    if (badSnooze.status !== 400) throw new Error(`snooze with no until expected 400, got ${badSnooze.status}`)
+
     const delReal = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/${goodCreate.data.task.id}`, {
       method: 'DELETE', headers: authJson,
     })

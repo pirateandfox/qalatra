@@ -710,6 +710,9 @@ function activateTask(id) {
 }
 
 function snoozeTask(id, until) {
+  // Validate before dereferencing (bug C25): a missing/empty `until` used to throw a raw
+  // TypeError (until.includes(...)) surfaced as HTTP 500 instead of a 400 for a missing param.
+  if (typeof until !== 'string' || !until.trim()) throw validationError('until is required')
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
   if (!task) return { ok: false }
   const hasTime = until.includes(' ') || until.includes('T')
