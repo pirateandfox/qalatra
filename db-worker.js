@@ -282,6 +282,12 @@ function migrate() {
   db.prepare(`UPDATE tasks SET status = 'active', surface_after = NULL WHERE status = 'snoozed' AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime'))`).run()
   // Backfill projects table from existing task project values
   db.prepare(`INSERT OR IGNORE INTO projects (name) SELECT DISTINCT project FROM tasks WHERE project IS NOT NULL AND project != ''`).run()
+  // Bug C3 cleanup: MCP update_task used to store '' instead of NULL when clearing these
+  // reference fields, hiding tasks from every top-level list (parent_id IS NULL filter).
+  // Idempotent — repairs any rows already corrupted before the handler fix landed.
+  db.prepare(`UPDATE tasks SET parent_id = NULL WHERE parent_id = ''`).run()
+  db.prepare(`UPDATE tasks SET agent_path = NULL WHERE agent_path = ''`).run()
+  db.prepare(`UPDATE tasks SET assigned_agent = NULL WHERE assigned_agent = ''`).run()
 }
 
 // ── Query helpers ─────────────────────────────────────────────────────────────

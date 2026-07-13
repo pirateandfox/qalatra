@@ -454,9 +454,16 @@ export const handlers = {
     const updates = {};
     const setClauses = [];
 
+    // Reference/nullable fields that MUST become NULL (never '') when cleared. An empty
+    // string here matches neither `parent_id IS NULL` nor any real id, so the task vanishes
+    // from every top-level UI list while still active (bug C3). Mirror db-worker.js updateTask,
+    // which converts '' → null on clear.
+    const NULLABLE_ON_EMPTY = new Set(['parent_id', 'agent_path', 'assigned_agent']);
+
     for (const field of mutableFields) {
       if (args[field] !== undefined) {
-        const v = args[field];
+        let v = args[field];
+        if (v === '' && NULLABLE_ON_EMPTY.has(field)) v = null;
         updates[field] = typeof v === 'boolean' ? (v ? 1 : 0) : v;
         setClauses.push(`${field} = @${field}`);
       }

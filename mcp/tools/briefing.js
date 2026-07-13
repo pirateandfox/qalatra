@@ -1,11 +1,37 @@
 import { openDb, today, nowIso, appendAiContext, nextRecurrenceDate } from '../db.js';
 import { v4 as uuidv4 } from 'uuid';
 
+// Date helpers — mirror db-worker.js so the two rollover copies produce identical spawns.
+function offsetDate(dateStr, days) {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 86400000);
+
+// Spawn the next occurrence of a recurring task, preserving every field db-worker preserves
+// (bug C4: this copy previously dropped notes/links/agent_path/agent_resume/agent_autorun/
+// agent_autorun_time and re-anchored start-date-only tasks). Field-for-field parity with
+// db-worker.js spawnRecurrence.
+function spawnRecurrence(db, task, nextDate, now, reason) {
+  let spawnedStart = null;
+  let spawnedDue = nextDate;
+  if (task.start_date && task.due_date) {
+    spawnedStart = offsetDate(nextDate, -daysBetween(task.start_date, task.due_date));
+  } else if (task.start_date && !task.due_date) {
+    spawnedStart = nextDate;
+    spawnedDue = null;
+  }
+  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context, agent_path, agent_resume, agent_autorun, agent_autorun_time) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(uuidv4(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, now, spawnedStart, spawnedDue, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence, appendAiContext(null, reason), task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00');
+}
+
 function autoRolloverRecurring(db) {
   const t = today();
+  // Exclude events — they must not be auto-skipped/respawned (bug C4; matches db-worker).
   const stale = db.prepare(`
     SELECT * FROM tasks
-    WHERE status = 'active' AND recurrence IS NOT NULL
+    WHERE status = 'active' AND task_type != 'event' AND recurrence IS NOT NULL
       AND (
         (due_date IS NOT NULL AND due_date < ?)
         OR (due_date IS NULL AND start_date IS NOT NULL AND start_date < ?)
@@ -15,28 +41,15 @@ function autoRolloverRecurring(db) {
   for (const task of stale) {
     db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ?`)
       .run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id);
-    // Advance from the task's original due_date (not today) to preserve cadence alignment.
-    // If the task was skipped/missed across multiple periods, walk forward until we find
-    // the next occurrence that is >= today.
-    let baseDate = task.due_date ?? t;
+    // Advance from the task's own schedule anchor (not today) to preserve cadence alignment.
+    // If skipped/missed across multiple periods, walk forward until the next occurrence >= today.
+    let baseDate = task.due_date ?? task.start_date ?? t;
     let nextDate = nextRecurrenceDate(baseDate, task.recurrence);
     while (nextDate && nextDate < t) {
       baseDate = nextDate;
       nextDate = nextRecurrenceDate(baseDate, task.recurrence);
     }
-    if (nextDate) {
-      db.prepare(`
-        INSERT INTO tasks (
-          id, title, description, status, my_priority, energy_required, context, project,
-          tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context
-        ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        uuidv4(), task.title, task.description, task.my_priority, task.energy_required,
-        task.context, task.project, task.tags, task.source ?? 'manual', task.source_url,
-        now, now, now, nextDate, nextDate, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence,
-        appendAiContext(null, `Auto-recurred from task ${task.id}`)
-      );
-    }
+    if (nextDate) spawnRecurrence(db, task, nextDate, now, `Auto-recurred from task ${task.id}`);
   }
   return stale.length;
 }
