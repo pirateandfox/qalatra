@@ -98,9 +98,7 @@ Environment=QALATRA_API_PORT=$(systemd_literal "$API_PORT")
 Environment=QALATRA_MCP_HOST=$(systemd_literal "$MCP_HOST")
 Environment=QALATRA_MCP_PORT=$(systemd_literal "$MCP_PORT")
 Environment=QALATRA_START_MCP=1
-# QALATRA_START_WORKERS is intentionally not forced here (bug C2/C5): the box-role gate governs.
-# A single-box install has no ~/.config/qalatra/box-role file, so workers default on. To make a
-# box non-canonical, drop a box-role file naming the canonical box (its hostname) on it.
+Environment=QALATRA_START_WORKERS=1
 Environment=QALATRA_BOOTSTRAP_TOKEN_FILE=1
 ExecStart=$(systemd_literal "$NODE_BIN") $(systemd_literal "$ROOT_DIR/server/index.js")
 Restart=on-failure

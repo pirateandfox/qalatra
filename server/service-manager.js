@@ -54,9 +54,7 @@ function serviceEnv(options) {
     QALATRA_MCP_HOST: options.mcpHost || '127.0.0.1',
     QALATRA_MCP_PORT: String(options.mcpPort || 3457),
     QALATRA_START_MCP: options.startMcp === false ? '0' : '1',
-    // Only set QALATRA_START_WORKERS to disable; otherwise leave it unset so the box-role gate
-    // governs (bug C2/C5). A normal single-box install has no role file → workers default on.
-    ...(options.startWorkers === false ? { QALATRA_START_WORKERS: '0' } : {}),
+    QALATRA_START_WORKERS: options.startWorkers === false ? '0' : '1',
     QALATRA_BOOTSTRAP_TOKEN_FILE: '1',
   }
 }
