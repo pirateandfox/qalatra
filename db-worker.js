@@ -1141,13 +1141,28 @@ function createHeartbeat({ title, description, agent_path, prompt, interval_minu
 }
 
 function updateHeartbeat(id, fields = {}) {
-  const allowed = ['title', 'description', 'agent_path', 'prompt', 'interval_minutes', 'run_at_time', 'minute_offset']
+  const existing = db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)
+  if (!existing) return undefined
   const sets = []
   const vals = []
-  for (const k of allowed) {
+  for (const k of ['title', 'description', 'agent_path', 'prompt']) {
     if (k in fields) { sets.push(`${k} = ?`); vals.push(fields[k]) }
   }
-  if (!sets.length) return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)
+  // Recompute next_run_at on ANY schedule-field change (bug C8) and apply the create-path
+  // normalization (run_at_time only valid with interval 1440; minute_offset only with <1440),
+  // so a schedule edit takes effect immediately instead of firing on the stale next_run_at.
+  if (['interval_minutes', 'run_at_time', 'minute_offset'].some(k => k in fields)) {
+    const mins = (('interval_minutes' in fields) ? fields.interval_minutes : existing.interval_minutes) ?? 60
+    const rawRunAt = ('run_at_time' in fields) ? fields.run_at_time : existing.run_at_time
+    const rawOffset = ('minute_offset' in fields) ? fields.minute_offset : existing.minute_offset
+    const runAt = (rawRunAt && mins === 1440) ? rawRunAt : null
+    const offset = (rawOffset != null && mins < 1440) ? rawOffset : null
+    sets.push('interval_minutes = ?'); vals.push(mins)
+    sets.push('run_at_time = ?'); vals.push(runAt)
+    sets.push('minute_offset = ?'); vals.push(offset)
+    sets.push('next_run_at = ?'); vals.push(nextRunAt(mins, runAt, offset))
+  }
+  if (!sets.length) return existing
   sets.push('updated_at = ?'); vals.push(nowIso()); vals.push(id)
   db.prepare(`UPDATE heartbeats SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
   return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)

@@ -218,6 +218,12 @@ function initSchema(db) {
   if (!heartbeatCols.includes('run_at_time')) {
     db.exec(`ALTER TABLE heartbeats ADD COLUMN run_at_time TEXT`);
   }
+  // Schema parity with db-worker.js (bug C18 support): db-worker adds minute_offset via its own
+  // migration; mcp/db.js was missing it, so an MCP-first init lacked the column that the heartbeat
+  // create/update handlers write.
+  if (!heartbeatCols.includes('minute_offset')) {
+    db.exec(`ALTER TABLE heartbeats ADD COLUMN minute_offset INTEGER`);
+  }
 
   // Migrations for agent_jobs table
   const agentJobCols = db.prepare(`PRAGMA table_info(agent_jobs)`).all().map(r => r.name);

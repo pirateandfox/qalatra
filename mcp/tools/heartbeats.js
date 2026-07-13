@@ -46,7 +46,7 @@ export const toolDefs = [
   },
   {
     name: 'update_heartbeat',
-    description: 'Update a heartbeat agent\'s title, description, prompt, agent_path, or interval.',
+    description: 'Update a heartbeat agent\'s title, description, prompt, agent_path, or schedule. Any schedule change (interval_minutes, run_at_time, minute_offset) recomputes the next run time.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -56,6 +56,8 @@ export const toolDefs = [
         agent_path:       { type: 'string' },
         prompt:           { type: 'string' },
         interval_minutes: { type: 'number' },
+        run_at_time:      { type: 'string', description: 'For daily heartbeats (interval_minutes=1440): local time to run, as HH:MM' },
+        minute_offset:    { type: 'number', description: 'For sub-daily heartbeats: pin runs to clock-aligned times (N ≡ minute_offset mod interval_minutes)' },
       },
       required: ['id'],
     },
@@ -124,16 +126,32 @@ export const handlers = {
     return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
   },
 
-  update_heartbeat({ id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset } = {}) {
+  update_heartbeat(args = {}) {
+    const { id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset } = args;
     if (!id) return { error: 'id required' };
     const db = openDb();
-    const allowed = { title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset };
+    const existing = db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
+    if (!existing) return { error: 'Heartbeat not found' };
     const sets = [];
     const vals = [];
-    for (const [k, v] of Object.entries(allowed)) {
+    for (const [k, v] of Object.entries({ title, description, agent_path, prompt })) {
       if (v !== undefined) { sets.push(`${k} = ?`); vals.push(v); }
     }
-    if (!sets.length) return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
+    // Recompute next_run_at on ANY schedule change (bug C18) and normalize like create
+    // (run_at_time only with interval 1440; minute_offset only with <1440), so schedule edits
+    // take effect instead of firing once more on the stale next_run_at (up to ~7 days late).
+    if (['interval_minutes', 'run_at_time', 'minute_offset'].some(k => k in args && args[k] !== undefined)) {
+      const mins = (interval_minutes !== undefined ? interval_minutes : existing.interval_minutes) ?? 60;
+      const rawRunAt = run_at_time !== undefined ? run_at_time : existing.run_at_time;
+      const rawOffset = minute_offset !== undefined ? minute_offset : existing.minute_offset;
+      const runAt = (rawRunAt && mins === 1440) ? rawRunAt : null;
+      const offset = (rawOffset != null && mins < 1440) ? rawOffset : null;
+      sets.push('interval_minutes = ?'); vals.push(mins);
+      sets.push('run_at_time = ?'); vals.push(runAt);
+      sets.push('minute_offset = ?'); vals.push(offset);
+      sets.push('next_run_at = ?'); vals.push(nextRunAt(mins, runAt, offset));
+    }
+    if (!sets.length) return existing;
     sets.push('updated_at = ?'); vals.push(nowIso()); vals.push(id);
     db.prepare(`UPDATE heartbeats SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
     return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
