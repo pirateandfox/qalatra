@@ -21,20 +21,23 @@ function spawnNextOccurrence(db, task, now) {
   const next_task_id = uuidv4();
   db.prepare(`
     INSERT INTO tasks (
-      id, title, description, status, my_priority, energy_required, context, project,
+      id, title, description, notes, links, status, my_priority, energy_required, context, project,
       tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline,
-      task_type, recurrence, ai_context,
+      task_type, recurrence, ai_context, time_estimate, inbox,
       agent_path, agent_resume, agent_autorun, agent_autorun_time
     ) VALUES (
-      @id, @title, @description, 'active', @my_priority, @energy_required, @context, @project,
+      @id, @title, @description, @notes, @links, 'active', @my_priority, @energy_required, @context, @project,
       @tags, @source, @source_url, @created_at, @updated_at, @last_reviewed_at, @start_date, @due_date, @hard_deadline,
-      @task_type, @recurrence, @ai_context,
+      @task_type, @recurrence, @ai_context, @time_estimate, @inbox,
       @agent_path, @agent_resume, @agent_autorun, @agent_autorun_time
     )
   `).run({
     id:                next_task_id,
     title:             task.title,
     description:       task.description,
+    // Preserve reference material and estimation/inbox flags across respawn (bug C15).
+    notes:             task.notes ?? null,
+    links:             task.links ?? null,
     my_priority:       task.my_priority,
     energy_required:   task.energy_required,
     context:           task.context,
@@ -51,6 +54,8 @@ function spawnNextOccurrence(db, task, now) {
     task_type:         task.task_type,
     recurrence:        task.recurrence,
     ai_context:        appendAiContext(null, `Recurred from task ${task.id}`),
+    time_estimate:     task.time_estimate ?? null,
+    inbox:             task.inbox ?? 0,
     agent_path:        task.agent_path ?? null,
     agent_resume:      task.agent_resume ?? 1,
     agent_autorun:     task.agent_autorun ?? 0,

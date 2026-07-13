@@ -444,8 +444,9 @@ function spawnRecurrence(task, nextDate, now, reason) {
     spawnedStart = nextDate
     spawnedDue = null
   }
-  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context, agent_path, agent_resume, agent_autorun, agent_autorun_time) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(crypto.randomUUID(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, now, spawnedStart, spawnedDue, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence, appendAiContext(null, reason), task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00')
+  // time_estimate + inbox preserved across respawn (bug C15 — shared gap with the MCP copy).
+  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context, time_estimate, inbox, agent_path, agent_resume, agent_autorun, agent_autorun_time) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(crypto.randomUUID(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, now, spawnedStart, spawnedDue, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence, appendAiContext(null, reason), task.time_estimate ?? null, task.inbox ?? 0, task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00')
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -623,7 +624,14 @@ function completeTaskWithSubtasks(id) {
   if (!task) return { ok: false, reason: 'not_found' }
   const now = nowIso()
   db.prepare(`UPDATE tasks SET status = 'done', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE parent_id = ? AND status != 'done'`).run(now, now, appendAiContext(null, 'Bulk-completed with parent via UI.'), id)
-  db.prepare(`UPDATE tasks SET status = 'done', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, 'Marked complete via UI (with subtasks).'), id)
+  db.prepare(`UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, 'Marked complete via UI (with subtasks).'), id)
+  // Preserve the recurrence chain (bug C9). The UI forces THIS path for any parent that has
+  // incomplete subtasks (completeTask rejects it), so without spawning here a recurring task
+  // that acquired a subtask would silently end its series. Mirror completeTask's spawn.
+  if (task.recurrence) {
+    const nextDate = nextRecurrenceDate(task.due_date ?? task.start_date ?? today(), task.recurrence)
+    if (nextDate) spawnRecurrence(task, nextDate, now, `Recurred from task ${id}`)
+  }
   return { ok: true }
 }
 
