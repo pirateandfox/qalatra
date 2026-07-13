@@ -492,6 +492,11 @@ function getTasksForDate(date) {
       AND (
         (due_date IS NOT NULL AND due_date < ?)
         OR (due_date = ? AND event_time IS NOT NULL
+            -- bug C20: time(event_time,'+1 hour') wraps for a 23:xx event (e.g. 23:30 -> 00:30),
+            -- and an explicit cross-midnight end_time is < start. Either way the computed end is
+            -- next-day, so it must NOT auto-complete on the event's own date (the due_date < today
+            -- branch catches it the next day). Only same-day-completing when end >= start.
+            AND time(COALESCE(end_time, time(event_time, '+1 hour'))) >= time(event_time)
             AND time(COALESCE(end_time, time(event_time, '+1 hour'))) <= time('now', 'localtime'))
       )
     `).run(date, date)
