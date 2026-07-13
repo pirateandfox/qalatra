@@ -38,19 +38,28 @@ function autoRolloverRecurring(db) {
       )
   `).all(t, t);
   const now = nowIso();
-  for (const task of stale) {
-    db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ?`)
-      .run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id);
-    // Advance from the task's own schedule anchor (not today) to preserve cadence alignment.
-    // If skipped/missed across multiple periods, walk forward until the next occurrence >= today.
-    let baseDate = task.due_date ?? task.start_date ?? t;
-    let nextDate = nextRecurrenceDate(baseDate, task.recurrence);
-    while (nextDate && nextDate < t) {
-      baseDate = nextDate;
-      nextDate = nextRecurrenceDate(baseDate, task.recurrence);
+  // Wrap claim+spawn per task in a transaction and claim via compare-and-set (bug C12): this
+  // rollover runs in a separate process/connection from db-worker's copy, so without a status
+  // recheck at write time two concurrent runs both read the task as 'active' and both spawn a
+  // fresh occurrence. Flipping active->done only WHERE status='active' means exactly one writer
+  // wins the claim (changes===1); the loser skips the spawn.
+  const rollover = db.transaction((tasks) => {
+    for (const task of tasks) {
+      const claim = db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ? AND status = 'active'`)
+        .run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id);
+      if (claim.changes !== 1) continue;
+      // Advance from the task's own schedule anchor (not today) to preserve cadence alignment.
+      // If skipped/missed across multiple periods, walk forward until the next occurrence >= today.
+      let baseDate = task.due_date ?? task.start_date ?? t;
+      let nextDate = nextRecurrenceDate(baseDate, task.recurrence);
+      while (nextDate && nextDate < t) {
+        baseDate = nextDate;
+        nextDate = nextRecurrenceDate(baseDate, task.recurrence);
+      }
+      if (nextDate) spawnRecurrence(db, task, nextDate, now, `Auto-recurred from task ${task.id}`);
     }
-    if (nextDate) spawnRecurrence(db, task, nextDate, now, `Auto-recurred from task ${task.id}`);
-  }
+  });
+  rollover(stale);
   return stale.length;
 }
 

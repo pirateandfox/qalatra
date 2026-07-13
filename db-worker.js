@@ -419,18 +419,25 @@ function autoRolloverRecurring() {
   const t = today()
   const stale = db.prepare(`SELECT * FROM tasks WHERE status = 'active' AND task_type != 'event' AND recurrence IS NOT NULL AND ((due_date IS NOT NULL AND due_date < ?) OR (due_date IS NULL AND start_date IS NOT NULL AND start_date < ?))`).all(t, t)
   const now = nowIso()
-  for (const task of stale) {
-    db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ?`).run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id)
-    // Advance all the way to today-or-future in one shot to prevent cascade duplication
-    // when autoRolloverRecurring runs multiple times (e.g. repeated UI refreshes).
-    let baseDate = task.due_date ?? task.start_date ?? t
-    let nextDate = nextRecurrenceDate(baseDate, task.recurrence)
-    while (nextDate && nextDate < t) {
-      baseDate = nextDate
-      nextDate = nextRecurrenceDate(baseDate, task.recurrence)
+  // Transaction + compare-and-set claim (bug C12): the MCP briefing runs the same rollover on a
+  // separate connection, so two concurrent runs can both read a task as 'active' and both spawn.
+  // Flipping active->done only WHERE status='active' means exactly one writer wins; the loser
+  // (changes===0) skips the spawn. Also prevents cascade duplication across repeated UI refreshes.
+  const rollover = db.transaction((tasks) => {
+    for (const task of tasks) {
+      const claim = db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ? AND status = 'active'`).run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id)
+      if (claim.changes !== 1) continue
+      // Advance all the way to today-or-future in one shot to preserve cadence alignment.
+      let baseDate = task.due_date ?? task.start_date ?? t
+      let nextDate = nextRecurrenceDate(baseDate, task.recurrence)
+      while (nextDate && nextDate < t) {
+        baseDate = nextDate
+        nextDate = nextRecurrenceDate(baseDate, task.recurrence)
+      }
+      if (nextDate) spawnRecurrence(task, nextDate, now, `Auto-recurred from task ${task.id}`)
     }
-    if (nextDate) spawnRecurrence(task, nextDate, now, `Auto-recurred from task ${task.id}`)
-  }
+  })
+  rollover(stale)
 }
 
 function spawnRecurrence(task, nextDate, now, reason) {
