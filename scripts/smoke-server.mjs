@@ -124,13 +124,17 @@ async function main() {
     })
     if (badSettings.status !== 400) throw new Error(`POST settings/import bad json expected 400, got ${badSettings.status}`)
 
-    // Sanity: a valid create still returns 200 (proves the 400s above are input-specific, not a
-    // blanket failure). NB: not exercising DELETE of a real task here — with MCP disabled the
-    // sync_log table is absent (unfixed low C19), which is orthogonal to the C16/C17 checks above.
+    // Sanity: a valid create still returns 200, and DELETE of a real task is 200 — the latter
+    // exercises deleteTask's sync_log path with MCP disabled (bug C19: db-worker must create
+    // sync_log itself, else this throws 'no such table').
     const goodCreate = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks`, {
       method: 'POST', headers: authJson, body: JSON.stringify({ title: 'smoke task' }),
     }).then(async r => ({ res: r, data: await r.json().catch(() => ({})) }))
     if (!goodCreate.res.ok || !goodCreate.data.task?.id) throw new Error('valid task create failed')
+    const delReal = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/${goodCreate.data.task.id}`, {
+      method: 'DELETE', headers: authJson,
+    })
+    if (delReal.status !== 200) throw new Error(`DELETE real task expected 200, got ${delReal.status}`)
 
     console.log(`Server smoke passed on port ${apiPort}`)
   } catch (e) {

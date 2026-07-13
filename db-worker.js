@@ -244,6 +244,22 @@ function migrate() {
   `)
   ensureCapabilitySchema(db)
   ensureDailyNoteSearchSchema(db)
+  // sync_log is otherwise created only by mcp/db.js, so with MCP disabled (QALATRA_START_MCP=0)
+  // db-worker's deleteTask threw 'no such table: sync_log' (bug C19). Create it here too, matching
+  // mcp/db.js's schema, so deletion works regardless of whether the MCP process ran.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sync_log (
+      id            TEXT PRIMARY KEY,
+      task_id       TEXT NOT NULL REFERENCES tasks(id),
+      source        TEXT NOT NULL,
+      action        TEXT NOT NULL,
+      payload       TEXT,
+      status        TEXT NOT NULL DEFAULT 'pending',
+      attempted_at  TEXT,
+      response      TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `)
 
   const tryAlter = sql => { try { db.exec(sql) } catch {} }
   tryAlter('ALTER TABLE tasks RENAME COLUMN notes TO description')
@@ -618,12 +634,17 @@ function deleteTask(id) {
   const subtaskIds = db.prepare('SELECT id FROM tasks WHERE parent_id = ?').all(id).map(r => r.id)
   const allIds = [id, ...subtaskIds]
   const ph = allIds.map(() => '?').join(',')
-  db.prepare(`DELETE FROM task_dependencies WHERE task_id IN (${ph}) OR blocked_by_task_id IN (${ph})`).run(...allIds, ...allIds)
-  db.prepare(`DELETE FROM notes       WHERE task_id IN (${ph})`).run(...allIds)
-  db.prepare(`DELETE FROM agent_jobs  WHERE task_id IN (${ph})`).run(...allIds)
-  db.prepare(`DELETE FROM attachments WHERE task_id IN (${ph})`).run(...allIds)
-  db.prepare(`DELETE FROM sync_log    WHERE task_id IN (${ph})`).run(...allIds)
-  db.prepare('DELETE FROM tasks WHERE id = ? OR parent_id = ?').run(id, id)
+  // Single transaction (bug C19): otherwise a throw partway (e.g. missing sync_log) commits the
+  // earlier child deletes while leaving the task row, silently destroying data on a failed delete.
+  const purge = db.transaction(() => {
+    db.prepare(`DELETE FROM task_dependencies WHERE task_id IN (${ph}) OR blocked_by_task_id IN (${ph})`).run(...allIds, ...allIds)
+    db.prepare(`DELETE FROM notes       WHERE task_id IN (${ph})`).run(...allIds)
+    db.prepare(`DELETE FROM agent_jobs  WHERE task_id IN (${ph})`).run(...allIds)
+    db.prepare(`DELETE FROM attachments WHERE task_id IN (${ph})`).run(...allIds)
+    db.prepare(`DELETE FROM sync_log    WHERE task_id IN (${ph})`).run(...allIds)
+    db.prepare('DELETE FROM tasks WHERE id = ? OR parent_id = ?').run(id, id)
+  })
+  purge()
   return { ok: true }
 }
 
