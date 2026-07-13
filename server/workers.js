@@ -247,6 +247,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     let settled = false
     let proc
     let promptFile = null
+    let specFile = null
     let bin = ''
     let spawnArgs = []
 
@@ -254,9 +255,14 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (isTemplateCommand) {
         let resolvedCommand = agentCommand
         if (agentCommand.includes('{spec_file}')) {
-          const specPath = path.join(job.agent_path, 'spec.md')
+          // Per-job spec filename (bug C13): a fixed spec.md is clobbered when two jobs for the
+          // same agent land in one batch (they spawn back-to-back without awaiting), so job 1's
+          // shell reads job 2's spec. A unique name per job keeps them isolated.
+          const specName = `spec-${job.id}.md`
+          const specPath = path.join(job.agent_path, specName)
           fs.writeFileSync(specPath, job.prompt, 'utf8')
-          resolvedCommand = resolvedCommand.replace(/\{spec_file\}/g, './spec.md')
+          specFile = specPath
+          resolvedCommand = resolvedCommand.replace(/\{spec_file\}/g, `./${specName}`)
         }
         if (agentCommand.includes('{description}') || agentCommand.includes('{title}')) {
           const task = job.task_id ? await dbCall('getTask', job.task_id) : null
@@ -291,6 +297,8 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       }
     } catch (spawnErr) {
       runningJobs--
+      if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
+      if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${spawnErr.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
         { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, commandMode: isTemplateCommand ? 'template' : 'prompt' },
@@ -309,6 +317,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       clearTimeout(timeout)
       runningJobs--
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
+      if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
 
       let result = stdout.trim()
       let sessionId = null
@@ -345,6 +354,8 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       settled = true
       clearTimeout(timeout)
       runningJobs--
+      if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
+      if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
         { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, commandMode: isTemplateCommand ? 'template' : 'prompt' },
