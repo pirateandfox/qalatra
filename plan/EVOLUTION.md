@@ -1,5 +1,16 @@
 # Qalatra — Evolution Notes
 
+## Unreleased — heartbeat `last_run_at` timezone fix (2026-07-13)
+
+`markHeartbeatRun` wrote `last_run_at` with local `nowIso()` (a side effect of
+the C10 local-time convention) while `next_run_at` and `agent_jobs.created_at`
+are UTC, so the two scheduler columns disagreed by the box's UTC offset and the
+UI's "Last: Xh ago" (which parses as UTC) was off by the same amount. Now
+written with `utcNowIso()`, a new shared helper in `server/task-logic.js`.
+Scheduler firing was never affected (`next_run_at` vs `datetime('now')` was
+already UTC-vs-UTC). Existing rows self-correct on their next run. Full
+write-up: `docs/bug-heartbeat-timezone-mismatch.md`.
+
 ## v1.9.23 — C15 straggler: briefing.js rollover field preservation (2026-07-13)
 
 The C15 fix (time_estimate + inbox preserved on recurring respawn) covered two

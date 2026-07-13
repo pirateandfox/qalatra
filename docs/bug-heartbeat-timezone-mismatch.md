@@ -1,5 +1,12 @@
 # Bug: heartbeats table mixes local time and UTC (`last_run_at` local, `next_run_at` UTC)
 
+**Status:** FIXED 2026-07-13 — `markHeartbeatRun` in `db-worker.js` now writes `last_run_at` with
+`utcNowIso()` (new helper in `server/task-logic.js`) instead of local `nowIso()`. Existing rows
+self-correct on their next run (no migration). Root cause confirmed: the C10 fix made `nowIso()`
+local for day-bucketing columns, and `last_run_at` was swept along with it while `next_run_at`
+stayed UTC. The UI's `relativeTime` already parsed both as UTC, so "Last: Xh ago" was also off by
+the box offset — fixed by the same change.
+
 **Severity:** medium (data-consistency / scheduling correctness; not user-facing crash)
 **Found:** 2026-07-13, while investigating a Code Pipeline heartbeat that stopped firing.
 **Area:** heartbeat scheduler / db-worker

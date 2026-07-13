@@ -30,8 +30,8 @@ export function today() {
 // Local wall-clock timestamp YYYY-MM-DD HH:MM:SS, NOT UTC (bug C10). Must match the day-bucketing
 // queries (which use strftime('now','localtime')) so evening completions on a negative-UTC box
 // bucket to the correct local day instead of tomorrow. Only used for human/day-facing columns
-// (last_touched_human, last_reviewed_at, created_at); heartbeat next_run_at scheduling stays UTC
-// via addMinutesFromNow/nextRunAt, which are compared against datetime('now').
+// (last_touched_human, last_reviewed_at, created_at); heartbeat scheduling columns (next_run_at,
+// last_run_at) stay UTC via addMinutesFromNow/nextRunAt/utcNowIso, compared against datetime('now').
 export function nowIso() {
   const d = new Date()
   const p = n => String(n).padStart(2, '0')
@@ -53,6 +53,11 @@ export const daysBetween = (a, b) =>
 export function addMinutesFromNow(minutes) {
   return new Date(Date.now() + minutes * 60_000).toISOString().replace('T', ' ').slice(0, 19)
 }
+
+// UTC "now" as YYYY-MM-DD HH:MM:SS — for scheduler columns that live alongside next_run_at and
+// agent_jobs.created_at (both UTC). heartbeats.last_run_at must use this, not nowIso(), or the two
+// scheduler columns disagree by the box's UTC offset (docs/bug-heartbeat-timezone-mismatch.md).
+export const utcNowIso = () => addMinutesFromNow(0)
 
 // ── ai_context ordering ─────────────────────────────────────────────────────────
 

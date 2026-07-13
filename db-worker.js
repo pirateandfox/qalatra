@@ -20,7 +20,7 @@ import { autoAttachMentionedFiles } from './server/mentioned-files.js'
 // test-recurrence.mjs extracts it from this file's source text and runs it in isolation. That test
 // also asserts this copy === the shared copy, so it is an automated guard against drift.
 import {
-  today, nowIso, offsetDate, daysBetween, appendAiContext, isHabitDueOn, nextRunAt,
+  today, nowIso, utcNowIso, offsetDate, daysBetween, appendAiContext, isHabitDueOn, nextRunAt,
 } from './server/task-logic.js'
 const { rrulestr } = pkg
 
@@ -1200,9 +1200,11 @@ function getDueHeartbeats() {
 }
 
 function markHeartbeatRun(id, intervalMinutes, runAtTime, minuteOffset) {
-  const now = nowIso()
+  // last_run_at must be UTC like next_run_at and agent_jobs.created_at, not local nowIso()
+  // (docs/bug-heartbeat-timezone-mismatch.md); updated_at stays local like the rest of the table.
+  const lastRun = utcNowIso()
   const nr = nextRunAt(intervalMinutes, runAtTime ?? null, minuteOffset ?? null)
-  db.prepare(`UPDATE heartbeats SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?`).run(now, nr, now, id)
+  db.prepare(`UPDATE heartbeats SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?`).run(lastRun, nr, nowIso(), id)
   return { ok: true }
 }
 
