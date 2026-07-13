@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { initAuth, authenticate } from '../server/auth.js';
+import { initAuth, authenticate, requireScope } from '../server/auth.js';
 
 import { toolDefs as taskDefs,     handlers as taskHandlers }     from './tools/tasks.js';
 import { toolDefs as triageDefs,   handlers as triageHandlers }   from './tools/triage.js';
@@ -46,9 +46,13 @@ function isLoopback(addr = '') {
 }
 
 // Returns true if the request is authorized. Writes 401 and returns false if not.
+// Also stamps req._mcpFullAccess so tool-call scope can be enforced downstream (bug C7):
+// the MCP port must honor the same scope model as the HTTP API (server/index.js requires
+// full_access for every /api/ route). A read_only token authenticates but must not invoke
+// mutating tools. local-bypass/off grant full access, preserving prior local-caller behaviour.
 function checkMcpAuth(req, res) {
-  if (MCP_AUTH_MODE === 'off') return true
-  if (MCP_AUTH_MODE === 'local-bypass' && isLoopback(req.socket?.remoteAddress)) return true
+  if (MCP_AUTH_MODE === 'off') { req._mcpFullAccess = true; return true }
+  if (MCP_AUTH_MODE === 'local-bypass' && isLoopback(req.socket?.remoteAddress)) { req._mcpFullAccess = true; return true }
   const user = authenticate(authDb, req)
   if (!user) {
     res.writeHead(401, {
@@ -58,22 +62,30 @@ function checkMcpAuth(req, res) {
     res.end(JSON.stringify({ error: 'Unauthorized' }))
     return false
   }
+  req._mcpFullAccess = requireScope(user, 'full_access')
   return true
 }
 
 const allDefs     = [...taskDefs, ...triageDefs, ...briefingDefs, ...syncDefs, ...notesDefs, ...agentDefs, ...habitDefs, ...healthDefs, ...heartbeatDefs, ...capabilityDefs];
 const allHandlers = { ...taskHandlers, ...triageHandlers, ...briefingHandlers, ...syncHandlers, ...notesHandlers, ...agentHandlers, ...habitHandlers, ...healthHandlers, ...heartbeatHandlers, ...capabilityHandlers };
 
-function createMcpServer() {
+function createMcpServer({ fullAccess = false } = {}) {
   const server = new Server(
     { name: 'qalatra', version: '1.0.0' },
     { capabilities: { tools: {} } }
   );
 
+  // Listing tool definitions is harmless metadata — allowed for any authenticated caller.
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: allDefs }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    // Scope gate (bug C7): invoking any tool requires full_access, mirroring the HTTP API
+    // (server/index.js requires full_access for every /api/ route). Without this a read_only
+    // token — the default token class — could call every mutating tool via the MCP port.
+    if (!fullAccess) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Forbidden: this token lacks the full_access scope required to call MCP tools' }) }], isError: true };
+    }
     const handler = allHandlers[name];
     if (!handler) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: `Unknown tool: ${name}` }) }], isError: true };
@@ -184,7 +196,10 @@ const httpServer = http.createServer(async (req, res) => {
         const sid = transport.sessionId;
         if (sid) delete transports[sid];
       };
-      const server = createMcpServer();
+      // Bind the caller's access level at session creation. A session belongs to one token,
+      // so scopes are fixed for its lifetime; checkMcpAuth still re-validates the token
+      // (revocation/expiry) on every request before we ever reach here.
+      const server = createMcpServer({ fullAccess: !!req._mcpFullAccess });
       await server.connect(transport);
       await transport.handleRequest(req, res, body);
       return;
