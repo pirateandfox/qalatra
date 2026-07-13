@@ -78,6 +78,29 @@ export async function listBackups(ctx) {
   }
 }
 
+// Apply a pending DB restore written by restoreBackup (bug C11). restoreBackup only writes
+// tasks.db.restore; the code that actually swaps it into place used to live ONLY in
+// electron-main.js, so on a headless install (systemd -> node server/index.js) a restore
+// reported success and then silently never applied. Call this at server startup, before the
+// DB worker opens tasks.db, so both Electron and headless paths apply the restore. Idempotent:
+// a no-op when there is no pending restore file.
+export function applyPendingRestore(dataDir) {
+  const restorePath = path.join(dataDir, 'tasks.db.restore')
+  if (!fs.existsSync(restorePath)) return { ok: true, applied: false }
+  const dbPath = path.join(dataDir, 'tasks.db')
+  try {
+    if (fs.existsSync(dbPath)) fs.copyFileSync(dbPath, `${dbPath}.pre-restore`)
+    fs.renameSync(restorePath, dbPath)
+    for (const ext of ['-wal', '-shm']) {
+      const f = dbPath + ext
+      if (fs.existsSync(f)) { try { fs.unlinkSync(f) } catch {} }
+    }
+    return { ok: true, applied: true }
+  } catch (e) {
+    return { ok: false, applied: false, error: e.message }
+  }
+}
+
 export async function restoreBackup(ctx, objKey) {
   const key = loadEncryptionKey(ctx.dataDir)
   if (!key) return { ok: false, error: 'No encryption key; import your key first' }

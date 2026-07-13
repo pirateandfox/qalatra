@@ -10,7 +10,7 @@ import { defaultDataDir, ensureDataDir, settingsPath } from './paths.js'
 import { initSettings, loadSettings, saveSettings } from './settings.js'
 import { authenticate, createToken, ensureBootstrapToken, initAuth, listTokens, requireScope, revokeToken } from './auth.js'
 import { deleteAttachment, listAttachments, readAttachmentContent, uploadAttachment } from './attachments.js'
-import { runBackup } from './backups.js'
+import { applyPendingRestore, runBackup } from './backups.js'
 import { fileExists, findInheritedStyle, listDirectory, listWorkspaceRoots, readTextFile, resolveAllowedPath, writeFolderStyle, writeTextFile, writeUserStyle } from './files.js'
 import { applyCors, parseBody, parseRawBody, sendBinary, sendJson, streamFile } from './http.js'
 import { handleV1 } from './v1.js'
@@ -89,6 +89,11 @@ function startMcpServer() {
 
 async function main() {
   initSettings(SETTINGS_FILE)
+  // Apply any pending DB restore BEFORE the worker opens tasks.db (bug C11) — this is the only
+  // place it happens on a headless install; the Electron app has its own equivalent at startup.
+  const restore = applyPendingRestore(DATA_DIR)
+  if (restore.applied) console.log('[server] applied pending DB restore (tasks.db.restore)')
+  else if (restore.error) console.error(`[server] pending DB restore failed: ${restore.error}`)
   await initDbWorker(DATA_DIR)
   const authDb = initAuth(DB_PATH)
   const bootstrap = ensureBootstrapToken(authDb, DATA_DIR, { forceFile: process.env.QALATRA_BOOTSTRAP_TOKEN_FILE === '1' })
