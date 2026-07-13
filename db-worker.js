@@ -1040,7 +1040,12 @@ function getQueuedJobs(limit) {
     return { ...job, prevSessionId: prev?.session_id ?? null }
   })
 }
-function startAgentJob(id) { db.prepare(`UPDATE agent_jobs SET status = 'running', started_at = datetime('now') WHERE id = ?`).run(id); return { ok: true } }
+function startAgentJob(id) {
+  // Atomic claim (bug C6): only transition a job that is still 'queued'. If another worker/
+  // instance already claimed it, changes === 0 and the caller must not run it.
+  const info = db.prepare(`UPDATE agent_jobs SET status = 'running', started_at = datetime('now') WHERE id = ? AND status = 'queued'`).run(id)
+  return { ok: info.changes === 1, claimed: info.changes === 1 }
+}
 function finishAgentJob(id, status, result, sessionId) {
   db.prepare(`UPDATE agent_jobs SET status = ?, result = ?, session_id = ?, completed_at = datetime('now') WHERE id = ?`).run(status, result, sessionId, id)
   return { ok: true }

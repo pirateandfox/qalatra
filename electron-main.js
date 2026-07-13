@@ -336,7 +336,9 @@ async function startLocalApiServer(dbDir, { restart = false } = {}) {
     QALATRA_API_HOST: '127.0.0.1',
     QALATRA_API_PORT: String(apiPort),
     QALATRA_START_MCP: '1',
-    QALATRA_START_WORKERS: '1',
+    // Do not hard-force workers on (bug C2/C5): let the box-role gate + any inherited
+    // QALATRA_START_WORKERS decide, so a non-canonical box can't be forced to run duties.
+    ...(process.env.QALATRA_START_WORKERS !== undefined ? { QALATRA_START_WORKERS: process.env.QALATRA_START_WORKERS } : {}),
     QALATRA_BACKUP_ON_SHUTDOWN: '0',
     QALATRA_BOOTSTRAP_TOKEN_FILE: '1',
     ...(encryptionKey ? { QALATRA_ENCRYPTION_KEY: encryptionKey } : {}),

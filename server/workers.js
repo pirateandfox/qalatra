@@ -214,7 +214,12 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
 
   for (const job of jobs) {
     runningJobs++
-    await dbCall('startAgentJob', job.id)
+    // Atomic claim (bug C6): skip the job if another worker/instance already took it.
+    const claim = await dbCall('startAgentJob', job.id)
+    if (claim && claim.claimed === false) {
+      runningJobs--
+      continue
+    }
 
     if (!fs.existsSync(job.agent_path)) {
       runningJobs--

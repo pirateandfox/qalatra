@@ -15,6 +15,7 @@ import { fileExists, findInheritedStyle, listDirectory, listWorkspaceRoots, read
 import { applyCors, parseBody, parseRawBody, sendBinary, sendJson, streamFile } from './http.js'
 import { handleV1 } from './v1.js'
 import { startBackgroundWorkers } from './workers.js'
+import { shouldRunDutyWorkers } from './box-role.js'
 import { createTerminalManager } from './terminal-sessions.js'
 import { createBoxWebProxy } from './box-web.js'
 
@@ -26,7 +27,11 @@ const DB_PATH = path.join(DATA_DIR, 'tasks.db')
 const API_PORT = parseInt(process.env.QALATRA_API_PORT || process.env.PORT || '3456', 10)
 const API_HOST = process.env.QALATRA_API_HOST || '127.0.0.1'
 const START_MCP = process.env.QALATRA_START_MCP !== '0'
-const START_WORKERS = process.env.QALATRA_START_WORKERS !== '0'
+// Duty-worker gate (bugs C2/C5): honor the box-role gate, not just the env flag, so a
+// non-canonical box (e.g. a laptop against a stale copy of the data) cannot fire scheduled
+// duties. Falls back to workers-on for ordinary single-box installs with no role configured.
+const WORKER_GATE = shouldRunDutyWorkers()
+const START_WORKERS = WORKER_GATE.run
 const BACKUP_ON_SHUTDOWN = process.env.QALATRA_BACKUP_ON_SHUTDOWN !== '0'
 const SERVER_STARTED_AT = new Date().toISOString()
 
@@ -95,12 +100,11 @@ async function main() {
   const ctx = { dbCall, loadSettings, saveSettings, dataDir: DATA_DIR, notify: publishEvent }
   const terminalManager = createTerminalManager({ dataDir: DATA_DIR, loadSettings })
   const boxWebProxy = createBoxWebProxy()
-  if (START_WORKERS) {
-    startBackgroundWorkers(ctx)
-    backupTimer = setInterval(() => {
-      runBackup(ctx).catch(e => console.error('[backup] scheduled backup failed:', e.message))
-    }, 60 * 60 * 1000)
-  }
+  // NOTE: background workers are started only AFTER a successful port bind (in the
+  // server.listen callback below). Binding the API port is the single-instance lock: a second
+  // process against the same data dir fails EADDRINUSE, never enters the callback, and therefore
+  // never runs resetStuckJobs / job processing / heartbeats against jobs the live instance owns
+  // (bug C6). Do not move worker startup back before listen.
   startMcpServer()
 
   const server = http.createServer(async (req, res) => {
@@ -399,6 +403,15 @@ async function main() {
   server.listen(API_PORT, API_HOST, () => {
     console.log(`[server] API listening on http://${API_HOST}:${API_PORT}`)
     console.log(`[server] data dir: ${DATA_DIR}`)
+    // Start duty workers only now that we hold the port (single-instance lock — see note above).
+    if (START_WORKERS) {
+      startBackgroundWorkers(ctx)
+      backupTimer = setInterval(() => {
+        runBackup(ctx).catch(e => console.error('[backup] scheduled backup failed:', e.message))
+      }, 60 * 60 * 1000)
+    } else {
+      console.log(`[server] background workers NOT started: ${WORKER_GATE.reason}`)
+    }
   })
 
   const shutdown = async () => {
