@@ -1,39 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { openDb, nowIso } from '../db.js';
-
-function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-}
-
-function offsetDate(dateStr, days) {
-  const d = new Date(dateStr + 'T12:00:00Z');
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-const DAY_ABBR_TO_DOW = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
-function isHabitDueOn(habit, dateStr) {
-  const d = new Date(dateStr + 'T12:00:00Z');
-  const dow = d.getUTCDay();
-  if (habit.recurrence_days) {
-    const days = habit.recurrence_days.split(',').map(s => DAY_ABBR_TO_DOW[s.trim()]).filter(n => n !== undefined);
-    return days.includes(dow);
-  }
-  switch (habit.recurrence) {
-    case 'daily':    return true;
-    case 'weekdays': return dow >= 1 && dow <= 5;
-    case 'weekly': {
-      const created = new Date(habit.created_at.substring(0, 10) + 'T12:00:00Z');
-      return d.getUTCDay() === created.getUTCDay();
-    }
-    case 'monthly': {
-      const created = new Date(habit.created_at.substring(0, 10) + 'T12:00:00Z');
-      return d.getUTCDate() === created.getUTCDate();
-    }
-    default: return true;
-  }
-}
+import { openDb, nowIso, today as todayStr, offsetDate, isHabitDueOn } from '../db.js';
 
 export const toolDefs = [
   {

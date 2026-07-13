@@ -14,37 +14,24 @@ import {
 } from './server/capability-registry.js'
 import { ensureDailyNoteSearchSchema, searchDailyNotes } from './server/daily-note-search.js'
 import { autoAttachMentionedFiles } from './server/mentioned-files.js'
+// Pure business logic (date math, ai_context ordering, heartbeat/habit scheduling) is single-sourced
+// in server/task-logic.js — the same module mcp/db.js imports — so the two runtimes cannot silently
+// diverge (bugs C10/C15/C24). nextRecurrenceDate is the ONE exception: it stays defined below because
+// test-recurrence.mjs extracts it from this file's source text and runs it in isolation. That test
+// also asserts this copy === the shared copy, so it is an automated guard against drift.
+import {
+  today, nowIso, offsetDate, daysBetween, appendAiContext, isHabitDueOn, nextRunAt,
+} from './server/task-logic.js'
 const { rrulestr } = pkg
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
-function nowIso() {
-  // Local wall-clock time, NOT UTC (bug C10). Must match the day-bucketing queries (which use
-  // strftime('now','localtime')) and mcp/db.js's nowIso, so evening completions on a negative-UTC
-  // box bucket to the correct local day instead of tomorrow. Only affects human/day-facing columns
-  // (last_touched_human, last_reviewed_at, created_at); heartbeat next_run_at scheduling stays UTC
-  // via addMinutesFromNow/nextRunAt, which are compared against datetime('now').
-  const d = new Date()
-  const p = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-}
-function today() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-function appendAiContext(existing, note) {
-  const entry = `[${today()}] ${note}`
-  return existing ? `${existing}\n${entry}` : entry
-}
 // Validation error carrying an HTTP status (bug C17). The status survives the worker boundary
 // (db-worker serializes err.status; db-client rehydrates it) so index.js emits 400, not 500.
 function validationError(message) { const e = new Error(message); e.status = 400; return e }
-function offsetDate(dateStr, days) {
-  const d = new Date(dateStr + 'T12:00:00Z')
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
-}
-const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 86400000)
+// Kept local (do not move): test-recurrence.mjs regex-extracts this exact function from source and
+// runs it with only `rrulestr` injected. It must stay self-contained and byte-for-byte behaviorally
+// identical to nextRecurrenceDate in server/task-logic.js (the test asserts db-worker === shared).
 function nextRecurrenceDate(baseDate, rule) {
   if (!rule) return null
   const SHORTHANDS = { daily: 'FREQ=DAILY', weekdays: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', weekly: 'FREQ=WEEKLY', monthly: 'FREQ=MONTHLY' }
@@ -65,28 +52,6 @@ function nextRecurrenceDate(baseDate, rule) {
     const next = r.after(dtstart, false) // exclusive: first occurrence strictly after baseDate
     return next ? next.toISOString().slice(0, 10) : null
   } catch { return null }
-}
-const DAY_ABBR_TO_DOW = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }
-function isHabitDueOn(habit, dateStr) {
-  const d = new Date(dateStr + 'T12:00:00Z')
-  const dow = d.getUTCDay()
-  if (habit.recurrence_days) {
-    const days = habit.recurrence_days.split(',').map(s => DAY_ABBR_TO_DOW[s.trim()]).filter(n => n !== undefined)
-    return days.includes(dow)
-  }
-  switch (habit.recurrence) {
-    case 'daily':    return true
-    case 'weekdays': return dow >= 1 && dow <= 5
-    case 'weekly': {
-      const created = new Date(habit.created_at.substring(0, 10) + 'T12:00:00Z')
-      return dow === created.getUTCDay()
-    }
-    case 'monthly': {
-      const created = new Date(habit.created_at.substring(0, 10) + 'T12:00:00Z')
-      return d.getUTCDate() === created.getUTCDate()
-    }
-    default: return true
-  }
 }
 
 // ── Database init ─────────────────────────────────────────────────────────────
@@ -1148,32 +1113,7 @@ function insertAutorunJob(taskId, agentPath, prompt) {
 }
 
 // ── Heartbeats ────────────────────────────────────────────────────────────────
-
-function addMinutesFromNow(minutes) {
-  return new Date(Date.now() + minutes * 60_000).toISOString().replace('T', ' ').slice(0, 19)
-}
-
-// Compute next run timestamp. For daily heartbeats with a specific time, schedules
-// the next occurrence of that local time (today if not yet passed, tomorrow if it has).
-function nextRunAt(intervalMinutes, runAtTime, minuteOffset) {
-  if (runAtTime && intervalMinutes === 1440) {
-    const [h, m] = runAtTime.split(':').map(Number)
-    const target = new Date()
-    target.setHours(h, m, 0, 0)
-    if (target <= new Date()) target.setDate(target.getDate() + 1)
-    return target.toISOString().replace('T', ' ').slice(0, 19)
-  }
-  if (minuteOffset != null && intervalMinutes < 1440) {
-    const now = new Date()
-    const nowMinutes = now.getHours() * 60 + now.getMinutes()
-    const elapsed = ((nowMinutes - minuteOffset) % intervalMinutes + intervalMinutes) % intervalMinutes
-    const minutesUntilNext = elapsed === 0 ? intervalMinutes : intervalMinutes - elapsed
-    const next = new Date(now.getTime() + minutesUntilNext * 60_000)
-    next.setSeconds(0, 0)
-    return next.toISOString().replace('T', ' ').slice(0, 19)
-  }
-  return addMinutesFromNow(intervalMinutes)
-}
+// addMinutesFromNow + nextRunAt are imported from server/task-logic.js (shared with mcp).
 
 function listHeartbeats() {
   return db.prepare(`

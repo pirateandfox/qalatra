@@ -1,25 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { openDb, nowIso } from '../db.js';
-
-function nextRunAt(intervalMinutes, runAtTime, minuteOffset) {
-  if (runAtTime && intervalMinutes === 1440) {
-    const [h, m] = runAtTime.split(':').map(Number);
-    const target = new Date();
-    target.setHours(h, m, 0, 0);
-    if (target <= new Date()) target.setDate(target.getDate() + 1);
-    return target.toISOString().replace('T', ' ').slice(0, 19);
-  }
-  if (minuteOffset != null && intervalMinutes < 1440) {
-    const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    const elapsed = ((nowMinutes - minuteOffset) % intervalMinutes + intervalMinutes) % intervalMinutes;
-    const minutesUntilNext = elapsed === 0 ? intervalMinutes : intervalMinutes - elapsed;
-    const next = new Date(now.getTime() + minutesUntilNext * 60_000);
-    next.setSeconds(0, 0);
-    return next.toISOString().replace('T', ' ').slice(0, 19);
-  }
-  return new Date(Date.now() + intervalMinutes * 60_000).toISOString().replace('T', ' ').slice(0, 19);
-}
+import { openDb, nowIso, nextRunAt } from '../db.js';
 
 export const toolDefs = [
   {

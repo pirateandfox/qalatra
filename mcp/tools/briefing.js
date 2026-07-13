@@ -1,13 +1,5 @@
-import { openDb, today, nowIso, appendAiContext, nextRecurrenceDate } from '../db.js';
+import { openDb, today, nowIso, appendAiContext, nextRecurrenceDate, offsetDate, daysBetween } from '../db.js';
 import { v4 as uuidv4 } from 'uuid';
-
-// Date helpers — mirror db-worker.js so the two rollover copies produce identical spawns.
-function offsetDate(dateStr, days) {
-  const d = new Date(dateStr + 'T12:00:00Z');
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 86400000);
 
 // Spawn the next occurrence of a recurring task, preserving every field db-worker preserves
 // (bug C4: this copy previously dropped notes/links/agent_path/agent_resume/agent_autorun/

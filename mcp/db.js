@@ -3,10 +3,25 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
 import fs from 'fs';
-import pkg from 'rrule';
 import { ensureAgentSchema, ensureCapabilitySchema } from '../server/capability-registry.js';
 import { ensureDailyNoteSearchSchema } from '../server/daily-note-search.js';
-const { rrulestr } = pkg;
+
+// Pure business logic (date math, recurrence, ai_context ordering, heartbeat/habit scheduling)
+// lives in server/task-logic.js — the single source shared with db-worker.js so the two runtimes
+// cannot silently diverge. Re-exported here so mcp/tools/* (and test-recurrence.mjs) keep importing
+// them from '../db.js' as before, now backed by that one implementation.
+import {
+  today, nowIso, offsetDate, daysBetween, addMinutesFromNow,
+  appendAiContext, LEGACY_RRULE, toRruleString, rruleToText,
+  nextRecurrenceDate, isAgentScheduleDue, nextRunAt,
+  isHabitDueOn, DAY_ABBR_TO_DOW,
+} from '../server/task-logic.js';
+export {
+  today, nowIso, offsetDate, daysBetween, addMinutesFromNow,
+  appendAiContext, LEGACY_RRULE, toRruleString, rruleToText,
+  nextRecurrenceDate, isAgentScheduleDue, nextRunAt,
+  isHabitDueOn, DAY_ABBR_TO_DOW,
+};
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.TASKOS_DB_DIR ?? path.join(__dirname, '..', 'db');
@@ -268,96 +283,5 @@ export function openDb({ busyTimeout = 1000 } = {}) {
   return db;
 }
 
-export function today() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-export function nowIso() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const h = String(d.getHours()).padStart(2, '0');
-  const mi = String(d.getMinutes()).padStart(2, '0');
-  const s = String(d.getSeconds()).padStart(2, '0');
-  return `${y}-${mo}-${day} ${h}:${mi}:${s}`;
-}
-
-// Legacy shorthand → RRULE string
-const LEGACY_RRULE = {
-  'daily':    'FREQ=DAILY',
-  'weekdays': 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
-  'weekly':   'FREQ=WEEKLY',
-  'monthly':  'FREQ=MONTHLY',
-};
-
-export function toRruleString(recurrence) {
-  return LEGACY_RRULE[recurrence] ?? recurrence;
-}
-
-// Human-readable description of a recurrence pattern
-export function rruleToText(recurrence) {
-  if (!recurrence) return null;
-  try {
-    const rule = rrulestr('RRULE:' + toRruleString(recurrence));
-    return rule.toText();
-  } catch (_) {
-    return recurrence;
-  }
-}
-
-// Returns the next ISO date string (YYYY-MM-DD) after baseDate for the given recurrence.
-// recurrence: legacy shorthand OR full RRULE string (e.g. 'FREQ=MONTHLY;BYMONTHDAY=1')
-export function nextRecurrenceDate(baseDate, recurrence) {
-  if (!recurrence) return null;
-  try {
-    let rruleStr = toRruleString(recurrence);
-    // Anchor to midnight UTC on baseDate. Use exclusive after() so we always get the
-    // NEXT occurrence strictly after baseDate without shifting the weekday/monthday anchor.
-    // (Using day+1 with inclusive was shifting FREQ=WEEKLY's weekday anchor when baseDate
-    // and the completion day were on different weekdays.)
-    const dtstart = new Date(baseDate + 'T00:00:00Z');
-    // FREQ=MONTHLY without BYMONTHDAY would anchor to dtstart's day-of-month, causing 1-day drift
-    // on each completion. Fix by explicitly anchoring to baseDate's day-of-month.
-    if (rruleStr === 'FREQ=MONTHLY') {
-      const dom = parseInt(baseDate.slice(8, 10), 10);
-      rruleStr = `FREQ=MONTHLY;BYMONTHDAY=${dom}`;
-    }
-    const rule = rrulestr('RRULE:' + rruleStr, { dtstart });
-    const next = rule.after(dtstart, false); // exclusive: first occurrence strictly after baseDate
-    return next ? next.toISOString().slice(0, 10) : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-// Returns true if the agent schedule is due given the last run time.
-// agentSchedule: RRULE string with BYHOUR/BYMINUTE (e.g. 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0')
-// lastRunAt: ISO datetime string or null
-export function isAgentScheduleDue(agentSchedule, lastRunAt) {
-  if (!agentSchedule) return false;
-  try {
-    const now = new Date();
-    const rule = rrulestr('RRULE:' + agentSchedule);
-    // Find the most recent occurrence that should have fired by now
-    const lastOccurrence = rule.before(now, true);
-    if (!lastOccurrence) return false;
-    if (!lastRunAt) return true;
-    return lastOccurrence > new Date(lastRunAt);
-  } catch (_) {
-    return false;
-  }
-}
-
-export function appendAiContext(existing, newNote) {
-  if (!newNote) return existing ?? null;
-  const entry = `[${today()}] ${newNote}`;
-  // Append (chronological), matching db-worker (bug C24): this file used to PREPEND, so a task
-  // touched by both MCP and the UI ended up with day-stamped entries in mixed order, misleading
-  // readers about the latest decision. One convention: newest last.
-  return existing ? `${existing}\n${entry}` : entry;
-}
+// Pure date/recurrence/ai_context/heartbeat/habit helpers now live in server/task-logic.js and are
+// imported + re-exported at the top of this file (single source shared with db-worker.js).

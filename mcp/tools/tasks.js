@@ -1,9 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate } from '../db.js';
+import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate, daysBetween, offsetDate } from '../db.js';
 import { enrichTaskRows, getTaskDependencies, staleWhereClause } from './trust-signals.js';
-
-const daysBetween = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 86400000)
-const offsetDate = (dateStr, days) => { const d = new Date(dateStr + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10) }
 
 function spawnNextOccurrence(db, task, now) {
   if (!task.recurrence) return null;
