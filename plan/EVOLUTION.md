@@ -1,6 +1,6 @@
 # Qalatra — Evolution Notes
 
-## Unreleased — heartbeat `last_run_at` timezone fix (2026-07-13)
+## v1.9.24 — heartbeat `last_run_at` timezone fix (2026-07-13)
 
 `markHeartbeatRun` wrote `last_run_at` with local `nowIso()` (a side effect of
 the C10 local-time convention) while `next_run_at` and `agent_jobs.created_at`
