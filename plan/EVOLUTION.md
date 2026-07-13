@@ -1,5 +1,32 @@
 # Qalatra — Evolution Notes
 
+## v1.9.22 — Correctness sweep C1–C26 + task-logic single-sourcing (2026-07-13)
+
+A git-history-mined debugging pass (see `docs/` playbook) found and fixed 26
+bugs across the recurrence engine, MCP tools, db-worker, and HTTP API:
+
+- Recurrence: weekly/monthly rules no longer collapse to next-day (C1); the
+  recurrence chain and task fields survive respawn (C9/C15); completing via
+  `status: done` spawns the next occurrence like `complete_task` (C14);
+  concurrent rollovers can't duplicate tasks (C12).
+- MCP: `read_only` token scope enforced on all mutating tools (C7); NULL
+  clears fields instead of being ignored and rollover preserves fields
+  (C3/C4); projects upsert + chronological `ai_context` (C22/C24).
+- Server/db-worker: `nowIso()` uses local time not UTC (C10); pending DB
+  restore applied on headless startup (C11); per-job spec files stop batched
+  same-agent jobs clobbering each other (C13); heartbeat `next_run_at`
+  recomputed on schedule edits (C8/C18); `sync_log` created in db-worker and
+  `deleteTask` made transactional (C19); event auto-complete no longer fires
+  before a late-night event (C20); pre-spawn `dbCall` rejection no longer
+  leaks a concurrency slot (C21).
+- HTTP API: date-default fix, snooze validation, GET returns 404 for missing
+  tasks (C23/C25/C26).
+- Refactor (Q1): pure task logic single-sourced in `server/task-logic.js`,
+  shared by the server and db-worker so the copies can't drift.
+- New standalone regression suite: `scripts/test-*.mjs` (10 scripts — run
+  with `ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron <script>` on a
+  dev box where native modules are built for Electron).
+
 ## Server idle-crash hardening (2026-07-06)
 
 Qalatra Server now guards the idle/background paths that could terminate the
