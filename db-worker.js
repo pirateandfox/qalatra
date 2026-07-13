@@ -18,7 +18,16 @@ const { rrulestr } = pkg
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
-function nowIso() { return new Date().toISOString().replace('T', ' ').slice(0, 19) }
+function nowIso() {
+  // Local wall-clock time, NOT UTC (bug C10). Must match the day-bucketing queries (which use
+  // strftime('now','localtime')) and mcp/db.js's nowIso, so evening completions on a negative-UTC
+  // box bucket to the correct local day instead of tomorrow. Only affects human/day-facing columns
+  // (last_touched_human, last_reviewed_at, created_at); heartbeat next_run_at scheduling stays UTC
+  // via addMinutesFromNow/nextRunAt, which are compared against datetime('now').
+  const d = new Date()
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
 function today() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
