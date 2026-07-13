@@ -1,5 +1,15 @@
 # Qalatra — Evolution Notes
 
+## v1.9.23 — C15 straggler: briefing.js rollover field preservation (2026-07-13)
+
+The C15 fix (time_estimate + inbox preserved on recurring respawn) covered two
+of the three spawn paths but missed `mcp/tools/briefing.js` spawnRecurrence, so
+recurring tasks rolling over via `morning_briefing` silently lost their time
+estimate (breaking the briefing's own capacity math) and inbox flag. Fixed to
+field-for-field parity with db-worker; `test-mcp-rollover-guard.mjs` now
+asserts preservation through the briefing path (verified red pre-fix, green
+post-fix). All three spawn paths are now aligned.
+
 ## v1.9.22 — Correctness sweep C1–C26 + task-logic single-sourcing (2026-07-13)
 
 A git-history-mined debugging pass (see `docs/` playbook) found and fixed 26
