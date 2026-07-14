@@ -7,6 +7,13 @@ TUNNEL_NAME="${QALATRA_TUNNEL_NAME:-qalatra-api}"
 API_HOST="${QALATRA_API_HOST:-127.0.0.1}"
 API_PORT="${QALATRA_API_PORT:-3456}"
 SERVICE_URL="${QALATRA_TUNNEL_SERVICE:-http://$API_HOST:$API_PORT}"
+# Optional second origin: the MCP port, for boxes whose canonical Qalatra is reached by
+# off-box Claude clients. Only published when QALATRA_TUNNEL_MCP_HOSTNAME is set, and only
+# after verifying the server enforces QALATRA_MCP_AUTH=required (see check_mcp_auth below).
+MCP_HOSTNAME="${QALATRA_TUNNEL_MCP_HOSTNAME:-}"
+MCP_HOST="${QALATRA_MCP_HOST:-127.0.0.1}"
+MCP_PORT="${QALATRA_MCP_PORT:-3457}"
+MCP_SERVICE_URL="${QALATRA_TUNNEL_MCP_SERVICE:-http://$MCP_HOST:$MCP_PORT}"
 CLOUDFLARED_BIN="${QALATRA_CLOUDFLARED_BIN:-$(command -v cloudflared || true)}"
 CLOUDFLARED_HOME="${QALATRA_CLOUDFLARED_HOME:-$HOME/.cloudflared}"
 CONFIG_DIR="${QALATRA_TUNNEL_CONFIG_DIR:-$HOME/.config/qalatra/cloudflared}"
@@ -44,6 +51,19 @@ try {
   if (match) console.log(match.id || match.ID || match.uuid || match.UUID)
 } catch {}
 NODE
+}
+
+# Behind cloudflared every request reaches the origin from 127.0.0.1, so the MCP server's
+# default local-bypass auth mode would treat the whole internet as a trusted local caller.
+# Publishing the MCP port is only safe when auth is enforced for loopback callers too.
+check_mcp_auth() {
+  local env_block mode
+  env_block="$(systemctl --user show qalatra-server.service -p Environment --value 2>/dev/null || true)"
+  mode="$(printf '%s' "$env_block" | tr ' ' '\n' | sed -n 's/^QALATRA_MCP_AUTH=//p' | tail -1)"
+  [ "$mode" = "required" ] || fail "Refusing to publish $MCP_HOSTNAME -> $MCP_SERVICE_URL: qalatra-server has QALATRA_MCP_AUTH=${mode:-<unset, defaults to local-bypass>}, but a tunneled MCP port MUST be 'required'. Behind cloudflared the origin sees every request as 127.0.0.1, so local-bypass would expose unauthenticated MCP writes to the internet. Set it via a drop-in, then re-run:
+  mkdir -p \$HOME/.config/systemd/user/qalatra-server.service.d
+  printf '[Service]\\nEnvironment=QALATRA_MCP_AUTH=required\\n' > \$HOME/.config/systemd/user/qalatra-server.service.d/override.conf
+  systemctl --user daemon-reload && systemctl --user restart qalatra-server.service"
 }
 
 wait_for_url() {
@@ -84,28 +104,40 @@ fi
 CREDENTIALS_FILE="${QALATRA_TUNNEL_CREDENTIALS:-$CLOUDFLARED_HOME/$TUNNEL_ID.json}"
 [ -f "$CREDENTIALS_FILE" ] || fail "Could not find tunnel credentials for $TUNNEL_NAME. Set QALATRA_TUNNEL_CREDENTIALS explicitly."
 
-info "Writing Qalatra-only tunnel config"
-cat > "$CONFIG_FILE" <<CONFIG
-tunnel: $TUNNEL_ID
-credentials-file: "$CREDENTIALS_FILE"
+if [ -n "$MCP_HOSTNAME" ]; then
+  check_mcp_auth
+fi
 
-ingress:
-  - hostname: $HOSTNAME
-    service: $SERVICE_URL
-    originRequest:
-      noTLSVerify: false
-  - service: http_status:404
-CONFIG
+# This file is regenerated on every run, so every origin the box needs must be derived from
+# config here — a rule hand-added to config.yml is silently dropped on the next run.
+info "Writing Qalatra-only tunnel config"
+{
+  printf 'tunnel: %s\n' "$TUNNEL_ID"
+  printf 'credentials-file: "%s"\n\n' "$CREDENTIALS_FILE"
+  printf 'ingress:\n'
+  printf '  - hostname: %s\n    service: %s\n    originRequest:\n      noTLSVerify: false\n' \
+    "$HOSTNAME" "$SERVICE_URL"
+  if [ -n "$MCP_HOSTNAME" ]; then
+    printf '  - hostname: %s\n    service: %s\n    originRequest:\n      noTLSVerify: false\n' \
+      "$MCP_HOSTNAME" "$MCP_SERVICE_URL"
+  fi
+  printf '  - service: http_status:404\n'
+} > "$CONFIG_FILE"
 chmod 600 "$CONFIG_FILE"
 
-info "Creating DNS route $HOSTNAME -> $TUNNEL_ID"
-if ! ROUTE_OUTPUT="$("$CLOUDFLARED_BIN" tunnel route dns --overwrite-dns "$TUNNEL_ID" "$HOSTNAME" 2>&1)"; then
-  if printf '%s' "$ROUTE_OUTPUT" | grep -qiE 'already exists|record exists'; then
-    echo "$ROUTE_OUTPUT"
-  else
-    fail "$ROUTE_OUTPUT"
+"$CLOUDFLARED_BIN" tunnel --config "$CONFIG_FILE" ingress validate \
+  || fail "Generated ingress config failed validation: $CONFIG_FILE"
+
+for route_hostname in "$HOSTNAME" ${MCP_HOSTNAME:+"$MCP_HOSTNAME"}; do
+  info "Creating DNS route $route_hostname -> $TUNNEL_ID"
+  if ! ROUTE_OUTPUT="$("$CLOUDFLARED_BIN" tunnel route dns --overwrite-dns "$TUNNEL_ID" "$route_hostname" 2>&1)"; then
+    if printf '%s' "$ROUTE_OUTPUT" | grep -qiE 'already exists|record exists'; then
+      echo "$ROUTE_OUTPUT"
+    else
+      fail "$ROUTE_OUTPUT"
+    fi
   fi
-fi
+done
 
 cat > "$SERVICE_FILE" <<SERVICE
 [Unit]
@@ -139,6 +171,9 @@ echo "Tunnel:  $TUNNEL_NAME"
 echo "ID:      $TUNNEL_ID"
 echo "Host:    https://$HOSTNAME"
 echo "Origin:  $SERVICE_URL"
+if [ -n "$MCP_HOSTNAME" ]; then
+  echo "MCP:     https://$MCP_HOSTNAME -> $MCP_SERVICE_URL (QALATRA_MCP_AUTH=required verified)"
+fi
 echo "Config:  $CONFIG_FILE"
 echo "Service: $SERVICE_FILE"
 echo "Local:   $LOCAL_STATUS ($LOCAL_HEALTH)"
@@ -150,5 +185,6 @@ echo "Remote smoke test:"
 echo "  TOKEN=\$(cat $(printf '%q' "${QALATRA_DATA_DIR:-$HOME/.local/share/qalatra/db}/admin-token.txt"))"
 echo "  curl -fsS -H \"Authorization: Bearer \$TOKEN\" https://$HOSTNAME/api/instance"
 echo
-echo "This tunnel exposes only the Qalatra API origin. Do not publish MCP port 3457."
+echo "This tunnel exposes only Qalatra origins. Publish the MCP port by setting"
+echo "QALATRA_TUNNEL_MCP_HOSTNAME; it is refused unless QALATRA_MCP_AUTH=required."
 echo "Do not add $HOSTNAME to the operator Cloudflare Access app; Qalatra clients authenticate with bearer tokens."
