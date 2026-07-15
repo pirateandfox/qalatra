@@ -26,7 +26,7 @@ export const toolDefs = [
   },
   {
     name: 'update_heartbeat',
-    description: 'Update a heartbeat agent\'s title, description, prompt, agent_path, or schedule. Any schedule change (interval_minutes, run_at_time, minute_offset) recomputes the next run time.',
+    description: 'Update a heartbeat agent\'s title, description, prompt, agent_path, schedule, or active state. Any schedule change (interval_minutes, run_at_time, minute_offset) recomputes the next run time. Setting `active` is idempotent — use it instead of toggle_heartbeat when you need a heartbeat to be definitely on or definitely off.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -38,13 +38,14 @@ export const toolDefs = [
         interval_minutes: { type: 'number' },
         run_at_time:      { type: 'string', description: 'For daily heartbeats (interval_minutes=1440): local time to run, as HH:MM' },
         minute_offset:    { type: 'number', description: 'For sub-daily heartbeats: pin runs to clock-aligned times (N ≡ minute_offset mod interval_minutes)' },
+        active:           { type: 'boolean', description: 'Idempotent enable/disable: false pauses the heartbeat, true resumes it (scheduling the next run). Unlike toggle_heartbeat, calling this repeatedly with the same value is safe.' },
       },
       required: ['id'],
     },
   },
   {
     name: 'toggle_heartbeat',
-    description: 'Pause or resume a heartbeat agent. Pausing stops it from running; resuming schedules the next run immediately.',
+    description: 'Flip a heartbeat between paused and running. WARNING: this is a blind toggle — if another agent already changed the state, calling it will undo that change. When you need a specific state (e.g. "make sure this is disabled"), use update_heartbeat with `active` instead.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -107,7 +108,7 @@ export const handlers = {
   },
 
   update_heartbeat(args = {}) {
-    const { id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset } = args;
+    const { id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset, active } = args;
     if (!id) return { error: 'id required' };
     const db = openDb();
     const existing = db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
@@ -120,7 +121,8 @@ export const handlers = {
     // Recompute next_run_at on ANY schedule change (bug C18) and normalize like create
     // (run_at_time only with interval 1440; minute_offset only with <1440), so schedule edits
     // take effect instead of firing once more on the stale next_run_at (up to ~7 days late).
-    if (['interval_minutes', 'run_at_time', 'minute_offset'].some(k => k in args && args[k] !== undefined)) {
+    const scheduleChanged = ['interval_minutes', 'run_at_time', 'minute_offset'].some(k => k in args && args[k] !== undefined);
+    if (scheduleChanged) {
       const mins = (interval_minutes !== undefined ? interval_minutes : existing.interval_minutes) ?? 60;
       const rawRunAt = run_at_time !== undefined ? run_at_time : existing.run_at_time;
       const rawOffset = minute_offset !== undefined ? minute_offset : existing.minute_offset;
@@ -130,6 +132,16 @@ export const handlers = {
       sets.push('run_at_time = ?'); vals.push(runAt);
       sets.push('minute_offset = ?'); vals.push(offset);
       sets.push('next_run_at = ?'); vals.push(nextRunAt(mins, runAt, offset));
+    }
+    // Idempotent enable/disable — the fix for the toggle_heartbeat blind-flip footgun:
+    // setting the same value twice is a no-op, unlike toggle. Resuming (0→1) schedules
+    // the next run like toggle does, unless a schedule change above already set it.
+    if (active !== undefined) {
+      const newActive = active ? 1 : 0;
+      sets.push('active = ?'); vals.push(newActive);
+      if (newActive === 1 && existing.active !== 1 && !scheduleChanged) {
+        sets.push('next_run_at = ?'); vals.push(nextRunAt(existing.interval_minutes, existing.run_at_time, existing.minute_offset));
+      }
     }
     if (!sets.length) return existing;
     sets.push('updated_at = ?'); vals.push(nowIso()); vals.push(id);

@@ -41,6 +41,24 @@ try {
   check('title updated', afterTitle.title === 'renamed')
 
   check('update of missing heartbeat returns error', !!handlers.update_heartbeat({ id: 'nope', title: 'x' }).error)
+
+  // Idempotent active (toggle_heartbeat blind-flip fix): disabling twice must stay disabled.
+  const off1 = handlers.update_heartbeat({ id: hb.id, active: false })
+  check('active: false disables', off1.active === 0)
+  const off2 = handlers.update_heartbeat({ id: hb.id, active: false })
+  check('active: false again stays disabled (idempotent)', off2.active === 0)
+
+  // Re-enabling schedules a next run; re-enabling again must not move it.
+  const on1 = handlers.update_heartbeat({ id: hb.id, active: true })
+  check('active: true re-enables', on1.active === 1)
+  check('re-enable schedules next_run_at', !!on1.next_run_at)
+  const on2 = handlers.update_heartbeat({ id: hb.id, active: true })
+  check('active: true again stays enabled (idempotent)', on2.active === 1)
+  check('repeat enable leaves next_run_at unchanged', on2.next_run_at === on1.next_run_at)
+
+  // Combined schedule + active change must not double-set next_run_at.
+  const combo = handlers.update_heartbeat({ id: hb.id, interval_minutes: 60, minute_offset: 0, active: true })
+  check('schedule + active combo applies both', combo.active === 1 && combo.interval_minutes === 60)
 } finally {
   fs.rmSync(dir, { recursive: true, force: true })
 }

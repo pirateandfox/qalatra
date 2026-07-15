@@ -1,5 +1,20 @@
 # Qalatra — Evolution Notes
 
+## v1.9.25 — idempotent heartbeat enable/disable (2026-07-15)
+
+`toggle_heartbeat` was the only affordance for pausing a heartbeat, and it's a
+blind flip: an agent following "disable the heartbeat on failure" would re-arm
+a heartbeat another agent (or Justin) had already disabled. `update_heartbeat`
+now accepts an `active` field (both `mcp/tools/heartbeats.js` and
+`db-worker.js`, so the `/api/v1` PATCH route gets it too): `active: false`
+pauses, `active: true` resumes and schedules the next run, and repeating either
+is a no-op. Tool descriptions steer agents to `update_heartbeat { active }` for
+"ensure on/off" and warn that `toggle_heartbeat` is a blind flip. Covered in
+`scripts/test-mcp-heartbeats.mjs`. Qalatra task 13b6d394. Note: any canonical
+agent prompts that say "call toggle_heartbeat to disable" (e.g. the pipeline
+circuit-breaker protocol on remote nodes) should be updated to the idempotent
+call, and remote servers need a restart to pick up the new tool schema.
+
 ## v1.9.24 — heartbeat `last_run_at` timezone fix (2026-07-13)
 
 `markHeartbeatRun` wrote `last_run_at` with local `nowIso()` (a side effect of

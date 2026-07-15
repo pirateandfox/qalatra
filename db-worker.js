@@ -1151,7 +1151,8 @@ function updateHeartbeat(id, fields = {}) {
   // Recompute next_run_at on ANY schedule-field change (bug C8) and apply the create-path
   // normalization (run_at_time only valid with interval 1440; minute_offset only with <1440),
   // so a schedule edit takes effect immediately instead of firing on the stale next_run_at.
-  if (['interval_minutes', 'run_at_time', 'minute_offset'].some(k => k in fields)) {
+  const scheduleChanged = ['interval_minutes', 'run_at_time', 'minute_offset'].some(k => k in fields)
+  if (scheduleChanged) {
     const mins = (('interval_minutes' in fields) ? fields.interval_minutes : existing.interval_minutes) ?? 60
     const rawRunAt = ('run_at_time' in fields) ? fields.run_at_time : existing.run_at_time
     const rawOffset = ('minute_offset' in fields) ? fields.minute_offset : existing.minute_offset
@@ -1161,6 +1162,16 @@ function updateHeartbeat(id, fields = {}) {
     sets.push('run_at_time = ?'); vals.push(runAt)
     sets.push('minute_offset = ?'); vals.push(offset)
     sets.push('next_run_at = ?'); vals.push(nextRunAt(mins, runAt, offset))
+  }
+  // Idempotent enable/disable — the fix for the toggleHeartbeat blind-flip footgun:
+  // setting the same value twice is a no-op, unlike toggle. Resuming (0→1) schedules
+  // the next run like toggle does, unless a schedule change above already set it.
+  if ('active' in fields && fields.active !== undefined) {
+    const newActive = fields.active ? 1 : 0
+    sets.push('active = ?'); vals.push(newActive)
+    if (newActive === 1 && existing.active !== 1 && !scheduleChanged) {
+      sets.push('next_run_at = ?'); vals.push(nextRunAt(existing.interval_minutes, existing.run_at_time ?? null, existing.minute_offset ?? null))
+    }
   }
   if (!sets.length) return existing
   sets.push('updated_at = ?'); vals.push(nowIso()); vals.push(id)
