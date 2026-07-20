@@ -1,5 +1,22 @@
 # Qalatra — Evolution Notes
 
+## Release workflow: assert full asset set before un-drafting (2026-07-20)
+
+The v1.9.26 release exposed a silent-failure mode in `.github/workflows/release.yml`.
+electron-builder treats an upload to a pre-existing GitHub release that's more than
+2 hours old as a no-op ("skipped publishing") and still exits 0. So when a first
+release run partially uploads assets and then fails (e.g. a GitHub 503 mid-upload),
+a later re-run skips every remaining upload and all three platform jobs go green —
+leaving a release with only the assets from the first attempt and, critically,
+missing the `latest*.yml` auto-updater manifests. The workflow reported success
+while shipping a release the in-app updater couldn't read. The `publish-release`
+job now verifies every required platform binary and updater manifest is present on
+the release before it flips `--draft=false`, and fails the workflow with the exact
+missing files (and the delete-release-then-re-run remedy) if any are absent. An
+incomplete release is left as a draft, which the updater ignores, rather than
+advertised. Recovery when it fires: `gh release delete <tag> --yes` (keep the tag),
+then re-run the workflow.
+
 ## Auto-attach secret denylist (2026-07-19)
 
 Note auto-attach (`server/mentioned-files.js`, used by `add_task_note` for

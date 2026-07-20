@@ -129,6 +129,49 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Guardrail: electron-builder treats an upload to a pre-existing release
+      # that's >2h old as a no-op and still exits 0 ("skipped publishing").
+      # A re-run after a partial/failed first attempt can therefore leave a
+      # green-but-incomplete release missing binaries or, worse, the auto-updater
+      # manifests (latest*.yml) — which silently breaks in-app updates. Fail loudly
+      # here, before the release is un-drafted, so a broken release is never shipped.
+      - name: Verify all platform assets are present
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          REQUIRED=(
+            "latest.yml"                              # Windows updater manifest
+            "latest-mac.yml"                          # macOS updater manifest
+            "latest-linux.yml"                        # Linux x64 updater manifest
+            "latest-linux-arm64.yml"                  # Linux arm64 updater manifest
+            "Qalatra-${VERSION}.dmg"
+            "Qalatra-${VERSION}-arm64.dmg"
+            "Qalatra-${VERSION}-mac.zip"              # updater feed reads the zip, not the dmg
+            "Qalatra-${VERSION}-arm64-mac.zip"
+            "Qalatra-Setup-${VERSION}.exe"
+            "Qalatra-${VERSION}.AppImage"
+            "Qalatra-${VERSION}-arm64.AppImage"
+          )
+          ASSETS="$(gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+          echo "Assets currently on $TAG:"
+          echo "${ASSETS:-  (none)}"
+          MISSING=()
+          for f in "${REQUIRED[@]}"; do
+            grep -qxF "$f" <<< "$ASSETS" || MISSING+=("$f")
+          done
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "::error::Release $TAG is missing ${#MISSING[@]} required asset(s):"
+            printf '::error::  - %s\n' "${MISSING[@]}"
+            echo "electron-builder likely skipped uploads to a pre-existing release."
+            echo "Fix: delete the release but keep the tag, then re-run this workflow —"
+            echo "  gh release delete $TAG --yes"
+            exit 1
+          fi
+          echo "All ${#REQUIRED[@]} required assets present."
+
       - name: Add changelog and publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
