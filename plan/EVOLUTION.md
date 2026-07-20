@@ -1,5 +1,23 @@
 # Qalatra — Evolution Notes
 
+## Auto-attach secret denylist (2026-07-19)
+
+Note auto-attach (`server/mentioned-files.js`, used by `add_task_note` for
+non-user authors and by agent-job results in `db-worker.js`) attached any
+path-looking string that resolved to a real file — so an agent note mentioning
+`~/.config/qalatra/github-token` or a `.env` file silently attached the live
+secret to the task. With `bucket`/`key`/`url` columns already on the
+attachments table, a future attachment-sync feature could have shipped secrets
+off-box. `resolveCandidate` now skips: (1) paths with sensitive directory
+segments (`.ssh`, `.aws`, `.config`, `.gnupg`, `.kube`, etc.), (2) filenames
+matching secret patterns (`token`, `secret`, `credential`, `password`,
+`api-key`, `.env*`, `id_rsa`, `.pem`/`.key`/keystore extensions, `.netrc`,
+shell history), and (3) any file whose first 1KB contains a PEM
+`-----BEGIN ... PRIVATE KEY-----` header — checked against both the mentioned
+path and its symlink-resolved realpath. False positives just mean manual
+attachment; that's the right trade. Normal agent outputs (pdf/csv/md/json/png)
+still attach.
+
 ## v1.9.25 — idempotent heartbeat enable/disable (2026-07-15)
 
 `toggle_heartbeat` was the only affordance for pausing a heartbeat, and it's a

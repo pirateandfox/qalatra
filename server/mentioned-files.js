@@ -5,6 +5,50 @@ import { randomUUID } from 'crypto'
 
 const MAX_AUTO_ATTACH_BYTES = 50 * 1024 * 1024
 
+// Never auto-attach secret material. Notes are written by agents and the
+// attachments table has bucket/key/url columns, so anything attached here may
+// later leave this machine. Denylist beats allowlist: a false positive just
+// means the user attaches the file manually.
+const DENY_DIR_SEGMENTS = new Set([
+  '.aws', '.azure', '.config', '.docker', '.gcloud', '.gnupg', '.kube',
+  '.password-store', '.ssh', 'keychains',
+])
+
+const DENY_FILENAME_PATTERNS = [
+  /(^|[._-])env($|[._-])/i,                       // .env, .env.local, prod.env
+  /token/i,
+  /secret/i,
+  /credential/i,
+  /passw(or)?d/i,
+  /api[-_]?key/i,
+  /^id_(rsa|dsa|ecdsa|ed25519)/i,
+  /^\.?(netrc|npmrc|pypirc|git-credentials|htpasswd|pgpass|authinfo)$/i,
+  /_history$/i,
+  /\.(pem|key|p12|pfx|jks|keystore|kdbx|gpg|asc|ppk)$/i,
+]
+
+function isSensitivePath(filePath) {
+  const segments = filePath.split(path.sep).filter(Boolean)
+  const filename = segments[segments.length - 1] ?? ''
+  if (segments.slice(0, -1).some(seg => DENY_DIR_SEGMENTS.has(seg.toLowerCase()))) return true
+  return DENY_FILENAME_PATTERNS.some(pattern => pattern.test(filename))
+}
+
+function looksLikePrivateKey(filePath) {
+  try {
+    const fd = fs.openSync(filePath, 'r')
+    try {
+      const buf = Buffer.alloc(1024)
+      const bytes = fs.readSync(fd, buf, 0, buf.length, 0)
+      return /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----/.test(buf.toString('utf8', 0, bytes))
+    } finally {
+      fs.closeSync(fd)
+    }
+  } catch {
+    return true // unreadable → don't attach
+  }
+}
+
 const MIME_BY_EXT = {
   '.csv': 'text/csv',
   '.gif': 'image/gif',
@@ -57,8 +101,11 @@ function resolveCandidate(candidate, baseDirs) {
       try {
         const stat = fs.statSync(p)
         if (!stat.isFile() || stat.size > MAX_AUTO_ATTACH_BYTES) continue
+        const realPath = fs.realpathSync(p)
+        // Check both the mentioned path and the symlink target
+        if (isSensitivePath(p) || isSensitivePath(realPath) || looksLikePrivateKey(realPath)) continue
         return {
-          localPath: fs.realpathSync(p),
+          localPath: realPath,
           filename: path.basename(p),
           sizeBytes: stat.size,
           mimeType: MIME_BY_EXT[path.extname(p).toLowerCase()] ?? null,
