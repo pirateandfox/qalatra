@@ -17,6 +17,22 @@ incomplete release is left as a draft, which the updater ignores, rather than
 advertised. Recovery when it fires: `gh release delete <tag> --yes` (keep the tag),
 then re-run the workflow.
 
+## Auto-attach denylist: home-root dotfiles + rc files (2026-07-21)
+
+Follow-up to the denylist below. `.flightdeskrc` — a bare credential dotfile in
+`$HOME` — matched none of the filename patterns (`token`/`secret`/`key`/`.pem`/…)
+nor a denied directory segment, so a note naming it by path auto-attached the
+credential file. Impact was contained (only a local-path reference was stored, no
+bytes uploaded; the row was deleted), but it exposed that enumerating credential
+dotfile names is a losing game. `isSensitivePath` now also denies (a) any dotfile
+ending in `rc` (`/^\.[^/]*rc$/i` — `.flightdeskrc`, `.myservicerc`, anywhere), and
+(b) **any** bare dotfile located directly in `$HOME`, regardless of name — that's
+almost always user/app config that may hold credentials, and legit agent outputs
+live under `<agent_path>/output/`, never as a home-root dotfile. Verified against
+both a home-root `.flightdeskrc` and a plainly-named home-root dotfile in the test
+harness. Remote nodes (e.g. `/home/pf/qalatra`) pick this up on their next
+pull/release.
+
 ## Auto-attach secret denylist (2026-07-19)
 
 Note auto-attach (`server/mentioned-files.js`, used by `add_task_note` for

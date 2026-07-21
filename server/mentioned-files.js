@@ -23,13 +23,22 @@ const DENY_FILENAME_PATTERNS = [
   /api[-_]?key/i,
   /^id_(rsa|dsa|ecdsa|ed25519)/i,
   /^\.?(netrc|npmrc|pypirc|git-credentials|htpasswd|pgpass|authinfo)$/i,
+  /^\.[^/]*rc$/i,                                 // any rc dotfile: .flightdeskrc, .myservicerc
   /_history$/i,
   /\.(pem|key|p12|pfx|jks|keystore|kdbx|gpg|asc|ppk)$/i,
 ]
 
+const HOME_DIR = os.homedir()
+
 function isSensitivePath(filePath) {
-  const segments = filePath.split(path.sep).filter(Boolean)
+  const resolved = path.resolve(filePath)
+  const segments = resolved.split(path.sep).filter(Boolean)
   const filename = segments[segments.length - 1] ?? ''
+  // Any dotfile living directly in $HOME is almost always user/app config that
+  // may hold credentials (.flightdeskrc, .gitconfig, .env, and countless others).
+  // Enumerating names is a losing game — deny the whole class. Legit agent
+  // outputs live under <agent_path>/output/, never as a home-root dotfile.
+  if (filename.startsWith('.') && path.dirname(resolved) === HOME_DIR) return true
   if (segments.slice(0, -1).some(seg => DENY_DIR_SEGMENTS.has(seg.toLowerCase()))) return true
   return DENY_FILENAME_PATTERNS.some(pattern => pattern.test(filename))
 }
