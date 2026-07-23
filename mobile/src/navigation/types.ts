@@ -12,6 +12,7 @@ export type TaskStackParamList = {
   Habits: undefined
   Instances: undefined
   AddInstance: undefined
+  NavigationSettings: undefined
   TaskDetail: { taskId: string }
   CreateTask: undefined
   MarkdownViewer: { path: string; title?: string }

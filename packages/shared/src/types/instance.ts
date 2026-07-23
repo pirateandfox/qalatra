@@ -7,7 +7,14 @@ export interface QalatraInstance {
   name: string
   url: string
   token: string
+  /**
+   * @deprecated The "Tools" (boxWeb) sidebar item is now a per-backend client nav
+   * preference (toolsEnabled/toolsLabel in each client's nav config), not connection
+   * config. These fields remain only so existing values can be seeded into that config
+   * once; nothing writes them anymore.
+   */
   boxWebEnabled?: boolean
+  /** @deprecated See boxWebEnabled. */
   boxWebLabel?: string
 }
 

@@ -1,13 +1,14 @@
 import { lazy, Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   fetchTasks, fetchSettings, updateTask, api,
-  getActiveInstance, onInstanceConfigChange,
+  onInstanceConfigChange,
   type TaskData,
 } from './api'
 import { today as todayStr } from './lib/constants'
 import { ContextsProvider } from './lib/ContextsProvider'
 import { ThemeProvider, useTheme } from './lib/ThemeProvider'
 import Sidebar, { type NavSection } from './components/Sidebar'
+import { getSidebarConfig, saveSidebarConfig, toolsLabelOrDefault, type SidebarConfig } from './lib/nav'
 import Header from './components/Header'
 import TaskList from './components/TaskList'
 import BacklogView from './components/BacklogView'
@@ -44,11 +45,6 @@ function shellQuote(value: string) {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
-function readBoxWebItem() {
-  const active = getActiveInstance()
-  if (!active?.boxWebEnabled) return null
-  return { label: active.boxWebLabel?.trim() || 'Tools' }
-}
 
 export default function App() {
   return (
@@ -61,7 +57,8 @@ export default function App() {
 function AppInner() {
   const { mode, setMode } = useTheme()
   const [date, setDate]             = useState(todayStr())
-  const [nav, setNav]               = useState<NavSection>('priority')
+  const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => getSidebarConfig())
+  const [nav, setNav]               = useState<NavSection>(() => sidebarConfig.landing)
   const [backlogRefresh, setBacklogRefresh] = useState(0)
   const [codeRefresh, setCodeRefresh]       = useState(0)
   const [readingRefresh, setReadingRefresh] = useState(0)
@@ -78,7 +75,29 @@ function AppInner() {
   const [loading, setLoading]       = useState(false)
   const [apiError, setApiError]     = useState<string | null>(null)
   const [updateStatus, setUpdateStatus] = useState<{ status: string; version?: string; percent?: number; message?: string } | null>(null)
-  const [boxWebItem, setBoxWebItem] = useState<{ label: string } | null>(() => readBoxWebItem())
+  // The Tools/boxWeb item is now part of the per-backend nav config (toolsEnabled/
+  // toolsLabel), so it derives from sidebarConfig and reacts to config edits and
+  // backend switches automatically — no separate state or instance subscription.
+  const boxWebItem = sidebarConfig.toolsEnabled ? { label: toolsLabelOrDefault(sidebarConfig) } : null
+
+  const handleSidebarConfigChange = useCallback((config: SidebarConfig) => {
+    setSidebarConfig(config)
+    saveSidebarConfig(config) // persists to the active backend's slot
+    // If the section you're currently viewing just got hidden, fall back to the
+    // default landing view. Action views (settings/daily/boxWeb) aren't toggleable
+    // and never appear in `hidden`, so editing the config from Settings won't bounce you.
+    setNav(prev => (config.hidden.includes(prev) ? config.landing : prev))
+  }, [])
+
+  // Sidebar visibility is per-backend, so re-resolve it whenever the active
+  // backend changes (e.g. switching instances in Settings). The switch happens
+  // from the non-hideable Settings view, so `nav` stays put unless the new
+  // backend's config hides the section you land back on.
+  useEffect(() => onInstanceConfigChange(() => {
+    const next = getSidebarConfig()
+    setSidebarConfig(next)
+    setNav(prev => (next.hidden.includes(prev) ? next.landing : prev))
+  }), [])
 
   const toggleTerminal = useCallback((launch: TerminalLaunch | null = null) => {
     setTerminalMode(current => {
@@ -147,14 +166,12 @@ function AppInner() {
 
   useEffect(() => { load(date) }, [date, load])
 
-  useEffect(() => onInstanceConfigChange(() => setBoxWebItem(readBoxWebItem())), [])
-
   useEffect(() => {
     if (nav === 'boxWeb' && !boxWebItem) {
-      setNav('priority')
+      setNav(sidebarConfig.landing)
       setSelectedId(null)
     }
-  }, [nav, boxWebItem])
+  }, [nav, boxWebItem, sidebarConfig.landing])
 
   // Background poll — 30s normally, 5s while agent jobs are running
   useEffect(() => {
@@ -313,6 +330,7 @@ function AppInner() {
         onNavChange={n => { setNav(n); setSelectedId(null) }}
         activeAgentCount={activeAgentCount}
         boxWebItem={boxWebItem}
+        hiddenSections={sidebarConfig.hidden}
         onNewTask={() => setCreateOpen(true)}
         dailyNoteActive={nav === 'daily'}
         onDailyNoteOpen={() => { setNav('daily'); setSelectedId(null) }}
@@ -335,7 +353,7 @@ function AppInner() {
         <div className={`layout ${selectedId ? 'panel-open' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           <div style={{ flex: 1, overflowY: nav === 'settings' || nav === 'daily' || nav === 'terminals' || nav === 'files' || nav === 'boxWeb' ? 'hidden' : 'auto', minWidth: 0 }}>
             {nav === 'settings' ? (
-              <SettingsView />
+              <SettingsView sidebarConfig={sidebarConfig} onSidebarConfigChange={handleSidebarConfigChange} />
             ) : nav === 'daily' ? (
               <Suspense fallback={<div style={{ color: 'var(--muted)', padding: '40px', textAlign: 'center' }}>Loading Daily Note...</div>}>
                 <DailyNote date={date} refreshToken={dailyNoteRefresh} />

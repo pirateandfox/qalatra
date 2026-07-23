@@ -151,13 +151,11 @@ export function setHideLocalInstance(hidden: boolean) {
 export function upsertInstance(input: Partial<QalatraInstance> & { name: string; url: string; token: string }): QalatraInstance {
   const previous = input.id ? getInstances().find(instance => instance.id === input.id) : null
   const instance: QalatraInstance = {
-    ...previous,
+    ...previous, // carries forward any fields incl. deprecated boxWeb* (seeded into nav config, then dropped)
     id: input.id || newId(),
     name: input.name.trim(),
     url: normalizeUrl(input.url),
     token: input.token.trim(),
-    boxWebEnabled: input.boxWebEnabled ?? previous?.boxWebEnabled,
-    boxWebLabel: input.boxWebLabel ?? previous?.boxWebLabel,
   }
   const next = getInstances().filter(i => i.id !== instance.id)
   next.push(instance)

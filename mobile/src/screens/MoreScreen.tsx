@@ -4,6 +4,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { getActiveInstance, removeInstance } from '@qalatra/shared'
 import type { TaskStackParamList } from '../navigation/types'
 import { Screen } from '../components/ui'
+import { isHidden, useNavConfig, type MoreSection } from '../lib/navConfig'
 import { colors, radius, space } from '../theme'
 
 type Nav = NativeStackNavigationProp<TaskStackParamList>
@@ -11,6 +12,10 @@ type Nav = NativeStackNavigationProp<TaskStackParamList>
 export function MoreScreen() {
   const navigation = useNavigation<Nav>()
   const active = getActiveInstance()
+  const navConfig = useNavConfig()
+  const show = (key: MoreSection) => !isHidden(navConfig, key)
+  // A section header only renders when at least one of its rows is visible.
+  const anyVisible = (...keys: MoreSection[]) => keys.some(show)
 
   function disconnect() {
     Alert.alert(
@@ -26,17 +31,17 @@ export function MoreScreen() {
   return (
     <Screen>
       <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
-        <Text style={styles.section}>Daily</Text>
-        <Row label="Daily Note" onPress={() => navigation.navigate('DailyNote')} />
-        <Row label="Habits" onPress={() => navigation.navigate('Habits')} />
+        {anyVisible('dailyNote', 'habits') && <Text style={styles.section}>Daily</Text>}
+        {show('dailyNote') && <Row label="Daily Note" onPress={() => navigation.navigate('DailyNote')} />}
+        {show('habits') && <Row label="Habits" onPress={() => navigation.navigate('Habits')} />}
 
-        <Text style={styles.section}>Lists</Text>
-        <Row label="Backlog" onPress={() => navigation.navigate('Backlog')} />
-        <Row label="Code" onPress={() => navigation.navigate('Code')} />
+        {anyVisible('backlog', 'code') && <Text style={styles.section}>Lists</Text>}
+        {show('backlog') && <Row label="Backlog" onPress={() => navigation.navigate('Backlog')} />}
+        {show('code') && <Row label="Code" onPress={() => navigation.navigate('Code')} />}
 
-        <Text style={styles.section}>Box</Text>
-        <Row label="Terminal" onPress={() => navigation.navigate('Terminal')} />
-        <Row label="Files" onPress={() => navigation.navigate('FileBrowser')} />
+        {anyVisible('terminals', 'files') && <Text style={styles.section}>Box</Text>}
+        {show('terminals') && <Row label="Terminal" onPress={() => navigation.navigate('Terminal')} />}
+        {show('files') && <Row label="Files" onPress={() => navigation.navigate('FileBrowser')} />}
 
         <Text style={styles.section}>Connection</Text>
         <View style={styles.card}>
@@ -45,6 +50,9 @@ export function MoreScreen() {
         </View>
         <Row label="Backends (switch / add)" onPress={() => navigation.navigate('Instances')} />
         <Row label="Disconnect" destructive onPress={disconnect} />
+
+        <Text style={styles.section}>App</Text>
+        <Row label="Navigation" onPress={() => navigation.navigate('NavigationSettings')} />
       </ScrollView>
     </Screen>
   )

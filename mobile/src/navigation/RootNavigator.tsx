@@ -22,6 +22,8 @@ import { HabitsScreen } from '../screens/HabitsScreen'
 import { SearchScreen } from '../screens/SearchScreen'
 import { InstancesScreen } from '../screens/InstancesScreen'
 import { AddInstanceScreen } from '../screens/AddInstanceScreen'
+import { NavigationSettingsScreen } from '../screens/NavigationSettingsScreen'
+import { isHidden, TAB_ROUTE, toolsLabelOrDefault, useNavConfig } from '../lib/navConfig'
 
 const Stack = createNativeStackNavigator<TaskStackParamList>()
 const Tab = createBottomTabNavigator<RootTabParamList>()
@@ -89,6 +91,7 @@ function MoreStack() {
       <Stack.Screen name="FileBrowser" component={FileBrowserScreen} options={{ title: 'Files' }} />
       <Stack.Screen name="Instances" component={InstancesScreen} options={{ title: 'Backends' }} />
       <Stack.Screen name="AddInstance" component={AddInstanceScreen} options={{ title: 'Add Backend', presentation: 'modal' }} />
+      <Stack.Screen name="NavigationSettings" component={NavigationSettingsScreen} options={{ title: 'Navigation' }} />
       <Stack.Screen name="TaskDetail" component={TaskDetailScreen} options={{ title: 'Task' }} />
       <Stack.Screen name="CreateTask" component={CreateTaskScreen} options={{ title: 'New Task', presentation: 'modal' }} />
       <Stack.Screen name="MarkdownViewer" component={MarkdownViewerScreen} options={{ title: 'Document' }} />
@@ -102,8 +105,12 @@ function tabIcon(emoji: string) {
 }
 
 export function RootNavigator() {
+  const navConfig = useNavConfig()
+  // The landing tab is guaranteed visible by normalizeNavConfig, so
+  // initialRouteName always points at a rendered screen.
   return (
     <Tab.Navigator
+      initialRouteName={TAB_ROUTE[navConfig.landing]}
       screenOptions={{
         headerShown: false,
         tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
@@ -111,20 +118,32 @@ export function RootNavigator() {
         tabBarInactiveTintColor: colors.muted2,
       }}
     >
-      <Tab.Screen name="PriorityTab" component={PriorityStack} options={{ title: 'Priority', tabBarIcon: tabIcon('★') }} />
-      <Tab.Screen name="SearchTab" component={SearchStack} options={{ title: 'Search', tabBarIcon: tabIcon('🔍') }} />
-      <Tab.Screen name="ReadingTab" component={ReadingStack} options={{ title: 'Reading', tabBarIcon: tabIcon('📖') }} />
-      <Tab.Screen
-        name="ToolsTab"
-        component={ToolsScreen}
-        options={{
-          title: 'Tools',
-          headerShown: true,
-          headerStyle: { backgroundColor: colors.surface },
-          headerTintColor: colors.text,
-          tabBarIcon: tabIcon('🧰'),
-        }}
-      />
+      {!isHidden(navConfig, 'priority') && (
+        <Tab.Screen name="PriorityTab" component={PriorityStack} options={{ title: 'Priority', tabBarIcon: tabIcon('★') }} />
+      )}
+      {!isHidden(navConfig, 'search') && (
+        <Tab.Screen name="SearchTab" component={SearchStack} options={{ title: 'Search', tabBarIcon: tabIcon('🔍') }} />
+      )}
+      {!isHidden(navConfig, 'reading') && (
+        <Tab.Screen name="ReadingTab" component={ReadingStack} options={{ title: 'Reading', tabBarIcon: tabIcon('📖') }} />
+      )}
+      {/* Tools (boxWeb) is opt-in with a custom label — a per-backend nav preference,
+          not a standard toggleable tab. */}
+      {navConfig.toolsEnabled && (
+        <Tab.Screen
+          name="ToolsTab"
+          component={ToolsScreen}
+          options={{
+            title: toolsLabelOrDefault(navConfig),
+            headerShown: true,
+            headerStyle: { backgroundColor: colors.surface },
+            headerTintColor: colors.text,
+            tabBarIcon: tabIcon('🧰'),
+          }}
+        />
+      )}
+      {/* The More tab is structural — it holds Backends, Disconnect, and Navigation
+          settings — so it is always shown and can't be hidden. */}
       <Tab.Screen name="MoreTab" component={MoreStack} options={{ title: 'More', tabBarIcon: tabIcon('⋯') }} />
     </Tab.Navigator>
   )

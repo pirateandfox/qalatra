@@ -1,5 +1,61 @@
 # Qalatra — Evolution Notes
 
+## Configurable navigation: per-backend section visibility + default view (2026-07-23)
+
+Qalatra has two distinct uses — personal vs. remote-server — and remote boxes
+rarely use Reading, Backlog, Habits, or Projects. You can now hide sections and
+pick which view loads on launch. Config is **stored app-locally but keyed by
+backend**: each install holds a map of backend → config, so switching backends
+swaps the nav to that backend's view (a personal backend can show everything
+while a headless remote box hides what it doesn't use). The active backend is
+resolved via `@qalatra/shared`'s `getActiveInstanceId()` (collapsing
+`LOCAL_INSTANCE_ID` aliases), and the config re-resolves on `onInstanceConfigChange`.
+
+- **Desktop** (`ui/`): new `lib/nav.ts` — section vocabulary + a localStorage map
+  `Record<backendKey, SidebarConfig>`; `getSidebarConfig`/`saveSidebarConfig`
+  default to the active backend. New Settings → Sidebar tab
+  (`components/settings/SidebarSettings.tsx`, names the backend it's editing) with
+  a Show checkbox + Default radio per section. `Sidebar.tsx` filters `NAV_ITEMS`
+  by the hidden set (preserving the dynamic Tools/boxWeb placement); `App.tsx`
+  seeds initial `nav` from the default, re-resolves on backend switch, and bounces
+  off a hidden active view.
+- **Mobile** (`mobile/`): new `src/lib/navConfig.ts` — AsyncStorage map keyed by
+  backend, hydrated at startup (awaited in `App.tsx` alongside `hydrateInstances`),
+  a `useSyncExternalStore` pub/sub, and an `onInstanceConfigChange` subscription
+  that re-resolves the active backend's config. `RootNavigator` conditionally
+  renders the bottom tabs and sets `initialRouteName` from the default;
+  `MoreScreen` filters its content rows; new `NavigationSettingsScreen` (More →
+  App → Navigation) provides the Show/Default controls.
+
+Deliberately **client-local, not server-side** for storage (nav is client chrome
+and stays on the device), but **per-backend** so the different-view-per-backend
+behavior works — that reshuffle-on-switch is the point. Config is normalized
+centrally so the default view (desktop) / default tab (mobile) is always visible;
+the app can never launch into a hidden section. Structural entry points stay
+non-hideable: desktop Settings + Daily Note action buttons; mobile More tab +
+Backends + Disconnect + the Navigation settings row — so you can always turn
+sections back on, and backend-switching itself always happens from a non-hideable
+surface (desktop Settings, mobile More tab).
+
+**boxWeb ("Tools") folded into this one model.** The pre-existing show/hide "Tools"
+item was configured separately on the instance record (`boxWebEnabled`/`boxWebLabel`,
+set in Settings → Instances) — a second, parallel per-backend visibility mechanism.
+It's now a client nav preference like the rest: `toolsEnabled`/`toolsLabel` live in
+the same per-backend nav config, configured in the same settings surface (desktop
+Settings → Sidebar; mobile More → Navigation), and the instance record goes back to
+pure connection config. The instance `boxWeb*` fields are `@deprecated` and read
+once to seed the nav config (desktop), then the map is authoritative. This also
+fixed a mobile bug: the Tools tab was always shown regardless of any toggle; it now
+honors `toolsEnabled` (defaulted `true` on mobile to preserve the always-shown
+behavior; opt-in/off on desktop as before). Storing the nav config *on* the instance
+record was rejected because the desktop local backend is a synthesized instance not
+present in `getInstances()`, so `updateInstance` can't persist to it — the client map
+(keyed by backend id, incl. `local-server`) is the correct single store.
+
+Verified: desktop tsc+vite build, mobile + shared tsc, config-normalizer invariant
+tests on both (incl. tools defaults/label). Mobile not yet run in the iOS Simulator
+— do that before cutting a release.
+
 ## Release workflow: assert full asset set before un-drafting (2026-07-20)
 
 The v1.9.26 release exposed a silent-failure mode in `.github/workflows/release.yml`.

@@ -1,28 +1,23 @@
 import type { ThemeMode } from '../lib/theme'
+import { NAV_ITEMS, type NavItem, type NavSection } from '../lib/nav'
 import './Sidebar.css'
 
-export type NavSection = 'priority' | 'daily' | 'code' | 'terminals' | 'files' | 'boxWeb' | 'reading' | 'project' | 'backlog' | 'habits' | 'heartbeats' | 'settings'
+export type { NavSection }
 
 const THEME_ICONS: Record<ThemeMode, string> = { system: '◑', light: '☀', dark: '☾' }
 const THEME_CYCLE: ThemeMode[] = ['system', 'light', 'dark']
 
-const NAV_ITEMS: { key: NavSection; icon: string; label: string }[] = [
-  { key: 'priority', icon: '★', label: 'Priority' },
-  { key: 'code',     icon: '⌨', label: 'Code' },
-  { key: 'terminals', icon: '_$', label: 'Terminals' },
-  { key: 'files',    icon: '▤', label: 'Files' },
-  { key: 'reading',  icon: '📖', label: 'Reading' },
-  { key: 'project',  icon: '⊞', label: 'Projects' },
-  { key: 'backlog',  icon: '≡', label: 'Backlog' },
-  { key: 'habits',      icon: '◎', label: 'Habits' },
-  { key: 'heartbeats',  icon: '⚡', label: 'Heartbeats' },
-]
+// The dynamic Tools/boxWeb item slots into the "tools" cluster, right after Files
+// (matching its original placement). It follows the last still-visible tool-group
+// section so it stays put even when some of those sections are hidden.
+const TOOL_GROUP: NavSection[] = ['priority', 'code', 'terminals', 'files']
 
 interface Props {
   nav: NavSection
   onNavChange: (n: NavSection) => void
   activeAgentCount: number
   boxWebItem: { label: string } | null
+  hiddenSections: NavSection[]
   onNewTask: () => void
   dailyNoteActive: boolean
   onDailyNoteOpen: () => void
@@ -32,7 +27,7 @@ interface Props {
 
 export default function Sidebar({
   nav, onNavChange, activeAgentCount,
-  boxWebItem,
+  boxWebItem, hiddenSections,
   onNewTask, dailyNoteActive, onDailyNoteOpen,
   themeMode, onThemeModeChange,
 }: Props) {
@@ -41,13 +36,18 @@ export default function Sidebar({
     onThemeModeChange(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length])
   }
 
-  const navItems = boxWebItem
-    ? [
-        ...NAV_ITEMS.slice(0, 4),
-        { key: 'boxWeb' as NavSection, icon: '▣', label: boxWebItem.label },
-        ...NAV_ITEMS.slice(4),
-      ]
-    : NAV_ITEMS
+  const hidden = new Set(hiddenSections)
+  const visibleItems = NAV_ITEMS.filter(i => !hidden.has(i.key))
+
+  let navItems: NavItem[] = visibleItems
+  if (boxWebItem) {
+    let insertAt = 0
+    for (let i = 0; i < visibleItems.length; i++) {
+      if (TOOL_GROUP.includes(visibleItems[i].key)) insertAt = i + 1
+    }
+    const boxWebEntry: NavItem = { key: 'boxWeb', icon: '▣', label: boxWebItem.label }
+    navItems = [...visibleItems.slice(0, insertAt), boxWebEntry, ...visibleItems.slice(insertAt)]
+  }
 
   return (
     <aside className="sidebar">

@@ -5,14 +5,17 @@ import { ContextsSettings } from './settings/ContextsSettings'
 import { EncryptionBackupSettings } from './settings/EncryptionBackupSettings'
 import { GeneralSettings } from './settings/GeneralSettings'
 import { InstancesSettings } from './settings/InstancesSettings'
+import { SidebarSettings } from './settings/SidebarSettings'
 import { StorageSettings } from './settings/StorageSettings'
+import type { SidebarConfig } from '../lib/nav'
 import './Settings.css'
 import './SettingsView.css'
 
-type Tab = 'general' | 'instances' | 'storage' | 'encryption' | 'contexts' | 'agents'
+type Tab = 'general' | 'sidebar' | 'instances' | 'storage' | 'encryption' | 'contexts' | 'agents'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'general', label: 'General' },
+  { key: 'sidebar', label: 'Sidebar' },
   { key: 'instances', label: 'Instances' },
   { key: 'storage', label: 'Storage' },
   { key: 'encryption', label: 'Encryption & Backup' },
@@ -20,7 +23,12 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'agents', label: 'Agents' },
 ]
 
-export default function SettingsView() {
+interface SettingsViewProps {
+  sidebarConfig: SidebarConfig
+  onSidebarConfigChange: (config: SidebarConfig) => void
+}
+
+export default function SettingsView({ sidebarConfig, onSidebarConfigChange }: SettingsViewProps) {
   const [tab, setTab] = useState<Tab>('general')
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [saved, setSaved] = useState(false)
@@ -60,6 +68,9 @@ export default function SettingsView() {
       <div className="sv-body settings-body">
         {tab === 'general' && (
           <GeneralSettings settings={settings} setSetting={setSetting} saved={saved} onSave={handleSave} />
+        )}
+        {tab === 'sidebar' && (
+          <SidebarSettings config={sidebarConfig} onChange={onSidebarConfigChange} />
         )}
         {tab === 'instances' && (
           <InstancesSettings settings={settings} setSettings={setSettings} markSaved={markSaved} />

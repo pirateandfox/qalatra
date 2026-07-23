@@ -6,7 +6,7 @@ import {
   listAccessTokens, removeInstance, restartLocalServer, restartLocalServerService,
   revokeAccessToken, saveSettings, setActiveInstance, setDefaultInstance,
   setHideLocalInstance, startLocalServer, startLocalServerService, stopLocalServerService,
-  testInstanceConnection, tokenIsExpired, uninstallLocalServerService, updateInstance, upsertInstance,
+  testInstanceConnection, tokenIsExpired, uninstallLocalServerService, upsertInstance,
   type AccessToken, type LocalServerServiceStatus, type LocalServerStatus,
   type QalatraInstance,
 } from '../../api'
@@ -115,11 +115,6 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
 
   function toggleHideLocalInstance(checked: boolean) {
     setHideLocalInstance(checked)
-    refreshInstances()
-  }
-
-  function updateBoxWeb(instance: QalatraInstance, patch: Partial<QalatraInstance>) {
-    updateInstance(instance.id, patch)
     refreshInstances()
   }
 
@@ -335,59 +330,9 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
         </div>
       )}
 
-      {instances.length > 0 && (
-        <>
-          <div className="settings-section-header">Box Web Apps</div>
-          <div className="settings-row">
-            <label className="settings-label">Remote Box Tools</label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {instances.map(instance => {
-                const enabled = !!instance.boxWebEnabled
-                const label = instance.boxWebLabel ?? 'Tools'
-                return (
-                  <div
-                    key={instance.id}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'minmax(150px, 1fr) minmax(180px, 260px)',
-                      gap: 10,
-                      alignItems: 'center',
-                      fontSize: 12,
-                    }}
-                  >
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)', minWidth: 0 }}>
-                      <input
-                        type="checkbox"
-                        checked={enabled}
-                        onChange={e => updateBoxWeb(instance, {
-                          boxWebEnabled: e.target.checked,
-                          boxWebLabel: instance.boxWebLabel?.trim() || 'Tools',
-                        })}
-                      />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        Show for {instance.name}
-                      </span>
-                    </label>
-                    <input
-                      className="settings-input"
-                      type="text"
-                      value={label}
-                      disabled={!enabled}
-                      onChange={e => updateBoxWeb(instance, { boxWebLabel: e.target.value })}
-                      placeholder="Tools"
-                      spellCheck={false}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                )
-              })}
-            </div>
-            <span className="settings-hint">
-              When enabled for the active remote instance, Qalatra adds a sidebar item that proxies that box's private <code>http://127.0.0.1:8080</code> web app through the existing authenticated server connection.
-            </span>
-          </div>
-        </>
-      )}
+      {/* The "Tools" (boxWeb) sidebar item moved to Settings → Sidebar, where it's
+          configured per backend alongside the rest of the nav (show/hide + label),
+          so it's no longer set here. */}
 
       <div className="settings-section-header">Access Tokens</div>
 

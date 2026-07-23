@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/native'
 import { getActiveInstance, hydrateInstances, onInstanceConfigChange } from '@qalatra/shared'
+import { hydrateNavConfig } from './src/lib/navConfig'
 import { OnboardingScreen } from './src/screens/OnboardingScreen'
 import { RootNavigator } from './src/navigation/RootNavigator'
 import { ErrorBoundary } from './src/ErrorBoundary'
@@ -36,7 +37,9 @@ export default function App() {
 
   useEffect(() => {
     let active = true
-    hydrateInstances().then(() => {
+    // Warm both caches before rendering: instances decide onboarding vs main,
+    // and the nav config decides the initial tab + which sections render.
+    Promise.all([hydrateInstances(), hydrateNavConfig()]).then(() => {
       if (active) evaluate()
     })
     const unsubscribe = onInstanceConfigChange(evaluate)
