@@ -567,8 +567,44 @@ function searchTasks(args = {}) {
 function createTask(body) {
   if (!body.title) throw validationError('title required')
   const id = crypto.randomUUID(); const now = nowIso()
-  db.prepare(`INSERT INTO tasks (id, title, status, context, project, my_priority, due_date, hard_deadline, agent_path, task_type, source, ai_context, created_at, updated_at, last_reviewed_at) VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, 'task', 'manual', ?, ?, ?, ?)`)
-    .run(id, body.title, body.context ?? 'personal', body.project ?? null, body.my_priority ?? null, body.due_date || null, body.hard_deadline ? 1 : 0, body.agent_path || null, body.ai_context ? `[${now.slice(0, 10)}] ${body.ai_context}` : null, now, now, now)
+
+  // Honor the same fields on insert as MCP create_task and REST updateTask.
+  // Previously this hardcoded task_type='task'/source='manual' and dropped the
+  // event-time and most other columns, forcing callers into a POST-then-PATCH
+  // workaround. Built as a dynamic insert so only provided columns are set and
+  // schema defaults cover the rest. Keep in sync with mcp/tools/tasks.js
+  // create_task (the known db-worker ↔ mcp parallel-logic pair).
+  const cols = {
+    id,
+    title:     body.title,
+    status:    body.status ?? 'active',
+    context:   body.context ?? 'personal',
+    source:    body.source ?? 'manual',
+    task_type: body.task_type ?? 'task',
+    created_at: now,
+    updated_at: now,
+    last_reviewed_at: now,
+  }
+
+  // Passthrough columns: set only when provided (schema defaults handle the rest).
+  const PASSTHROUGH = [
+    'description', 'notes', 'my_priority', 'energy_required', 'project', 'tags',
+    'source_id', 'source_url', 'source_priority', 'due_date', 'start_date', 'surface_after',
+    'event_time', 'end_time', 'parent_id', 'recurrence', 'agent_path', 'assigned_agent',
+    'agent_resume', 'agent_autorun', 'agent_autorun_time', 'time_estimate',
+  ]
+  for (const f of PASSTHROUGH) {
+    if (body[f] !== undefined) cols[f] = body[f] === '' ? null : body[f]
+  }
+  // REST conventions (mirror updateTask): booleans → 1/0, links stored as JSON
+  // text, ai_context date-prefixed via the shared helper.
+  if (body.hard_deadline !== undefined) cols.hard_deadline = body.hard_deadline ? 1 : 0
+  if (body.inbox !== undefined) cols.inbox = body.inbox ? 1 : 0
+  if (body.links !== undefined) cols.links = body.links == null ? null : JSON.stringify(body.links)
+  if (body.ai_context) cols.ai_context = appendAiContext(null, body.ai_context)
+
+  const keys = Object.keys(cols)
+  db.prepare(`INSERT INTO tasks (${keys.join(', ')}) VALUES (${keys.map(k => `@${k}`).join(', ')})`).run(cols)
   if (body.project) db.prepare(`INSERT OR IGNORE INTO projects (name) VALUES (?)`).run(body.project)
   return getTask(id)
 }
