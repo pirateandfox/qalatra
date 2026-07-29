@@ -1,5 +1,37 @@
 # Qalatra — Evolution Notes
 
+## Per-backend tab memory + NULL-context = global capabilities (2026-07-29)
+
+Two small, independent fixes.
+
+**Tab memory per backend (desktop `ui/`).** Switching servers triggers a full
+`window.location.reload()`, and on boot `nav` initialized from the backend's
+`landing` — so every switch dropped you on Priority regardless of where you'd
+been. With ~4 remote boxes in rotation that's a lot of lost place. Now each
+backend remembers its last-active tab: `lib/nav.ts` gained a per-backend
+localStorage map (`qalatra.lastNavByBackend`, keyed by `activeBackendKey()` like
+the sidebar config), `saveLastNav` (skips `settings`, so returning restores your
+last *content* view, not the settings panel), and `resolveInitialNav` (returns
+the remembered tab when it's still a valid place to land — visible, not hidden,
+Tools only when enabled — else the backend's `landing`). `App.tsx` seeds `nav`
+from `resolveInitialNav`, persists on every change, and restores on the
+reload-free `onInstanceConfigChange` path too. Purely client-local; no server
+involvement. New backends (or a since-hidden tab) still fall back to `landing`.
+
+**NULL context/project = global capability (server `capability-registry.js`).**
+`listCapabilities`/`searchCapabilities` filtered with strict `context = @context`
+(and `project = @project`), so a capability with no context — global in the UI —
+was excluded from *every* context-scoped search. Backwards: globals were the one
+thing that should surface everywhere. Both filters now use
+`(context IS NULL OR context = @context)` / `(project IS NULL OR project = @project)`,
+so a scoped search returns its own scope **plus** globals, and a fully global
+agent (null context *and* null project) survives both filters. Making a global
+agent needs no new field — just omit `context`/`project` in `agent.config`; the
+registry already stores unset as `null`. Bonus: `context: null` now lists just
+the globals (previously a dead `context = NULL` query that matched nothing).
+Server-side, so remote boxes pick it up on deploy; local picks it up on MCP/API
+restart.
+
 ## Configurable navigation: per-backend section visibility + default view (2026-07-23)
 
 Qalatra has two distinct uses — personal vs. remote-server — and remote boxes

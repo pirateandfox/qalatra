@@ -8,7 +8,7 @@ import { today as todayStr } from './lib/constants'
 import { ContextsProvider } from './lib/ContextsProvider'
 import { ThemeProvider, useTheme } from './lib/ThemeProvider'
 import Sidebar, { type NavSection } from './components/Sidebar'
-import { getSidebarConfig, saveSidebarConfig, toolsLabelOrDefault, type SidebarConfig } from './lib/nav'
+import { getSidebarConfig, saveSidebarConfig, saveLastNav, resolveInitialNav, toolsLabelOrDefault, type SidebarConfig } from './lib/nav'
 import Header from './components/Header'
 import TaskList from './components/TaskList'
 import BacklogView from './components/BacklogView'
@@ -58,7 +58,7 @@ function AppInner() {
   const { mode, setMode } = useTheme()
   const [date, setDate]             = useState(todayStr())
   const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => getSidebarConfig())
-  const [nav, setNav]               = useState<NavSection>(() => sidebarConfig.landing)
+  const [nav, setNav]               = useState<NavSection>(() => resolveInitialNav(sidebarConfig))
   const [backlogRefresh, setBacklogRefresh] = useState(0)
   const [codeRefresh, setCodeRefresh]       = useState(0)
   const [readingRefresh, setReadingRefresh] = useState(0)
@@ -89,14 +89,18 @@ function AppInner() {
     setNav(prev => (config.hidden.includes(prev) ? config.landing : prev))
   }, [])
 
+  // Remember the active tab per backend so switching servers (which reloads the
+  // page) and coming back lands you where you left off rather than on Priority.
+  useEffect(() => { saveLastNav(nav) }, [nav])
+
   // Sidebar visibility is per-backend, so re-resolve it whenever the active
-  // backend changes (e.g. switching instances in Settings). The switch happens
-  // from the non-hideable Settings view, so `nav` stays put unless the new
-  // backend's config hides the section you land back on.
+  // backend changes (e.g. switching instances in Settings). A user-initiated
+  // switch reloads the page (so the remembered tab is restored on boot); this
+  // reload-free path restores the new backend's last tab too, for safety.
   useEffect(() => onInstanceConfigChange(() => {
     const next = getSidebarConfig()
     setSidebarConfig(next)
-    setNav(prev => (next.hidden.includes(prev) ? next.landing : prev))
+    setNav(resolveInitialNav(next))
   }), [])
 
   const toggleTerminal = useCallback((launch: TerminalLaunch | null = null) => {

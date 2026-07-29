@@ -128,3 +128,54 @@ export function saveSidebarConfig(config: SidebarConfig, backendKey: string = ac
   map[backendKey] = normalizeSidebarConfig(config)
   saveMap(map)
 }
+
+// --- Per-backend last-active tab -------------------------------------------
+//
+// Switching backends triggers a full page reload, which would otherwise always
+// drop you on the backend's landing tab. To let each backend remember where you
+// left off, we persist the last-active nav section per backend (same keying as
+// the sidebar config) and restore it on boot. Settings is intentionally never
+// remembered, so returning to a backend restores your last *content* view.
+
+const LAST_NAV_KEY = 'qalatra.lastNavByBackend'
+
+function loadNavMap(): Record<string, NavSection> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LAST_NAV_KEY) ?? 'null')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, NavSection>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Whether a nav section is a valid place to land for a given backend config:
+ * a visible toggleable section, the Tools item when enabled, or the Daily Note.
+ * Settings and unknown/hidden sections are not landable (fall back to landing).
+ */
+function isLandable(nav: NavSection, config: SidebarConfig): boolean {
+  if (nav === 'daily') return true
+  if (nav === 'boxWeb') return config.toolsEnabled
+  return VALID.has(nav) && !config.hidden.includes(nav)
+}
+
+/** Remember the last-active tab for a backend. 'settings' is never persisted. */
+export function saveLastNav(nav: NavSection, backendKey: string = activeBackendKey()): void {
+  if (nav === 'settings') return
+  try {
+    const map = loadNavMap()
+    map[backendKey] = nav
+    localStorage.setItem(LAST_NAV_KEY, JSON.stringify(map))
+  } catch {
+    /* localStorage unavailable or over quota — non-fatal, tab just won't persist */
+  }
+}
+
+/**
+ * The tab a backend should open on: its remembered last-active tab when that's
+ * still a valid place to land, otherwise the backend's configured landing tab.
+ */
+export function resolveInitialNav(config: SidebarConfig, backendKey: string = activeBackendKey()): NavSection {
+  const last = loadNavMap()[backendKey]
+  return last && isLandable(last, config) ? last : config.landing
+}

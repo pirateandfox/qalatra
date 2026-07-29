@@ -404,8 +404,14 @@ export function listCapabilities(db, filter = {}) {
   ensureCapabilitySchema(db)
   const conds = []
   const params = {}
-  if (filter.context !== undefined) { conds.push('context = @context'); params.context = filter.context }
-  if (filter.project !== undefined) { conds.push('project = @project'); params.project = filter.project }
+  // A NULL context means "global" — visible from every context-scoped search,
+  // not just unfiltered ones. So a context filter matches its own context OR any
+  // global capability. (Passing context: null therefore lists just the globals,
+  // since `context = NULL` is never true in SQL.)
+  if (filter.context !== undefined) { conds.push('(context IS NULL OR context = @context)'); params.context = filter.context }
+  // Same NULL-as-global rule for project: a project-less capability (e.g. one
+  // scoped only to a context, or fully global) stays visible under a project filter.
+  if (filter.project !== undefined) { conds.push('(project IS NULL OR project = @project)'); params.project = filter.project }
   if (filter.kind !== undefined) { conds.push('kind = @kind'); params.kind = filter.kind }
   if (filter.active !== undefined) { conds.push('active = @active'); params.active = filter.active ? 1 : 0 }
   const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''

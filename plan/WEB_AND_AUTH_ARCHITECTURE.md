@@ -113,6 +113,25 @@ the same endpoint `@qalatra/shared`'s `account` module calls from web and mobile
   came from Stripe (web) or an Apple/Google IAP receipt (mobile). Clients just ask
   "is this account active?" — one entitlement API, many payment sources.
 
+### Sales Portal Catalog V1
+
+The current launch catalog lives in the project planning workspace:
+
+```txt
+/Users/justinhandley/IdeaProjects/projects/qalatra/business-plan/sales-portal-catalog-v1.md
+```
+
+Implementation rules from that catalog:
+
+- Connect is the hosted web/native access layer.
+- Connect has monthly and annual tiered licensed-seat pricing.
+- Connect gets a 14-day free trial applied at Checkout/subscription creation with `subscription_data[trial_period_days]=14`.
+- Do not create a separate `$0` trial product.
+- Cloud Standard Agent Node, DevNode, and DevNode Plus are monthly-only hosted products with no free trial and no self-serve annual price.
+- Cloud subscriptions include one admin Connect seat; additional human users require Connect seats.
+- Native apps are login-only clients paid through the web account unless Apple/Google force IAP later.
+- Use restricted Stripe API keys for catalog setup and checkout testing; do not require full live secret keys.
+
 ### RevenueCat
 Worth it **only if** we end up doing native IAP — it wraps StoreKit + Play Billing
 + web into one entitlement API and removes the misery of receipt validation. If we
