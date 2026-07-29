@@ -35,7 +35,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1052.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.10.0",
-    "electron-updater": "^6.8.3",
+    "electron-updater": "^6.8.9",
     "node-pty": "^1.1.0",
     "rrule": "^2.8.1",
     "uuid": "^14.0.0",
@@ -45,11 +45,12 @@
     "@electron/notarize": "^2.5.0",
     "concurrently": "^10.0.3",
     "electron": "^41.7.0",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "^26.15.3",
     "sharp": "^0.35.0"
   },
   "overrides": {
     "shell-quote": "^1.9.0",
-    "@hono/node-server": "^2.0.5"
+    "@hono/node-server": "^2.0.5",
+    "builder-util-runtime": "^9.7.0"
   }
 }

@@ -1,5 +1,29 @@
 # Qalatra — Evolution Notes
 
+## Dependency advisories: electron-updater/builder + postcss + brace-expansion (2026-07-29)
+
+Security-maintenance patch clearing five high Dependabot advisories. None was
+runtime-exploitable in the shipped desktop app, but the scan is kept clean.
+
+- **`builder-util-runtime` → 9.7.0** (GHSA-p2f4-r6v6-j797): cross-origin redirect
+  could leak `PRIVATE-TOKEN`/`Authorization` creds. Pulled by both electron-builder
+  (build) and **electron-updater (runtime)** — the only runtime-touching one. Exploit
+  needs a token-authed update feed; Qalatra updates from public GitHub Releases, so
+  it was never exposed. Fixed by bumping `electron-updater ^6.8.3 → ^6.8.9` (runtime)
+  and adding a `builder-util-runtime ^9.7.0` root override.
+- **`app-builder-lib` → 26.15.3** (GHSA-7g7r-gx96-252g): AppImage search-path issue;
+  build-time only and AppImage isn't built (macOS DMG). Cleared by
+  `electron-builder ^26.8.1 → ^26.15.3`.
+- **`postcss` → 8.5.18** (GHSA-r28c-9q8g-f849) in `ui/` + `mobile/` (via vite): source-map
+  path traversal, build-time only. Cleared via override.
+- **`brace-expansion` → 5.0.8** (GHSA-mh99-v99m-4gvg) in `mobile/` (via minimatch/glob/
+  expo-updates): DoS, build/dev-time. Cleared via override.
+
+Verified: root/ui installs resolve the patched versions; `check-imports` + ui build
+pass; and an `electron-builder --dir` pack on 26.15.3 (signing disabled) packaged the
+macOS arm64 app cleanly — confirming the toolchain major bump is safe for the signed
+CI build.
+
 ## Per-backend tab memory + NULL-context = global capabilities (2026-07-29)
 
 Two small, independent fixes.
