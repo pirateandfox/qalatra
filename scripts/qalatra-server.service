@@ -16,6 +16,14 @@ Environment=QALATRA_BOOTSTRAP_TOKEN_FILE=1
 ExecStart=/usr/bin/node /opt/qalatra/server/index.js
 Restart=on-failure
 RestartSec=5
+# Defence in depth for remote terminals: with the default KillMode=control-group,
+# systemd SIGKILLs every process in this cgroup on stop/restart — which would kill
+# any tmux server (and its ptys) that landed here. The primary fix starts tmux in
+# its own transient scope (see server/terminal-sessions.js ensureTmuxServer), so
+# tmux shouldn't be in this cgroup at all; this signals only the main PID as a
+# backstop. Tradeoff: a hard crash could orphan the MCP child, but the server
+# restarts that child itself on normal shutdown.
+KillMode=process
 
 [Install]
 WantedBy=default.target

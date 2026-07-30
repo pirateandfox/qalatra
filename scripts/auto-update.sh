@@ -59,6 +59,18 @@ npm ci --ignore-scripts --quiet
 log "Rebuilding native modules..."
 npm run rebuild:node 2>&1 | tail -3
 
+# Self-heal the systemd unit: KillMode=process keeps systemd from SIGKILLing a tmux
+# server that landed in this service's cgroup (which would kill remote terminals). The
+# unit is generated once at install time and never regenerated here, so patch it in
+# place if the directive is missing. Doing this *before* the restart means even a
+# pre-scope-fix tmux server survives this upgrade — only the main PID is signalled.
+UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$SERVICE_NAME"
+if [ -f "$UNIT_FILE" ] && ! grep -q '^KillMode=' "$UNIT_FILE"; then
+  log "Adding KillMode=process to $SERVICE_NAME"
+  sed -i '/^\[Service\]/a KillMode=process' "$UNIT_FILE"
+  systemctl --user daemon-reload
+fi
+
 log "Restarting $SERVICE_NAME..."
 systemctl --user restart "$SERVICE_NAME"
 

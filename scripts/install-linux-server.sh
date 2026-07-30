@@ -103,6 +103,10 @@ Environment=QALATRA_BOOTSTRAP_TOKEN_FILE=1
 ExecStart=$(systemd_literal "$NODE_BIN") $(systemd_literal "$ROOT_DIR/server/index.js")
 Restart=on-failure
 RestartSec=5
+# Signal only the main PID on stop/restart so a tmux server that landed in this
+# cgroup isn't SIGKILLed (would kill remote terminals). Primary fix runs tmux in
+# its own scope (ensureTmuxServer); this is a backstop. See scripts/qalatra-server.service.
+KillMode=process
 
 [Install]
 WantedBy=default.target

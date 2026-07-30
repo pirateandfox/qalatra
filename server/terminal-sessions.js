@@ -53,6 +53,31 @@ function runTmux(args) {
   return result.stdout
 }
 
+// The tmux server inherits the cgroup of whatever first starts it. Started
+// implicitly by `new-session` from inside qalatra-server, it lands in
+// qalatra-server.service's cgroup, where systemd's default
+// KillMode=control-group kills it — and every terminal — on restart. Start it
+// in its own transient scope instead. No-op if a server is already running.
+//
+// Portability: systemd-run only exists on systemd Linux and needs XDG_RUNTIME_DIR
+// + a live user manager, so we attempt-and-fall-back rather than detect. On macOS,
+// non-systemd Linux, or when no user manager is present, we drop to a plain
+// `tmux start-server`, which reduces cleanly to the previous behaviour.
+// Idempotent: `tmux start-server` no-ops when a server is already running.
+//
+// Limitation: this does NOT move an already-running tmux server out of the wrong
+// cgroup — it only governs where a *newly* started server lands. If a server is
+// already running in qalatra-server.service's cgroup, the fix takes effect once
+// that server exits (e.g. after the next restart with no live sessions).
+function ensureTmuxServer() {
+  const scoped = spawnSync('systemd-run', [
+    '--user', '--scope', '--quiet', '--collect',
+    'tmux', 'start-server',
+  ], { stdio: 'ignore' })
+  if (scoped.status === 0) return
+  runTmux(['start-server']) // macOS, non-systemd Linux, or no user manager
+}
+
 function sessionName(id) {
   return `qalatra_${id.replace(/[^a-zA-Z0-9_]/g, '').slice(0, 48)}`
 }
@@ -131,6 +156,9 @@ export function createTerminalManager({ dataDir, loadSettings }) {
     const id = crypto.randomUUID()
     const tmuxSession = sessionName(id)
     const createdAt = now()
+    // Ensure the tmux server is running in its own scope before `new-session`
+    // implicitly starts one inside this service's cgroup (see ensureTmuxServer).
+    ensureTmuxServer()
     runTmux(['new-session', '-d', '-s', tmuxSession, '-c', cwd])
     // Enable tmux mouse mode so mouse-wheel scroll works (tmux handles it natively).
     // With mouse on, normal click-drag is intercepted by tmux's copy-mode. To get those
