@@ -97,7 +97,7 @@ async function main() {
     console.log(`[server] Initial token: ${bootstrap.token}`)
   }
 
-  const ctx = { dbCall, loadSettings, saveSettings, dataDir: DATA_DIR, notify: publishEvent }
+  const ctx = { dbCall, loadSettings, saveSettings, dataDir: DATA_DIR, notify: publishEvent, startedAt: SERVER_STARTED_AT }
   const terminalManager = createTerminalManager({ dataDir: DATA_DIR, loadSettings })
   const boxWebProxy = createBoxWebProxy()
   // NOTE: background workers are started only AFTER a successful port bind (in the

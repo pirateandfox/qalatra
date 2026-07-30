@@ -120,6 +120,7 @@
 }
 .agent-done   { font-size: 13px; color: #22c55e; vertical-align: middle; }
 .agent-failed { font-size: 13px; color: #ef4444; vertical-align: middle; }
+.agent-orphaned { font-size: 13px; color: #f59e0b; vertical-align: middle; }
 @keyframes agent-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%       { opacity: .4; transform: scale(.7); }

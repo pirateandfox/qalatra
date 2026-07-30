@@ -253,6 +253,14 @@ function initSchema(db) {
   if (!agentJobCols.includes('heartbeat_id')) {
     db.exec(`ALTER TABLE agent_jobs ADD COLUMN heartbeat_id TEXT REFERENCES heartbeats(id)`);
   }
+  // Orphan handling: 'orphaned' status carries a cause + the killing instance's start time, so
+  // consumers branch on a field instead of string-matching result. (Server owns the backfill.)
+  if (!agentJobCols.includes('terminated_by')) {
+    db.exec(`ALTER TABLE agent_jobs ADD COLUMN terminated_by TEXT`);
+  }
+  if (!agentJobCols.includes('terminated_boundary')) {
+    db.exec(`ALTER TABLE agent_jobs ADD COLUMN terminated_boundary TEXT`);
+  }
 
   // Migrations for attachments table
   const attachmentCols = db.prepare(`PRAGMA table_info(attachments)`).all().map(r => r.name);

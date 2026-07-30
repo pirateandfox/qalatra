@@ -646,6 +646,21 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, onSel
                 )}
               </div>
             )}
+            {latestJob && latestJob.status === 'orphaned' && (
+              <div className="detail-agent-job detail-agent-job--orphaned">
+                <span className="detail-job-status detail-job-status--orphaned">⟳ Interrupted by app restart</span>
+                {latestJob.session_id && (
+                  <button
+                    className="detail-resume-btn"
+                    onClick={() => onRunInTerminal?.(task.agent_path ? `cd "${task.agent_path}" && claude --resume ${latestJob.session_id}\r` : `claude --resume ${latestJob.session_id}\r`)}
+                    title="Resume this session in the terminal — partial work may already have landed"
+                  >Resume session</button>
+                )}
+                {latestJob.result && (
+                  <pre className="detail-agent-error">{latestJob.result}</pre>
+                )}
+              </div>
+            )}
 
             {/* Dates */}
             <div className="detail-field-row">

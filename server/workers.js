@@ -160,8 +160,11 @@ function appendLaunchDiagnostics(result, context) {
 }
 
 export function startBackgroundWorkers(ctx) {
-  const { dbCall, loadSettings, notify = () => {} } = ctx
-  dbCall('resetStuckJobs').catch(() => {})
+  const { dbCall, loadSettings, notify = () => {}, startedAt = null } = ctx
+  // Pass this instance's start time as the orphan "restart boundary": any job still 'running'
+  // was killed when the previous instance stopped, and the consumer can compare a late cloud
+  // reply's timestamp against this to tell whether the job's work landed before or after death.
+  dbCall('resetStuckJobs', startedAt).catch(() => {})
   syncPendingAttachments(ctx).catch(() => {})
   runAgentScan({ dbCall, loadSettings }).catch(() => {})
   setInterval(() => syncPendingAttachments(ctx).catch(() => {}), 5 * 60 * 1000)

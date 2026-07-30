@@ -174,6 +174,7 @@ export default function TaskRow({ task, showContext = true, draggable = false, s
             {task.agent_job_status === 'queued'  && <span className="agent-queued" title="Agent queued"><span className="agent-queued-pip" /></span>}
             {task.agent_job_status === 'done'    && <span className="agent-done"     title="Agent result ready for review">★</span>}
             {task.agent_job_status === 'failed'  && <span className="agent-failed"   title="Agent job failed">✕</span>}
+            {task.agent_job_status === 'orphaned' && <span className="agent-orphaned" title="Agent job interrupted by an app restart — not a failure">⟳</span>}
             {task.recurrence && <span className="recurrence-indicator" title={task.recurrence}>↻</span>}
           </div>
 

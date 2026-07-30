@@ -642,6 +642,9 @@
 .detail-job-status--done    { color: #22c55e; }
 .detail-job-status--failed  { color: #ef4444; }
 .detail-agent-job--failed { border-color: #ef444440; background: #ef444410; }
+/* Orphaned = interrupted by app restart, not a failure — amber/neutral, not red. */
+.detail-job-status--orphaned { color: #f59e0b; }
+.detail-agent-job--orphaned { border-color: #f59e0b40; background: #f59e0b10; }
 .detail-resume-btn {
   margin-left: 10px;
   padding: 2px 8px;

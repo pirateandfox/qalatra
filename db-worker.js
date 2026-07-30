@@ -248,6 +248,23 @@ function migrate() {
   tryAlter('ALTER TABLE tasks ADD COLUMN time_estimate INTEGER')
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN session_id TEXT')
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN user_message TEXT')
+  // Orphan handling (app restart mid-job is infrastructure, not an agent failure):
+  //  - terminated_by:        cause of a non-failure termination, e.g. 'app_restart'. Lets
+  //                          consumers branch on a field instead of string-matching `result`.
+  //  - terminated_boundary:  started_at of the app instance that killed the job, so a consumer
+  //                          can tell "died before doing anything" from "died after work landed"
+  //                          by comparing against when a late cloud reply arrived.
+  tryAlter('ALTER TABLE agent_jobs ADD COLUMN terminated_by TEXT')
+  tryAlter('ALTER TABLE agent_jobs ADD COLUMN terminated_boundary TEXT')
+  // One-time backfill: rows marked `failed` that carry the old orphan string were the same
+  // infrastructure event under a wrong label. Reclassify so failure counts and the Pipeline
+  // Auditor's recurring-infra-error detector stop counting restarts as agent failures.
+  // Idempotent: once converted the status is 'orphaned', so the LIKE no longer matches.
+  try {
+    db.prepare(
+      `UPDATE agent_jobs SET status = 'orphaned', terminated_by = 'app_restart' WHERE status = 'failed' AND result LIKE 'Job orphaned:%'`
+    ).run()
+  } catch { /* columns may not exist yet on a partial migration — non-fatal */ }
   tryAlter('ALTER TABLE contexts ADD COLUMN label TEXT')
   tryAlter("ALTER TABLE contexts ADD COLUMN color TEXT NOT NULL DEFAULT '#888888'")
   tryAlter('ALTER TABLE contexts ADD COLUMN sort_order INTEGER')
@@ -392,7 +409,7 @@ function attachSubtasks(tasks) {
 }
 
 function stampAgentJobs(...arrays) {
-  const jobs = db.prepare(`SELECT task_id, status FROM agent_jobs WHERE status IN ('queued','running') OR (status = 'done' AND completed_at >= datetime('now','-24 hours')) OR (status = 'failed' AND completed_at >= datetime('now','-24 hours')) ORDER BY created_at DESC`).all()
+  const jobs = db.prepare(`SELECT task_id, status FROM agent_jobs WHERE status IN ('queued','running') OR (status IN ('done','failed','orphaned') AND completed_at >= datetime('now','-24 hours')) ORDER BY created_at DESC`).all()
   if (!jobs.length) return
   const map = {}
   for (const j of jobs) { if (j.task_id && !map[j.task_id]) map[j.task_id] = j.status }
@@ -1132,11 +1149,29 @@ function insertAgentNote(id, taskId, result, jobId) {
     return { ok: true, auto_attached: 0, attachments: [], auto_attach_error: err.message }
   }
 }
-function resetStuckJobs() {
-  // Jobs stuck for less than the 15-min timeout window were likely orphaned by an app crash — re-queue them.
-  // Jobs stuck longer than that will never recover on their own — mark them failed.
-  db.prepare(`UPDATE agent_jobs SET status = 'queued', started_at = NULL WHERE status = 'running' AND started_at > datetime('now', '-16 minutes')`).run()
-  db.prepare(`UPDATE agent_jobs SET status = 'failed', result = 'Job orphaned: app was restarted while this job was running and it exceeded the timeout window.', completed_at = datetime('now') WHERE status = 'running'`).run()
+function resetStuckJobs(bootBoundary = null) {
+  // Runs once at startup, only on the instance that won the single-instance port lock (see
+  // server/index.js). The previous instance is therefore gone, so any job still marked 'running'
+  // was orphaned by that instance stopping mid-job (restart, crash, or clean shutdown).
+  //
+  // That is an INFRASTRUCTURE event, not an agent failure, so it gets its own terminal status
+  // (`orphaned`) and cause (`terminated_by = 'app_restart'`) rather than being labelled `failed` —
+  // which would pollute failure counts / infra-error detectors and hide the cause behind a string.
+  //
+  // We deliberately do NOT auto-requeue. Job prompts are built at launch and these jobs are not
+  // idempotent, so a blind requeue re-injects already-completed work (a cloud session's reply can
+  // land after the job dies). Requeue is the consumer/orchestrator's decision — it can reconstruct
+  // what actually completed and requeue safely; `terminated_boundary` gives it the restart instant
+  // to reason about without diffing PR head SHAs.
+  db.prepare(`
+    UPDATE agent_jobs
+    SET status = 'orphaned',
+        terminated_by = 'app_restart',
+        terminated_boundary = @boundary,
+        result = 'Job orphaned: the app instance running it stopped (restart or crash) before it reported a result. This is an infrastructure event, not an agent failure; partial work may still have landed.',
+        completed_at = datetime('now')
+    WHERE status = 'running'
+  `).run({ boundary: bootBoundary })
   return { ok: true }
 }
 function getAutorunTasks() {

@@ -15,7 +15,7 @@ export const toolDefs = [
   },
   {
     name: 'list_agent_jobs',
-    description: 'List recent agent jobs, optionally filtered by task_id.',
+    description: "List recent agent jobs, optionally filtered by task_id. status is one of queued|running|done|failed|orphaned. 'orphaned' means the app instance running the job stopped mid-run (restart/crash) — an infrastructure event, NOT an agent failure; branch on it separately from 'failed'. For orphaned jobs, terminated_by='app_restart' and terminated_boundary holds the started_at of the instance that killed it (compare a late reply's timestamp against it to tell whether work landed). Orphaned jobs are never auto-requeued — the consumer must decide.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -26,7 +26,7 @@ export const toolDefs = [
   },
   {
     name: 'get_agent_job',
-    description: 'Get the status and result of a specific agent job.',
+    description: "Get the status and result of a specific agent job. status is one of queued|running|done|failed|orphaned; 'orphaned' (terminated_by='app_restart', terminated_boundary=killing instance's started_at) is an app-restart interruption, not an agent failure.",
     inputSchema: {
       type: 'object',
       properties: {
