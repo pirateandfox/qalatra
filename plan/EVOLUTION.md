@@ -206,7 +206,7 @@ ending in `rc` (`/^\.[^/]*rc$/i` — `.flightdeskrc`, `.myservicerc`, anywhere),
 almost always user/app config that may hold credentials, and legit agent outputs
 live under `<agent_path>/output/`, never as a home-root dotfile. Verified against
 both a home-root `.flightdeskrc` and a plainly-named home-root dotfile in the test
-harness. Remote nodes (e.g. `/home/pf/qalatra`) pick this up on their next
+harness. Remote nodes (e.g. `/home/ansible/qalatra`) pick this up on their next
 pull/release.
 
 ## Auto-attach secret denylist (2026-07-19)
