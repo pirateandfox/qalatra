@@ -205,21 +205,49 @@ const httpServer = http.createServer(async (req, res) => {
       return;
     }
 
+    // A session id we don't recognise is NOT a malformed request — it is a session this process
+    // no longer has. `transports` is in-memory with no TTL, so every server restart forgets every
+    // session; a client that reconnects afterwards presents a perfectly well-formed id for a
+    // session that died with the previous process.
+    //
+    // The MCP Streamable HTTP spec distinguishes these by status: on 404 the client MUST start a
+    // new session with a fresh InitializeRequest. Answering 400 instead conflates "your session is
+    // gone, re-initialize" with "your request is broken", so clients surface an error to the user
+    // rather than recovering. Every Qalatra release restarted the server and expired every live
+    // session for exactly this reason.
+    if (sessionId) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Session not found: re-initialize' }, id: null }));
+      return;
+    }
+
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'Bad Request: missing or invalid session' }, id: null }));
 
   } else if (req.method === 'GET') {
-    if (!sessionId || !transports[sessionId]) {
+    if (!sessionId) {
       res.writeHead(400);
-      res.end('Invalid or missing session ID');
+      res.end('Missing session ID');
+      return;
+    }
+    if (!transports[sessionId]) {
+      res.writeHead(404);
+      res.end('Session not found: re-initialize');
       return;
     }
     await transports[sessionId].handleRequest(req, res);
 
   } else if (req.method === 'DELETE') {
-    if (!sessionId || !transports[sessionId]) {
+    if (!sessionId) {
       res.writeHead(400);
-      res.end('Invalid or missing session ID');
+      res.end('Missing session ID');
+      return;
+    }
+    if (!transports[sessionId]) {
+      // Deleting an already-gone session is the caller's desired end state, not an error. Say so
+      // with 404 rather than 400 so a client tearing down after a restart doesn't log a failure.
+      res.writeHead(404);
+      res.end('Session not found: re-initialize');
       return;
     }
     await transports[sessionId].handleRequest(req, res);
