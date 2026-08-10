@@ -159,6 +159,46 @@ function appendLaunchDiagnostics(result, context) {
   return `${result || ''}\n\n${diagnostics}`.trim()
 }
 
+export function parseAgentOutput(stdout) {
+  let result = String(stdout ?? '').trim()
+  let sessionId = null
+  try {
+    const parsed = JSON.parse(stdout)
+    if (parsed.result != null) result = String(parsed.result)
+    sessionId = parsed.session_id ?? null
+  } catch {}
+  return { result, sessionId }
+}
+
+export function findLastOutputRuleMatch(output, pattern) {
+  const regex = new RegExp(pattern, 'g')
+  let lastMatch = null
+  for (const match of String(output ?? '').matchAll(regex)) lastMatch = match
+  return lastMatch
+}
+
+export async function applyOutputRules({ dbCall, jobId, taskId, rules, output, logger = console }) {
+  if (!taskId || !Array.isArray(rules) || rules.length === 0) return
+
+  for (const [index, rule] of rules.entries()) {
+    try {
+      if (!rule?.pattern) continue
+      const match = findLastOutputRuleMatch(output, rule.pattern)
+      if (!match) continue
+
+      if (rule.action === 'add_link' && rule.url) {
+        const url = rule.url.replace(/\{(\d+)\}/g, (_, group) => match[Number(group)] ?? '')
+        if (url) await dbCall('addTaskLink', taskId, url)
+      } else if (rule.action === 'set_field' && rule.field) {
+        const value = match[rule.group ?? 1] ?? match[0]
+        if (value) await dbCall('updateTask', taskId, { [rule.field]: value })
+      }
+    } catch (err) {
+      logger.error(`[workers] output rule ${index + 1} failed for job ${jobId}: ${err.message}`)
+    }
+  }
+}
+
 export function startBackgroundWorkers(ctx) {
   const { dbCall, loadSettings, notify = () => {}, startedAt = null } = ctx
   // Pass this instance's start time as the orphan "restart boundary": any job still 'running'
@@ -184,7 +224,7 @@ export async function runAgentScan({ dbCall, loadSettings }) {
   return agents
 }
 
-async function finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId }) {
+export async function finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, outputRules = [] }) {
   try {
     await dbCall('finishAgentJob', job.id, status, result, sessionId)
   } catch (err) {
@@ -201,6 +241,14 @@ async function finishAgentJobSafely({ dbCall, notify, job, status, result, sessi
     } catch (err) {
       console.error(`[workers] failed to insert agent note for job ${job.id}: ${err.message}`)
     }
+
+    await applyOutputRules({
+      dbCall,
+      jobId: job.id,
+      taskId: job.task_id,
+      rules: outputRules,
+      output: result,
+    })
   }
 
   try {
@@ -335,13 +383,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
 
-      let result = stdout.trim()
-      let sessionId = null
-      try {
-        const parsed = JSON.parse(stdout)
-        result = parsed.result ?? result
-        sessionId = parsed.session_id ?? null
-      } catch {}
+      let { result, sessionId } = parseAgentOutput(stdout)
 
       const status = code === 0 ? 'done' : 'failed'
       if (!result) {
@@ -361,7 +403,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         })
       }
 
-      finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId })
+      finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, outputRules: cfg?.output_rules })
         .catch(err => console.error(`[workers] agent completion handler failed for job ${job.id}: ${err.message}`))
     })
 

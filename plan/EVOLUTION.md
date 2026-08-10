@@ -1,5 +1,25 @@
 # Qalatra — Evolution Notes
 
+## Restore agent output rules after the headless-server migration (2026-08-10)
+
+- Restored `agent.config` `output_rules` evaluation for every successful agent job. The evaluator
+  was dropped when job execution moved from `ipc-handlers.js` to `server/workers.js` in May, while
+  its documentation and `addTaskLink` database method remained, making configured rules silently
+  do nothing on all headless-server releases.
+- Rules now evaluate the normalized result: command/template jobs use their stdout, while prompt
+  agents use the parsed JSON result rather than the prompt or JSON envelope. When output contains
+  multiple matches, the final match wins, preventing a Qalatra preamble ID from outranking the
+  downstream FlightDesk ID. Invalid rules are logged without blocking later rules or job completion.
+- Added regression coverage for plain command output, prompt-agent JSON output, last-match
+  selection, malformed-rule isolation, successful link persistence, and failed-job exclusion.
+
+## Reorderable instance switcher (2026-08-08)
+
+- Settings → Instances now lets saved remote servers be reordered by drag-and-drop or accessible
+  up/down buttons. The order persists in the existing client-side instance list and immediately
+  drives the header switcher; Local Server remains fixed first when it is visible.
+- Updating an existing instance now preserves its position instead of silently moving it to the end.
+
 ## Remote terminal sessions survive server restart (2026-07-30)
 
 Restarting `qalatra-server` killed every open remote terminal — and auto-update

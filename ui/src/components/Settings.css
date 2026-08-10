@@ -70,3 +70,70 @@
   font-weight: 500;
 }
 .settings-save:hover { opacity: 0.85; }
+
+.instance-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.instance-order-row {
+  display: grid;
+  grid-template-columns: 20px minmax(120px, 1fr) minmax(180px, 2fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+  font-size: 12px;
+}
+
+.instance-order-row.dragging {
+  opacity: 0.45;
+}
+
+.instance-order-row.drop-before {
+  border-top-color: var(--accent);
+}
+
+.instance-order-row.drop-after {
+  border-bottom-color: var(--accent);
+}
+
+.instance-drag-handle {
+  color: var(--muted);
+  cursor: grab;
+  font-size: 14px;
+  letter-spacing: -3px;
+  user-select: none;
+}
+
+.instance-order-row:active .instance-drag-handle {
+  cursor: grabbing;
+}
+
+.instance-order-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.instance-order-button {
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.instance-order-button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface2);
+}
+
+.instance-order-button:disabled {
+  cursor: default;
+  opacity: 0.3;
+}

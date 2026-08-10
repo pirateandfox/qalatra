@@ -3,7 +3,7 @@ import {
   createAccessToken, getAccessTokenExpiryLabel, getActiveInstanceId, getDefaultInstanceId,
   getHideLocalInstance, getInstances,
   getLocalServerServiceStatus, getLocalServerStatus, installLocalServerService,
-  listAccessTokens, removeInstance, restartLocalServer, restartLocalServerService,
+  listAccessTokens, removeInstance, reorderInstances, restartLocalServer, restartLocalServerService,
   revokeAccessToken, saveSettings, setActiveInstance, setDefaultInstance,
   setHideLocalInstance, startLocalServer, startLocalServerService, stopLocalServerService,
   testInstanceConnection, tokenIsExpired, uninstallLocalServerService, upsertInstance,
@@ -49,6 +49,8 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
   const [createdToken, setCreatedToken] = useState<string | null>(null)
   const [tokenBusy, setTokenBusy] = useState(false)
   const [tokenMsg, setTokenMsg] = useState<string | null>(null)
+  const [draggingInstanceId, setDraggingInstanceId] = useState<string | null>(null)
+  const [instanceDropTarget, setInstanceDropTarget] = useState<{ id: string; edge: 'before' | 'after' } | null>(null)
 
   useEffect(() => {
     refreshInstances()
@@ -116,6 +118,37 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
   function toggleHideLocalInstance(checked: boolean) {
     setHideLocalInstance(checked)
     refreshInstances()
+  }
+
+  function saveInstanceOrder(next: QalatraInstance[]) {
+    reorderInstances(next.map(instance => instance.id))
+    setInstances(getInstances())
+  }
+
+  function moveInstance(id: string, offset: -1 | 1) {
+    const from = instances.findIndex(instance => instance.id === id)
+    const to = from + offset
+    if (from < 0 || to < 0 || to >= instances.length) return
+    const next = [...instances]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    saveInstanceOrder(next)
+  }
+
+  function dropInstance(sourceId: string, targetId: string, edge: 'before' | 'after') {
+    if (!sourceId || sourceId === targetId) return
+    const next = instances.filter(instance => instance.id !== sourceId)
+    const targetIndex = next.findIndex(instance => instance.id === targetId)
+    if (targetIndex < 0) return
+    const moved = instances.find(instance => instance.id === sourceId)
+    if (!moved) return
+    next.splice(targetIndex + (edge === 'after' ? 1 : 0), 0, moved)
+    saveInstanceOrder(next)
+  }
+
+  function clearInstanceDrag() {
+    setDraggingInstanceId(null)
+    setInstanceDropTarget(null)
   }
 
   async function refreshAccessTokens() {
@@ -308,11 +341,55 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
       {instances.length > 0 && (
         <div className="settings-row">
           <label className="settings-label">Saved Servers</label>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {instances.map(instance => (
-              <div key={instance.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) minmax(220px, 2fr) auto', gap: 8, alignItems: 'center', fontSize: 12 }}>
+          <span className="settings-hint">Drag servers or use the arrow buttons to set their order in the header switcher.</span>
+          <div className="instance-order-list">
+            {instances.map((instance, index) => (
+              <div
+                key={instance.id}
+                className={`instance-order-row${draggingInstanceId === instance.id ? ' dragging' : ''}${instanceDropTarget?.id === instance.id ? ` drop-${instanceDropTarget.edge}` : ''}`}
+                onDragStart={event => {
+                  event.dataTransfer.setData('text/plain', instance.id)
+                  event.dataTransfer.effectAllowed = 'move'
+                  setDraggingInstanceId(instance.id)
+                }}
+                onDragOver={event => {
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                  const rect = event.currentTarget.getBoundingClientRect()
+                  setInstanceDropTarget({ id: instance.id, edge: event.clientY < rect.top + rect.height / 2 ? 'before' : 'after' })
+                }}
+                onDrop={event => {
+                  event.preventDefault()
+                  const rect = event.currentTarget.getBoundingClientRect()
+                  const edge = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+                  dropInstance(event.dataTransfer.getData('text/plain') || draggingInstanceId || '', instance.id, edge)
+                  clearInstanceDrag()
+                }}
+                onDragEnd={clearInstanceDrag}
+              >
+                <span className="instance-drag-handle" draggable aria-hidden="true">⋮⋮</span>
                 <strong style={{ color: 'var(--text)' }}>{instance.name}</strong>
                 <span style={{ color: 'var(--muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }}>{instance.url}</span>
+                <div className="instance-order-actions">
+                  <button
+                    className="instance-order-button"
+                    disabled={index === 0}
+                    aria-label={`Move ${instance.name} up`}
+                    title="Move up"
+                    onClick={() => moveInstance(instance.id, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="instance-order-button"
+                    disabled={index === instances.length - 1}
+                    aria-label={`Move ${instance.name} down`}
+                    title="Move down"
+                    onClick={() => moveInstance(instance.id, 1)}
+                  >
+                    ↓
+                  </button>
+                </div>
                 <button
                   className="settings-save"
                   style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', padding: '3px 8px', fontSize: 11 }}

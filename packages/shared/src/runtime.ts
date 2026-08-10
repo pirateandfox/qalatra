@@ -149,7 +149,8 @@ export function setHideLocalInstance(hidden: boolean) {
 }
 
 export function upsertInstance(input: Partial<QalatraInstance> & { name: string; url: string; token: string }): QalatraInstance {
-  const previous = input.id ? getInstances().find(instance => instance.id === input.id) : null
+  const current = getInstances()
+  const previous = input.id ? current.find(instance => instance.id === input.id) : null
   const instance: QalatraInstance = {
     ...previous, // carries forward any fields incl. deprecated boxWeb* (seeded into nav config, then dropped)
     id: input.id || newId(),
@@ -157,10 +158,32 @@ export function upsertInstance(input: Partial<QalatraInstance> & { name: string;
     url: normalizeUrl(input.url),
     token: input.token.trim(),
   }
-  const next = getInstances().filter(i => i.id !== instance.id)
-  next.push(instance)
+  const next = previous
+    ? current.map(existing => existing.id === instance.id ? instance : existing)
+    : [...current, instance]
   saveInstances(next)
   return instance
+}
+
+export function reorderInstances(instanceIds: string[]) {
+  const current = getInstances()
+  const byId = new Map(current.map(instance => [instance.id, instance]))
+  const seen = new Set<string>()
+  const next: QalatraInstance[] = []
+
+  for (const id of instanceIds) {
+    const instance = byId.get(id)
+    if (!instance || seen.has(id)) continue
+    seen.add(id)
+    next.push(instance)
+  }
+
+  // Preserve any records the caller did not know about instead of dropping them.
+  for (const instance of current) {
+    if (!seen.has(instance.id)) next.push(instance)
+  }
+
+  saveInstances(next)
 }
 
 export function updateInstance(id: string, patch: Partial<QalatraInstance>): QalatraInstance | null {
