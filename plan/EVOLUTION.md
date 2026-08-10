@@ -1,5 +1,13 @@
 # Qalatra — Evolution Notes
 
+## v1.9.35 — MCP session recovery after restart (2026-08-10)
+
+- An unknown MCP session id now returns `404` on POST, GET, and DELETE instead of `400`, which is
+  the status Streamable HTTP defines as "re-initialize". Sessions live only in memory, so every
+  release restart invalidated them and clients reported an error rather than reconnecting.
+- A missing session id on a non-initialize request still returns `400`; DELETE of an already-gone
+  session returns `404` because that is the caller's desired end state.
+
 ## v1.9.34 — August dependency advisory sweep (2026-08-10)
 
 - Cleared the newly published root and UI advisories with patched in-range releases, including
