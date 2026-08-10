@@ -1,7 +1,7 @@
 {
   "name": "qalatra",
   "productName": "Qalatra",
-  "version": "1.9.33",
+  "version": "1.9.34",
   "description": "Personal task management system with Claude AI integration",
   "author": "Justin Handley",
   "type": "module",
@@ -24,9 +24,13 @@
     "start": "npm run kill && sleep 1 && NODE_ENV=production ./node_modules/.bin/electron electron-main.js",
     "check-imports": "node scripts/check-imports.mjs",
     "shared:typecheck": "npm run typecheck -w @qalatra/shared",
+    "audit:mobile": "node scripts/audit-mobile.mjs",
+    "test:account": "node scripts/test-account.mjs",
+    "test:auth": "node scripts/test-auth.mjs",
     "test:output-rules": "node scripts/test-output-rules.mjs",
     "smoke:server": "node scripts/smoke-server.mjs",
-    "ci:server": "bash -n scripts/bootstrap-linux-server.sh scripts/install-linux-server.sh scripts/install-cloudflare-tunnel.sh && node --check server/index.js && node --check server/service-manager.js && node --check scripts/rebuild-node-native.mjs && node --check scripts/smoke-server.mjs && npm run test:output-rules && npm run rebuild:node && npm run smoke:server",
+    "ci:server": "bash -n scripts/bootstrap-linux-server.sh scripts/install-linux-server.sh scripts/install-cloudflare-tunnel.sh && node --check server/index.js && node --check server/service-manager.js && node --check scripts/rebuild-node-native.mjs && node --check scripts/smoke-server.mjs && npm run test:auth && npm run test:output-rules && npm run rebuild:node && npm run smoke:server",
+    "pre-publish": "npm audit --audit-level=moderate && npm audit --audit-level=moderate --prefix ui && npm run audit:mobile && npm run check-imports && npm run shared:typecheck && npm run test:account && npm run ci:server && npm run build && npm run typecheck --prefix mobile && npm run lint --prefix ui",
     "dist": "npm run check-imports && npm run build && electron-builder --mac --publish never",
     "dist:publish": "npm run check-imports && npm run build && electron-builder --mac --publish always",
     "postinstall": "node node_modules/@electron/rebuild/lib/cli.js -f -w better-sqlite3,node-pty --build-from-source || true"
@@ -45,7 +49,7 @@
   "devDependencies": {
     "@electron/notarize": "^2.5.0",
     "concurrently": "^10.0.3",
-    "electron": "^41.7.0",
+    "electron": "^41.10.4",
     "electron-builder": "^26.15.3",
     "sharp": "^0.35.0"
   },

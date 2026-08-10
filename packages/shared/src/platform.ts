@@ -31,14 +31,25 @@ export interface PlatformCapabilities {
    * `local-server` instance).
    */
   canManageLocalServer: boolean
+  /** Hosted web/native distributions require a qalatra.com account entitlement. */
+  requiresAccountAuth: boolean
+}
+
+export interface AccountEndpointConfig {
+  graphqlUrl: string
+  portalUrl: string
+  productKey: string
 }
 
 export interface Platform {
   /** Survives app restarts (localStorage / AsyncStorage). */
   persistent: PlatformKV
+  /** OS-protected credential storage when the host provides it (for example iOS Keychain). */
+  secure?: PlatformKV
   /** Cleared on app restart (sessionStorage / in-memory). */
   session: PlatformKV
   capabilities: PlatformCapabilities
+  account?: AccountEndpointConfig
   /**
    * Resolve the implicit local-server instance to use when no remote instance is
    * active. Desktop injects the Electron-managed local server here; mobile leaves

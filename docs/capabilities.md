@@ -151,6 +151,23 @@ What type of capability this is. Current rows usually use `agent`. Valid useful 
 - `knowledge`: a reference source that may not run anything
 - `external_tool`: an external service or API-backed capability
 
+`context` and `project`
+
+Scope. Both are optional, and leaving them unset is meaningful: **a capability with
+no `context` (and no `project`) is global.** Since 1.9.30, `list_capabilities` and
+`search_capabilities` filter with `(context IS NULL OR context = <context>)`, so a
+context-scoped search returns that context's capabilities **plus** every global one.
+A shared agent therefore surfaces wherever the assistant is working, without being
+registered per context.
+
+- Set `context` (and optionally `project`) when the capability only makes sense in
+  that scope, or when it carries detailed client/project facts.
+- Omit both to make it global. There is no separate "global" flag — the registry
+  stores unset as `null`.
+- `list_capabilities({ "context": null })` lists just the globals.
+
+Server-side behavior: remote boxes pick a change up on deploy, local on MCP/API restart.
+
 `aliases`
 
 Short alternate names people or agents might use. Use nouns and labels:
@@ -367,7 +384,8 @@ For every important agent, ask:
 - Does the `description` say what the agent actually does?
 - Would a top-level assistant find it from normal user wording?
 - Are `aliases` and `triggers` present for common phrasing?
-- Is `context` or `project` set if this should not be global?
+- Is `context` or `project` set if this should not be global? (Unset means global —
+  it will surface in every context-scoped search.)
 - Are risky actions represented in `permissions`?
 - Are important instruction and knowledge files listed or inferable?
 - Is the delegation mode correct?

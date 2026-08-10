@@ -35,6 +35,21 @@ jobs:
       - name: Audit UI dependencies
         run: npm audit --audit-level=moderate --prefix ui
 
+      - name: Install mobile dependencies
+        run: npm ci --prefix mobile
+
+      - name: Audit mobile dependencies
+        run: npm run audit:mobile
+
+      - name: Typecheck shared core
+        run: npm run shared:typecheck
+
+      - name: Test account client
+        run: npm run test:account
+
+      - name: Typecheck mobile client
+        run: npm run typecheck --prefix mobile
+
       - name: Lint UI
         run: npm run lint --prefix ui
 

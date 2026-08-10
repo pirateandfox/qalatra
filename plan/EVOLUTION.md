@@ -1,6 +1,47 @@
 # Qalatra — Evolution Notes
 
-## Restore agent output rules after the headless-server migration (2026-08-10)
+## v1.9.34 — August dependency advisory sweep (2026-08-10)
+
+- Cleared the newly published root and UI advisories with patched in-range releases, including
+  Electron 41.10.4, DOMPurify 3.4.13, js-yaml 4.3.1, Hono 4.13.1, fast-uri 3.1.5,
+  ip-address 10.5.0, nanoid 3.3.18, and the patched 1.x/2.x/5.x brace-expansion lines.
+- Updated Expo 56 within its supported release line and cleared every actionable mobile advisory.
+  Metro still depends on image-size, whose two high-severity infinite-loop advisories have no
+  patched release. That parser runs only against trusted repository assets during mobile builds,
+  not remote input in the app. The mobile audit keeps a narrow two-GHSA exception and will fail on
+  any other advisory; remove the exception as soon as Expo/Metro takes a patched image-size.
+- Rebuilt the shipped Markdown editor bundle so its embedded DOMPurify copy receives the fix.
+
+## v1.9.34 — Release publishing guardrails and changelog repair (2026-08-10)
+
+- Release tags now run a required pre-publish job before any platform packaging begins. The gate
+  checks the tag against `package.json`, requires checked-in curated release notes, and runs shared,
+  mobile, UI, account, auth, output-rule, and server validation against the tagged source.
+- Removed the raw-commit fallback for GitHub release notes. Missing `plan/releases/vX.Y.Z.md` now
+  fails the workflow instead of publishing an outward-facing changelog made from commit subjects.
+- Repaired the Evolution log against the actual commit-to-tag history from v1.9.22 onward, including
+  four releases whose shipped security/API work previously had no entry.
+
+## v1.9.34 — Secure Fleet bootstrap credentials (2026-07-31)
+
+- Added support for a caller-supplied `QALATRA_BOOTSTRAP_TOKEN` during the first headless server
+  start, while retaining random local bootstrap tokens when it is absent.
+- Stopped printing the raw initial full-access token to server logs. Fleet injects its derived
+  per-node credential through a one-time systemd drop-in that Ansible removes after bootstrap.
+- Moved native account credentials to the platform secure-store seam and clear revoked or expired
+  credentials as soon as the account API reports an unauthenticated response.
+
+## v1.9.34 — Qalatra account entitlement gate (2026-07-30)
+
+- Added a platform-agnostic `@qalatra/shared` account client for qalatra.com GraphQL login,
+  two-factor completion, token persistence, and Connect entitlement checks.
+- Hosted-web builds can enable the account gate with `VITE_QALATRA_ACCOUNT_AUTH=true`; the free
+  Electron build remains ungated. The Expo mobile app now requires an active assigned Connect seat
+  before backend onboarding/main navigation.
+- Added explicit logged-out, 2FA, unlicensed/seatless, retryable network-error, and valid-license
+  states, with recovery links to the Qalatra portal.
+
+## v1.9.33 — Restore agent output rules after the headless-server migration (2026-08-10)
 
 - Restored `agent.config` `output_rules` evaluation for every successful agent job. The evaluator
   was dropped when job execution moved from `ipc-handlers.js` to `server/workers.js` in May, while
@@ -13,14 +54,14 @@
 - Added regression coverage for plain command output, prompt-agent JSON output, last-match
   selection, malformed-rule isolation, successful link persistence, and failed-job exclusion.
 
-## Reorderable instance switcher (2026-08-08)
+## v1.9.33 — Reorderable instance switcher (2026-08-08)
 
 - Settings → Instances now lets saved remote servers be reordered by drag-and-drop or accessible
   up/down buttons. The order persists in the existing client-side instance list and immediately
   drives the header switcher; Local Server remains fixed first when it is visible.
 - Updating an existing instance now preserves its position instead of silently moving it to the end.
 
-## Remote terminal sessions survive server restart (2026-07-30)
+## v1.9.32 — Remote terminal sessions survive server restart (2026-07-30)
 
 Restarting `qalatra-server` killed every open remote terminal — and auto-update
 restarts on every release, so self-hosted Linux boxes lost all sessions on each
@@ -49,7 +90,7 @@ included.
   real one, so this is just a backstop. Tradeoff: a hard crash could orphan the MCP
   child, which the server already restarts itself on normal shutdown.
 
-## Restart-orphaned agent jobs get a distinct `orphaned` status (2026-07-29)
+## v1.9.32 — Restart-orphaned agent jobs get a distinct `orphaned` status (2026-07-29)
 
 When the app restarted mid-job, `resetStuckJobs()` marked the job **`failed`** with
 "…exceeded the timeout window" — mislabelling an infrastructure event as an agent
@@ -84,7 +125,7 @@ Verified: node syntax + ui tsc; an in-memory SQL harness confirmed both running 
 (with boundary), the legacy orphan-as-failed reclassifies, a genuine failure stays `failed`,
 and the badge query surfaces `orphaned`.
 
-## Dependency advisories: electron-updater/builder + postcss + brace-expansion (2026-07-29)
+## v1.9.31 — Dependency advisories: electron-updater/builder + postcss + brace-expansion (2026-07-29)
 
 Security-maintenance patch clearing five high Dependabot advisories. None was
 runtime-exploitable in the shipped desktop app, but the scan is kept clean.
@@ -108,7 +149,7 @@ pass; and an `electron-builder --dir` pack on 26.15.3 (signing disabled) package
 macOS arm64 app cleanly — confirming the toolchain major bump is safe for the signed
 CI build.
 
-## Per-backend tab memory + NULL-context = global capabilities (2026-07-29)
+## v1.9.30 — Per-backend tab memory + NULL-context = global capabilities (2026-07-29)
 
 Two small, independent fixes.
 
@@ -140,7 +181,7 @@ the globals (previously a dead `context = NULL` query that matched nothing).
 Server-side, so remote boxes pick it up on deploy; local picks it up on MCP/API
 restart.
 
-## Configurable navigation: per-backend section visibility + default view (2026-07-23)
+## v1.9.30 — Configurable navigation: per-backend section visibility + default view (2026-07-23)
 
 Qalatra has two distinct uses — personal vs. remote-server — and remote boxes
 rarely use Reading, Backlog, Habits, or Projects. You can now hide sections and
@@ -196,7 +237,60 @@ Verified: desktop tsc+vite build, mobile + shared tsc, config-normalizer invaria
 tests on both (incl. tools defaults/label). Mobile not yet run in the iOS Simulator
 — do that before cutting a release.
 
-## Release workflow: assert full asset set before un-drafting (2026-07-20)
+## v1.9.30 — REST `createTask` honors task type, source, and event times (2026-07-23)
+
+The `/api/v1` `createTask` route hardcoded `task_type = 'task'` and
+`source = 'manual'` and dropped the event-time columns (`event_time`/`end_time`)
+plus most other fields on insert, while MCP `create_task` and REST `updateTask`
+all supported them — so any external integration creating an event or tagging a
+source had to POST and then immediately PATCH. Rebuilt as a dynamic insert
+honoring the same field set as MCP `create_task`, using REST conventions
+(booleans as 1/0, `links` stored as JSON text, `ai_context` via
+`appendAiContext`), with the original defaults preserved
+(task/manual/active/personal) and schema defaults covering unset columns. Kept
+deliberately aligned with the `mcp/tools/tasks.js` `create_task` copy — the two
+inserts are parallel implementations and drift between them is what caused this.
+Verified with a worker-thread functional test against a temp DB.
+
+## v1.9.29 — `@hono/node-server` advisory cleared via override (2026-07-23)
+
+The last outstanding dependency advisory: GHSA-frvp-7c67-39w9, a Windows-only
+`serve-static` path traversal in the library backing the MCP server transport.
+The Model Context Protocol SDK still pins the 1.x line even in its latest
+release, so the patched 2.x was forced in with an npm `override`. The transport
+uses exactly one export (`getRequestListener`), unchanged across the major
+version; 2.x needs Node ≥20 and hono ^4, both already satisfied. Verified with a
+full connect → list-tools → tool-call handshake against the updated library
+before release. Desktop, web, and mobile all scan clean after this.
+
+Future note: MCP SDK v2 (the `@modelcontextprotocol/server` / `client` packages)
+drops this dependency entirely, but is a beta with an unstable API. When it goes
+stable the transport should migrate and this override should be removed.
+
+## v1.9.28 — Ten dependency advisories patched (2026-07-22)
+
+Security maintenance sweep after v1.9.27, all targeted in-place bumps with no
+functional change: `fast-uri` 3.1.2 → 3.1.4 (server, DoS); `js-yaml` 4.2.0 →
+4.3.0 (desktop/web/mobile, quadratic-CPU DoS via merge-key chains — forced past
+`@mdxeditor/editor`'s pin in the web build via override); `shell-quote` 1.8.4 →
+1.10.0 (desktop/mobile, forced past `concurrently`'s pin via override); `tar`
+7.5.16 → 7.5.21 (build tooling); `dompurify` 3.4.11 → 3.4.12 (web — the bundled
+Markdown-to-PDF overlay was rebuilt so its embedded copy is patched too);
+`sharp` 0.34.5 → 0.35.3 (icon build tooling). The Markdown editor (js-yaml) and
+PDF export (dompurify) were exercised against the updated libraries before
+release. `@hono/node-server` was deliberately deferred here — its only patched
+version is a major bump outside the MCP SDK's range, so it needed the coordinated
+override tested separately (shipped in v1.9.29).
+
+## v1.9.27 — brace-expansion + body-parser advisories (2026-07-22)
+
+Cleared the four open Dependabot alerts with lockfile-only updates —
+`brace-expansion` 5.0.6 → 5.0.7 (DoS, GHSA-3jxr-9vmj-r5cp, high) across the
+root, `ui`, and `mobile` lockfiles, and `body-parser` 2.2.2 → 2.3.0
+(GHSA-v422-hmwv-36x6, low) in the root. No `package.json` range changes and no
+unrelated tree churn.
+
+## v1.9.27 — Release workflow: assert full asset set before un-drafting (2026-07-20)
 
 The v1.9.26 release exposed a silent-failure mode in `.github/workflows/release.yml`.
 electron-builder treats an upload to a pre-existing GitHub release that's more than
@@ -213,7 +307,7 @@ incomplete release is left as a draft, which the updater ignores, rather than
 advertised. Recovery when it fires: `gh release delete <tag> --yes` (keep the tag),
 then re-run the workflow.
 
-## Auto-attach denylist: home-root dotfiles + rc files (2026-07-21)
+## v1.9.27 — Auto-attach denylist: home-root dotfiles + rc files (2026-07-21)
 
 Follow-up to the denylist below. `.flightdeskrc` — a bare credential dotfile in
 `$HOME` — matched none of the filename patterns (`token`/`secret`/`key`/`.pem`/…)
@@ -229,7 +323,7 @@ both a home-root `.flightdeskrc` and a plainly-named home-root dotfile in the te
 harness. Remote nodes (e.g. `/home/ansible/qalatra`) pick this up on their next
 pull/release.
 
-## Auto-attach secret denylist (2026-07-19)
+## v1.9.26 — Auto-attach secret denylist (2026-07-19)
 
 Note auto-attach (`server/mentioned-files.js`, used by `add_task_note` for
 non-user authors and by agent-job results in `db-worker.js`) attached any

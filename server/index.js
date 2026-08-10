@@ -91,10 +91,12 @@ async function main() {
   else if (restore.error) console.error(`[server] pending DB restore failed: ${restore.error}`)
   await initDbWorker(DATA_DIR)
   const authDb = initAuth(DB_PATH)
-  const bootstrap = ensureBootstrapToken(authDb, DATA_DIR, { forceFile: process.env.QALATRA_BOOTSTRAP_TOKEN_FILE === '1' })
+  const bootstrap = ensureBootstrapToken(authDb, DATA_DIR, {
+    forceFile: process.env.QALATRA_BOOTSTRAP_TOKEN_FILE === '1',
+    token: process.env.QALATRA_BOOTSTRAP_TOKEN || '',
+  })
   if (bootstrap) {
     console.log(`[server] Created initial full_access token at ${bootstrap.tokenPath}`)
-    console.log(`[server] Initial token: ${bootstrap.token}`)
   }
 
   const ctx = { dbCall, loadSettings, saveSettings, dataDir: DATA_DIR, notify: publishEvent, startedAt: SERVER_STARTED_AT }

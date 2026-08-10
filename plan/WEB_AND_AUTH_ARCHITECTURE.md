@@ -1,8 +1,8 @@
 # Qalatra — Web App, Accounts & Monetization Architecture
 
-Status: **planned, deferred.** Captures the decisions from the monetization
-discussion so they're ready when we pick this up. Nothing here is built yet, and
-none of it blocks the mobile app (which ships auth-free for now).
+Status: **implemented locally; production deployment and app-store validation pending.** The
+account login, 2FA, bearer-token entitlement check, hosted-web build gate, and native mobile gate
+are in source as of 2026-07-30. The free Electron build remains auth-free.
 
 Related: [[EXPO_MOBILE_ROADMAP.md]] (the native app), `qalatra.com` repo (the
 NestledJS account/billing site).
@@ -15,8 +15,9 @@ NestledJS account/billing site).
 - **Paid (~$10/mo):** access to **Qalatra's hosted web app + native mobile apps**.
   You still run your **own** backend — you're paying for the polished web/native
   *interfaces*, not for hosting. Open-core: DIY is free, convenience is paid.
-- **Paid (hundreds/mo, later):** managed **backend hosting** as a separate premium
-  add-on. Much higher price; out of scope for v1.
+- **Paid (hundreds/mo):** managed **backend hosting** as a separate premium add-on. The V1 control
+  plane and Ansible path now live across `qalatra.com` and `qalatra-fleet`; production canary and
+  provider credentials remain deployment gates.
 
 Enforcement is honest about the open-source reality: the paywall gates **access to
 _Qalatra's_ hosted web app and _Qalatra's_ published App Store / Play apps**, not
@@ -87,11 +88,11 @@ mobile app call its auth endpoint; for the web, cross-subdomain session via a
 cookie on `.qalatra.com` (or an OAuth-style token handoff
 `qalatra.com` ↔ `app.qalatra.com`). One account, one login, everywhere.
 
-**The one new thing to build in qalatra.com:** its auth today is session/cookie for
-its own SSR site. External clients (the SPA on another subdomain, and mobile) need
-it to **issue a token** (JWT/session) via a cross-origin endpoint, plus an
-"is this account entitled?" check. Bounded addition on top of existing auth; it's
-the same endpoint `@qalatra/shared`'s `account` module calls from web and mobile.
+**Implemented account boundary:** qalatra.com issues a bearer JWT from GraphQL login, supports a
+2FA completion token, and returns server-computed entitlement/seat state. `@qalatra/shared` calls
+that API from web and mobile; native stores the account token in Expo SecureStore. Production
+builds default to `https://api.qalatra.com/graphql` and may override it with the platform-specific
+environment variables documented below.
 
 ---
 
@@ -142,12 +143,22 @@ the same interface, without touching the app — but keep it off the critical pa
 
 ---
 
-## Build order (when we pick this up)
-1. qalatra.com: token auth + entitlement endpoint (on top of existing auth/billing).
-2. `@qalatra/shared`: `account` module (`login`, `getEntitlement`) + a swappable
-   entitlement provider interface.
-3. `requiresAccountAuth` capability + a login screen in front of connect-a-backend
-   (reused by `ui/` web build and mobile).
-4. Host `ui/` as `app.qalatra.com` (web platform adapter: no local server, gate on).
-5. Cross-subdomain SSO between qalatra.com and app.qalatra.com.
-6. Stripe checkout on web (likely already present in Nestled); IAP only if forced.
+## Hosted build configuration
+
+The source work in the original build order is complete. Deployment uses:
+
+```txt
+VITE_QALATRA_ACCOUNT_AUTH=true
+VITE_QALATRA_ACCOUNT_GRAPHQL_URL=https://api.qalatra.com/graphql
+VITE_QALATRA_PORTAL_URL=https://qalatra.com
+VITE_QALATRA_PRODUCT_KEY=connect
+
+EXPO_PUBLIC_QALATRA_ACCOUNT_GRAPHQL_URL=https://api.qalatra.com/graphql
+EXPO_PUBLIC_QALATRA_PORTAL_URL=https://qalatra.com
+EXPO_PUBLIC_QALATRA_PRODUCT_KEY=connect
+```
+
+Still external: deploy `ui/` at `app.qalatra.com`, validate production CORS, exercise account
+revocation and organization switching against the deployed portal, and pass App Store/Play review.
+Cross-subdomain cookie SSO is not required for V1 because hosted clients use the returned bearer
+token; it remains a later convenience improvement.

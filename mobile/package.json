@@ -23,6 +23,7 @@
     "expo-document-picker": "~56.0.4",
     "expo-file-system": "~56.0.8",
     "expo-image-picker": "~56.0.18",
+    "expo-secure-store": "~56.0.4",
     "expo-sharing": "~56.0.18",
     "expo-splash-screen": "~56.0.10",
     "expo-status-bar": "~56.0.4",
@@ -42,7 +43,7 @@
   },
   "overrides": {
     "postcss": "^8.5.18",
-    "brace-expansion": "^5.0.8",
+    "brace-expansion": "^5.0.9",
     "react-native-markdown-display": {
       "markdown-it": "^14.2.0"
     },

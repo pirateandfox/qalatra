@@ -24,6 +24,7 @@ import HabitsView from './components/HabitsView'
 import HeartbeatsView from './components/HeartbeatsView'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import EmailPreview from './components/EmailPreview'
+import { AccountGate } from './components/AccountGate'
 import MdView from './mdpdf/MdView'
 import './index.css'
 
@@ -49,7 +50,9 @@ function shellQuote(value: string) {
 export default function App() {
   return (
     <ThemeProvider>
-      <AppInner />
+      <AccountGate>
+        <AppInner />
+      </AccountGate>
     </ThemeProvider>
   )
 }

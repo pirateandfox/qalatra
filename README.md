@@ -77,6 +77,8 @@ stale_backlog_review  → surface tasks that haven't been touched recently
 
 **Attachments** — connect any S3-compatible bucket (Cloudflare R2 recommended) for file storage.
 
+**Per-backend navigation** (1.9.30+) — each connected backend (your local app and every remote box) keeps its own sidebar layout: hide the sections that backend doesn't use and pick which view it opens on, and it remembers the tab you were last on. A headless remote box can show just Priority and Terminals while your personal backend shows everything. Settings → Sidebar on desktop, More → Navigation on mobile.
+
 **Theming** — light, dark, or system. Full color token customization.
 
 ---
@@ -211,6 +213,8 @@ An agent is a folder with an `agent.config` file:
 Qalatra scans your configured agents root and lists discovered agents in Settings. Assign an agent to a task from the detail panel. When you queue a job, Qalatra spawns the agent in that folder with the task description as the prompt. Results appear as a note on the task.
 
 Qalatra also registers each scanned agent as a **capability**: structured metadata that helps a top-level AI discover the right agent, inspect permission guardrails, and understand what files belong to that capability. To improve AI routing, add an optional `capability` block to `agent.config` with aliases, trigger phrases, permissions, delegation settings, and owned files. See [docs/capabilities.md](docs/capabilities.md). For the executive-assistant rollout and real-agent cleanup workflow, see [docs/executive-agent-rollout.md](docs/executive-agent-rollout.md).
+
+**Job statuses** — an agent job is `queued`, `running`, `done`, `failed`, or `orphaned`. `orphaned` (1.9.32+) means the app instance running the job stopped mid-run — a restart or crash, not an agent failure — and carries `terminated_by = 'app_restart'` plus `terminated_boundary` (the killing instance's `started_at`, so a late reply's timestamp tells you whether the work actually landed). Orphaned jobs show an amber badge rather than a red failure and are never auto-requeued; requeueing is the consumer's call. Branch on it separately from `failed`.
 
 Agents can attach output files to tasks via the `update_task` MCP tool:
 

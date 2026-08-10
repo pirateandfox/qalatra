@@ -61,7 +61,7 @@ export function initAuth(dbPath) {
   return db
 }
 
-export function ensureBootstrapToken(authDb, dataDir, { forceFile = false } = {}) {
+export function ensureBootstrapToken(authDb, dataDir, { forceFile = false, token: suppliedToken = '' } = {}) {
   const tokenPath = path.join(dataDir, 'admin-token.txt')
   if (forceFile && fs.existsSync(tokenPath)) return null
 
@@ -73,7 +73,10 @@ export function ensureBootstrapToken(authDb, dataDir, { forceFile = false } = {}
   `).get()
   if (active.c > 0 && !forceFile) return null
 
-  const token = createSecret()
+  const token = suppliedToken || createSecret()
+  if (!/^qalatra_[A-Za-z0-9_-]{32,}$/.test(token)) {
+    throw new Error('QALATRA_BOOTSTRAP_TOKEN must be a qalatra_ prefixed URL-safe secret')
+  }
   const id = crypto.randomUUID()
   authDb.prepare(`
     INSERT INTO auth_tokens (id, label, token_hash, scopes)

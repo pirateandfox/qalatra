@@ -40,7 +40,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#0d0e18"
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {

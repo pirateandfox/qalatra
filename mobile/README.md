@@ -7,11 +7,11 @@ runs a local server.
 
 See `plan/EXPO_MOBILE_ROADMAP.md` for the full plan.
 
-## Status: scaffold
+## Status: V1 source complete; device release validation pending
 
-This is an unrun scaffold (Phases 0–2 of the roadmap — the shared core extraction
-and desktop switch-over — are done and verified; this app has not yet been
-installed or run on a device/simulator). Expect to validate and adjust.
+The shared data layer, remote-backend onboarding, application screens, qalatra.com account login,
+2FA, secure token persistence, and Connect/Cloud-seat entitlement gate are implemented and pass
+TypeScript checks. A signed build still needs real iOS/Android device testing and store review.
 
 ## First run
 
@@ -30,11 +30,11 @@ If Metro can't resolve `@qalatra/shared`, confirm `metro.config.js`'s
 
 ## How it's wired
 
-- `src/platform.native.ts` — installs the `@qalatra/shared` platform adapter:
-  AsyncStorage (with a hydrate-once sync cache) for persistent storage, in-memory
-  for session, and `canManageLocalServer: false` (no local-server fallback).
-- `App.tsx` — `await hydrateInstances()` then routes to onboarding (no backend
-  configured) or the main shell.
+- `src/platform.native.ts` — installs the `@qalatra/shared` platform adapter: AsyncStorage for
+  application state, Expo SecureStore for the account credential, and
+  `canManageLocalServer: false` (no local-server fallback).
+- `App.tsx` — hydrates account/backend state, verifies an active assigned Connect or included Cloud
+  seat, then routes to onboarding (no backend configured) or the main shell.
 - `src/AppShell.tsx` — adaptive: master-detail on tablet/regular width, single
   column on phone (`src/hooks/useLayout.ts`, branches on width, not device).
 - `src/screens/` — `OnboardingScreen` (paste URL + token) and `TodayScreen`

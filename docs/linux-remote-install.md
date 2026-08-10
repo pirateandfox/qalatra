@@ -85,6 +85,27 @@ systemctl --user status qalatra-server.service --no-pager -l
 systemctl --user status qalatra-cloudflared.service --no-pager -l
 ```
 
+### Terminal sessions across restarts (1.9.32+)
+
+Restarting `qalatra-server` — including the automatic restart on every auto-update — used
+to kill every open remote terminal, because the tmux server backing them started inside
+the service's own cgroup and systemd tore it down on stop. From 1.9.32 tmux runs in its own
+transient scope and sessions survive a restart; the browser reattaches with full scrollback.
+
+The unit also carries `KillMode=process` as defence in depth. Fresh installs get it from
+`scripts/install-linux-server.sh`, and `scripts/auto-update.sh` patches it into existing
+units on the next update. To avoid one last session loss on a box updating *to* 1.9.32,
+add it by hand first:
+
+```bash
+# under [Service] in ~/.config/systemd/user/qalatra-server.service
+KillMode=process
+```
+
+```bash
+systemctl --user daemon-reload
+```
+
 ## Updating an Existing Headless Install
 
 ### Automatic updates (1.9.4+)

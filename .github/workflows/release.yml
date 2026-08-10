@@ -12,6 +12,46 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  verify-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Verify tag, package version, and release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          EXPECTED_TAG="v${PACKAGE_VERSION}"
+          if [ "$GITHUB_REF_NAME" != "$EXPECTED_TAG" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PACKAGE_VERSION"
+            exit 1
+          fi
+          NOTES_FILE="plan/releases/${GITHUB_REF_NAME}.md"
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "::error::Missing curated release notes: $NOTES_FILE"
+            exit 1
+          fi
+
+      - name: Install root dependencies for system Node
+        run: npm ci --ignore-scripts
+
+      - name: Install UI dependencies
+        run: npm ci --prefix ui
+
+      - name: Install mobile dependencies
+        run: npm ci --prefix mobile
+
+      - name: Run release validation
+        run: npm run pre-publish
+
   # Single macOS job — electron-builder builds both arm64 and x64 on the
   # arm64 runner. It calls @electron/rebuild internally for each arch, so
   # cross-compilation of native modules (better-sqlite3, node-pty) is handled
@@ -19,6 +59,7 @@ jobs:
   # jobs built all configured arches and tried to upload the same files.
   release-mac:
     runs-on: macos-latest
+    needs: verify-release
 
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +99,7 @@ jobs:
 
   release-windows:
     runs-on: windows-latest
+    needs: verify-release
 
     steps:
       - uses: actions/checkout@v4
@@ -90,6 +132,7 @@ jobs:
 
   release-linux:
     runs-on: ubuntu-latest
+    needs: verify-release
 
     steps:
       - uses: actions/checkout@v4
@@ -179,15 +222,6 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
           NOTES_FILE="plan/releases/${TAG}.md"
-          if [ ! -f "$NOTES_FILE" ]; then
-            NOTES_FILE="$(mktemp)"
-            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-            if [ -z "$PREV_TAG" ]; then
-              git log --pretty=format:"- %s" --no-merges > "$NOTES_FILE"
-            else
-              git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges > "$NOTES_FILE"
-            fi
-          fi
           if gh release view "$TAG" &>/dev/null; then
             gh release edit "$TAG" \
               --title "Qalatra $VERSION" \
