@@ -59,6 +59,56 @@ export function addMinutesFromNow(minutes) {
 // scheduler columns disagree by the box's UTC offset (docs/bug-heartbeat-timezone-mismatch.md).
 export const utcNowIso = () => addMinutesFromNow(0)
 
+// ── Timestamp serialization ────────────────────────────────────────────────────
+
+// Stored timestamps are naive `YYYY-MM-DD HH:MM:SS` carrying no zone marker, and the zone differs
+// per column BY DESIGN: scheduler columns are UTC so SQLite can compare them against datetime('now'),
+// while day-facing columns are local so an evening write buckets to the right local day (bug C10).
+// Storage keeps that split. The cost is that a single row mixes both — heartbeats.last_run_at (UTC)
+// sits beside heartbeats.updated_at (local) — so anyone comparing them reads the box offset (4h on
+// AST) as elapsed time. That is not hypothetical: it is how an audit after v1.9.35 concluded that
+// dispatches which preceded a fix had come after it (docs/bug-heartbeat-timezone-mismatch.md).
+// Serializing with an explicit offset at every read boundary removes the need to know the split.
+//
+// Keyed by table, not column name, because `created_at` is UTC in agent_jobs (SQLite DEFAULT
+// datetime('now')) and local in heartbeats (nowIso()). A column-name-keyed map would be wrong for
+// one of them.
+export const TIMESTAMP_ZONES = {
+  heartbeats: { last_run_at: 'utc', next_run_at: 'utc', created_at: 'local', updated_at: 'local' },
+  agent_jobs: { created_at: 'utc', started_at: 'utc', completed_at: 'utc' },
+}
+
+const NAIVE_TIMESTAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
+
+// Naive `YYYY-MM-DD HH:MM:SS` → ISO-8601 with an explicit offset. Anything already carrying a zone
+// (or not a timestamp at all) is returned untouched, so this is safe to apply more than once.
+// A local value resolves its offset at that instant rather than now, so a timestamp written on the
+// far side of a DST change keeps the offset it was actually written with.
+export function toOffsetIso(value, zone) {
+  if (typeof value !== 'string' || !NAIVE_TIMESTAMP.test(value)) return value
+  if (zone === 'utc') return `${value.replace(' ', 'T')}Z`
+  const [date, time] = value.split(' ')
+  const [y, mo, d] = date.split('-').map(Number)
+  const [h, mi, s] = time.split(':').map(Number)
+  const offsetMins = -new Date(y, mo - 1, d, h, mi, s).getTimezoneOffset()
+  const pad = n => String(n).padStart(2, '0')
+  const abs = Math.abs(offsetMins)
+  return `${date}T${time}${offsetMins < 0 ? '-' : '+'}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+}
+
+// Stamp every known timestamp column on a row — or array of rows — read from `table`. Read paths
+// only: never feed the result back into SQL, since the comparisons expect the stored naive form.
+export function withTimestampZones(row, table) {
+  const zones = TIMESTAMP_ZONES[table]
+  if (!row || !zones) return row
+  if (Array.isArray(row)) return row.map(r => withTimestampZones(r, table))
+  const out = { ...row }
+  for (const [column, zone] of Object.entries(zones)) {
+    if (out[column] != null) out[column] = toOffsetIso(out[column], zone)
+  }
+  return out
+}
+
 // ── ai_context ordering ─────────────────────────────────────────────────────────
 
 // Append a day-stamped note to a task's ai_context, chronological / newest-last (bug C24).

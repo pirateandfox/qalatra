@@ -14,13 +14,13 @@ import {
   today, nowIso, offsetDate, daysBetween, addMinutesFromNow,
   appendAiContext, LEGACY_RRULE, toRruleString, rruleToText,
   nextRecurrenceDate, isAgentScheduleDue, nextRunAt,
-  isHabitDueOn, DAY_ABBR_TO_DOW,
+  isHabitDueOn, DAY_ABBR_TO_DOW, withTimestampZones,
 } from '../server/task-logic.js';
 export {
   today, nowIso, offsetDate, daysBetween, addMinutesFromNow,
   appendAiContext, LEGACY_RRULE, toRruleString, rruleToText,
   nextRecurrenceDate, isAgentScheduleDue, nextRunAt,
-  isHabitDueOn, DAY_ABBR_TO_DOW,
+  isHabitDueOn, DAY_ABBR_TO_DOW, withTimestampZones,
 };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

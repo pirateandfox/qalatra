@@ -1,6 +1,13 @@
 # Bug: heartbeats table mixes local time and UTC (`last_run_at` local, `next_run_at` UTC)
 
-**Status:** FIXED 2026-07-13 — `markHeartbeatRun` in `db-worker.js` now writes `last_run_at` with
+**Status:** REOPENED 2026-08-10, then FIXED at the read boundary — see
+"Recurrence: `last_run_at` vs `updated_at` (2026-08-10)" at the bottom. The 2026-07-13 fix below
+resolved the *scheduling* half correctly and is still in force; it did not close the
+**forensics** half this doc also raised, because `updated_at` stayed local while `last_run_at`
+became UTC. The row still mixes zones — it is now serialized with an explicit offset so that no
+longer misleads a reader.
+
+**Original status:** FIXED 2026-07-13 — `markHeartbeatRun` in `db-worker.js` now writes `last_run_at` with
 `utcNowIso()` (new helper in `server/task-logic.js`) instead of local `nowIso()`. Existing rows
 self-correct on their next run (no migration). Root cause confirmed: the C10 fix made `nowIso()`
 local for day-bucketing columns, and `last_run_at` was swept along with it while `next_run_at`
@@ -71,3 +78,63 @@ The heartbeat that stopped that day was explicitly set `active=0` (paused) — a
 non-automated event (there is no auto-pause path in the server). This tz bug was merely surfaced
 during that investigation. The external watchdog (`shi/tools/fleet-alerting/`) is what caught the
 stall and now distinguishes "paused" from "scheduler-stalled" in its alert.
+
+---
+
+## Recurrence: `last_run_at` vs `updated_at` (2026-08-10)
+
+**Status:** FIXED at the read boundary (storage deliberately unchanged).
+
+The 2026-07-13 fix aligned `last_run_at` with `next_run_at` and `agent_jobs.created_at` — all UTC.
+It left `heartbeats.updated_at` on local `nowIso()`, which is correct for its own purpose but means
+a single row still carries both zones, unlabeled. `markHeartbeatRun` writes them in one statement:
+
+```js
+db.prepare(`UPDATE heartbeats SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?`)
+  .run(utcNowIso(), nr, nowIso(), id)   // UTC, UTC, LOCAL
+```
+
+So the third bullet of "Why it matters" above — *"you can't compare `last_run_at` to `agent_jobs`
+timestamps without knowing which column is in which zone"* — never closed. It moved.
+
+### How it resurfaced
+
+An audit of the v1.9.35 `/home/pf` → `/home/ansible` path correction reported that **four dispatches
+after the correction still used the old path**. They did not. The audit read the fix time from
+`updated_at` (`16:49:43`, local) and the dispatch times from `agent_jobs.created_at` (`20:45`, UTC),
+compared them as if both were the same clock, and got the order backwards. `16:49:43` local on a
+UTC-4 box is `20:49:43` UTC — four minutes *after* the last dispatch it cited. There were zero
+failures after the fix.
+
+This is the documented hazard producing exactly the documented consequence, roughly four weeks after
+the doc was marked FIXED. Marking it fixed is what made it invisible.
+
+### Fix
+
+Storage keeps the split — scheduler columns must stay UTC for `datetime('now')` comparisons, and
+day-facing columns must stay local for day-bucketing (bug C10). Changing either would break
+something real. Instead, `server/task-logic.js` gained:
+
+- `TIMESTAMP_ZONES` — a per-table map of column → zone. **Per-table, not per-column-name**, because
+  `created_at` is UTC in `agent_jobs` and local in `heartbeats`.
+- `toOffsetIso(value, zone)` — naive `YYYY-MM-DD HH:MM:SS` → ISO-8601 with an explicit offset
+  (`...Z` or `...-04:00`), resolving a local value's offset *at that instant* so DST is handled.
+- `withTimestampZones(row, table)` — applied on every read path that leaves the process:
+  `listHeartbeats`, `createHeartbeat`, `updateHeartbeat`, `toggleHeartbeat`, `listHeartbeatJobs`,
+  `listAgentJobs`, `getAgentJob` in `db-worker.js`, and the matching MCP handlers in
+  `mcp/tools/heartbeats.js` and `mcp/tools/agent.js`.
+
+Every consumer — the UI, an MCP client, an auditing agent — now receives a timestamp that a standard
+date parser resolves to the correct instant without knowing the split. Read paths only: the stamped
+form must never be written back into SQL, where comparisons expect the naive form.
+
+`scripts/test-timestamps.mjs` (in `ci:server`, so it runs in the pre-publish gate) asserts the
+specific ordering this audit got wrong, and that `created_at` resolves differently for the two
+tables — so the map cannot drift back.
+
+### What is still not covered
+
+`tasks` columns (`created_at`, `last_touched_human`, `last_reviewed_at`, all local) are **not** in
+`TIMESTAMP_ZONES`. They are not currently compared against UTC columns in any forensic path, but
+they are the same latent hazard. Add them to the map if a task timestamp is ever compared to an
+`agent_jobs` or heartbeat timestamp.

@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { openDb } from '../db.js';
+import { openDb, withTimestampZones } from '../db.js';
 
 export const toolDefs = [
   {
@@ -73,13 +73,13 @@ export const handlers = {
     const jobs = args.task_id
       ? db.prepare(`SELECT * FROM agent_jobs WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`).all(args.task_id, limit)
       : db.prepare(`SELECT * FROM agent_jobs ORDER BY created_at DESC LIMIT ?`).all(limit);
-    return jobs;
+    return withTimestampZones(jobs, 'agent_jobs');
   },
 
   get_agent_job(args) {
     const db = openDb();
     const job = db.prepare('SELECT * FROM agent_jobs WHERE id = ?').get(args.job_id);
     if (!job) throw new Error(`Job not found: ${args.job_id}`);
-    return job;
+    return withTimestampZones(job, 'agent_jobs');
   },
 };

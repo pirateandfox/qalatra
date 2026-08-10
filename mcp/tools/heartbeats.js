@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { openDb, nowIso, nextRunAt } from '../db.js';
+import { openDb, nowIso, nextRunAt, withTimestampZones } from '../db.js';
 
 export const toolDefs = [
   {
@@ -82,13 +82,14 @@ export const toolDefs = [
 export const handlers = {
   list_heartbeats() {
     const db = openDb();
-    return db.prepare(`
+    const rows = db.prepare(`
       SELECT h.*,
         (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status = 'done') as runs_done,
         (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status = 'failed') as runs_failed,
         (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status IN ('queued','running')) as runs_pending
       FROM heartbeats h ORDER BY h.created_at DESC
     `).all();
+    return withTimestampZones(rows, 'heartbeats');
   },
 
   create_heartbeat({ title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset } = {}) {
@@ -104,7 +105,7 @@ export const handlers = {
       INSERT INTO heartbeats (id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset, active, next_run_at, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
     `).run(id, title.trim(), description ?? null, agent_path.trim(), prompt.trim(), mins, runAt, offset, firstRun, now, now);
-    return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
+    return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats');
   },
 
   update_heartbeat(args = {}) {
@@ -146,7 +147,7 @@ export const handlers = {
     if (!sets.length) return existing;
     sets.push('updated_at = ?'); vals.push(nowIso()); vals.push(id);
     db.prepare(`UPDATE heartbeats SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
-    return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
+    return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats');
   },
 
   toggle_heartbeat({ id } = {}) {
@@ -160,7 +161,7 @@ export const handlers = {
       const nextRun = nextRunAt(hb.interval_minutes, hb.run_at_time, hb.minute_offset);
       db.prepare(`UPDATE heartbeats SET active = 1, next_run_at = ?, updated_at = ? WHERE id = ?`).run(nextRun, nowIso(), id);
     }
-    return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
+    return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats');
   },
 
   delete_heartbeat({ id } = {}) {
@@ -174,10 +175,11 @@ export const handlers = {
   list_heartbeat_jobs({ id, limit } = {}) {
     if (!id) return { error: 'id required' };
     const db = openDb();
-    return db.prepare(`
+    const rows = db.prepare(`
       SELECT id, status, result, created_at, started_at, completed_at
       FROM agent_jobs WHERE heartbeat_id = ?
       ORDER BY created_at DESC LIMIT ?
     `).all(id, limit ?? 10);
+    return withTimestampZones(rows, 'agent_jobs');
   },
 };

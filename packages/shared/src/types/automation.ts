@@ -21,6 +21,11 @@ export interface AgentJob {
   terminated_boundary?: string | null
 }
 
+// Timestamps below are ISO-8601 with an explicit offset (`...Z` or `...-04:00`), stamped on the way
+// out by withTimestampZones (server/task-logic.js). The stored columns are naive and mix zones by
+// design — scheduler columns UTC, day-facing columns local — so always parse these as dates rather
+// than comparing the strings, and never write one back into a query
+// (docs/bug-heartbeat-timezone-mismatch.md).
 export interface Heartbeat {
   id: string
   title: string

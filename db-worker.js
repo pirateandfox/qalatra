@@ -21,6 +21,7 @@ import { autoAttachMentionedFiles } from './server/mentioned-files.js'
 // also asserts this copy === the shared copy, so it is an automated guard against drift.
 import {
   today, nowIso, utcNowIso, offsetDate, daysBetween, appendAiContext, isHabitDueOn, nextRunAt,
+  withTimestampZones,
 } from './server/task-logic.js'
 const { rrulestr } = pkg
 
@@ -1084,14 +1085,15 @@ function updateAttachmentStorage(id, bucket, key, url, encrypted = 0) {
 // ── Agent jobs ────────────────────────────────────────────────────────────────
 
 function listAgentJobs(taskId) {
-  return taskId
+  const rows = taskId
     ? db.prepare(`SELECT * FROM agent_jobs WHERE task_id = ? ORDER BY created_at DESC`).all(taskId)
     : db.prepare(`SELECT * FROM agent_jobs ORDER BY created_at DESC LIMIT 50`).all()
+  return withTimestampZones(rows, 'agent_jobs')
 }
 function getAgentJob(id) {
   const job = db.prepare('SELECT * FROM agent_jobs WHERE id = ?').get(id)
   if (!job) throw new Error('Job not found')
-  return job
+  return withTimestampZones(job, 'agent_jobs')
 }
 function createAgentJob(taskId, userMessage) {
   const task = taskId ? db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) : null
@@ -1187,13 +1189,14 @@ function insertAutorunJob(taskId, agentPath, prompt) {
 // addMinutesFromNow + nextRunAt are imported from server/task-logic.js (shared with mcp).
 
 function listHeartbeats() {
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT h.*,
       (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status = 'done') as runs_done,
       (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status = 'failed') as runs_failed,
       (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status IN ('queued','running')) as runs_pending
     FROM heartbeats h ORDER BY h.created_at DESC
   `).all()
+  return withTimestampZones(rows, 'heartbeats')
 }
 
 function createHeartbeat({ title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset } = {}) {
@@ -1208,7 +1211,7 @@ function createHeartbeat({ title, description, agent_path, prompt, interval_minu
     INSERT INTO heartbeats (id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset, active, next_run_at, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
   `).run(id, title.trim(), description ?? null, agent_path.trim(), prompt.trim(), mins, runAt, offset, firstRun, now, now)
-  return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)
+  return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats')
 }
 
 function updateHeartbeat(id, fields = {}) {
@@ -1247,7 +1250,7 @@ function updateHeartbeat(id, fields = {}) {
   if (!sets.length) return existing
   sets.push('updated_at = ?'); vals.push(nowIso()); vals.push(id)
   db.prepare(`UPDATE heartbeats SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
-  return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)
+  return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats')
 }
 
 function deleteHeartbeat(id) {
@@ -1265,7 +1268,7 @@ function toggleHeartbeat(id) {
     const nr = nextRunAt(hb.interval_minutes, hb.run_at_time ?? null, hb.minute_offset ?? null)
     db.prepare(`UPDATE heartbeats SET active = 1, next_run_at = ?, updated_at = ? WHERE id = ?`).run(nr, nowIso(), id)
   }
-  return db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)
+  return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats')
 }
 
 function getDueHeartbeats() {
@@ -1302,11 +1305,12 @@ function createHeartbeatJob(heartbeatId) {
 }
 
 function listHeartbeatJobs(heartbeatId, limit = 10) {
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT id, status, result, created_at, started_at, completed_at
     FROM agent_jobs WHERE heartbeat_id = ?
     ORDER BY created_at DESC LIMIT ?
   `).all(heartbeatId, limit)
+  return withTimestampZones(rows, 'agent_jobs')
 }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
