@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate, daysBetween, offsetDate } from '../db.js';
+import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate, daysBetween, offsetDate, withTimestampZones } from '../db.js';
 import { enrichTaskRows, getTaskDependencies, staleWhereClause } from './trust-signals.js';
 
 function spawnNextOccurrence(db, task, now) {
@@ -438,7 +438,7 @@ export const handlers = {
     // FROM the projects table, whose backfill runs only at server startup. Mirror db-worker.
     if (args.project) db.prepare(`INSERT OR IGNORE INTO projects (name) VALUES (?)`).run(args.project);
     const status = args.status ?? 'active';
-    return { task_id: id, title: args.title, status, created_at: now };
+    return withTimestampZones({ task_id: id, title: args.title, status, created_at: now }, 'tasks');
   },
 
   update_task(args) {
@@ -538,7 +538,7 @@ export const handlers = {
     const now = nowIso();
     db.prepare('UPDATE tasks SET last_reviewed_at = ?, last_touched_human = ? WHERE id = ?')
       .run(now, now, args.task_id);
-    return { task_id: args.task_id, last_reviewed_at: now };
+    return withTimestampZones({ task_id: args.task_id, last_reviewed_at: now }, 'tasks');
   },
 
   get_stale_tasks(args) {

@@ -132,6 +132,27 @@ async function main() {
     }).then(async r => ({ res: r, data: await r.json().catch(() => ({})) }))
     if (!goodCreate.res.ok || !goodCreate.data.task?.id) throw new Error('valid task create failed')
 
+    // Timestamps must leave the API with an explicit offset. Stored columns are naive and mix zones
+    // by design (tasks local, agent_jobs UTC), so an unstamped value lets a caller compare across
+    // zones and be wrong by the box offset (docs/bug-heartbeat-timezone-mismatch.md). This asserts
+    // the db-worker chokepoints actually cover the live route, not just the unit-tested helper.
+    const OFFSET_STAMPED = /(Z|[+-]\d{2}:\d{2})$/
+    const createdTask = goodCreate.data.task
+    for (const column of ['created_at', 'updated_at']) {
+      if (!OFFSET_STAMPED.test(createdTask[column] ?? '')) {
+        throw new Error(`POST /tasks returned unstamped ${column}: ${createdTask[column]}`)
+      }
+    }
+    const fetched = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/${createdTask.id}`, { headers: authJson })
+      .then(async r => (await r.json().catch(() => ({}))).task)
+    if (!OFFSET_STAMPED.test(fetched?.created_at ?? '')) {
+      throw new Error(`GET /tasks/:id returned unstamped created_at: ${fetched?.created_at}`)
+    }
+    // A stamped local timestamp must still resolve to the wall-clock time it was written at.
+    if (Math.abs(new Date(fetched.created_at).getTime() - Date.now()) > 5 * 60_000) {
+      throw new Error(`created_at resolved to the wrong instant: ${fetched.created_at}`)
+    }
+
     // C26: GET a nonexistent task must be 404, not 200 { task:null }.
     const getMissing = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/does-not-exist`, { headers: authJson })
     if (getMissing.status !== 404) throw new Error(`GET missing task expected 404, got ${getMissing.status}`)

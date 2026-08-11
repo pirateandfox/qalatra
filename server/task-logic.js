@@ -73,9 +73,18 @@ export const utcNowIso = () => addMinutesFromNow(0)
 // Keyed by table, not column name, because `created_at` is UTC in agent_jobs (SQLite DEFAULT
 // datetime('now')) and local in heartbeats (nowIso()). A column-name-keyed map would be wrong for
 // one of them.
+// tasks are here because agent_jobs.task_id makes tasks-vs-jobs the most reachable cross-zone
+// comparison in the system: /tasks/:id/agent-jobs hands a caller task.created_at (local) and
+// job.created_at (UTC) at once. notes and attachments are child records of the same task that
+// already disagree with each other — notes defaults to datetime('now','localtime'), attachments to
+// datetime('now'). Date-only columns (due_date, start_date, event_time…) are deliberately absent:
+// this is an allowlist, and toOffsetIso ignores anything that is not a full naive timestamp anyway.
 export const TIMESTAMP_ZONES = {
   heartbeats: { last_run_at: 'utc', next_run_at: 'utc', created_at: 'local', updated_at: 'local' },
   agent_jobs: { created_at: 'utc', started_at: 'utc', completed_at: 'utc' },
+  tasks: { created_at: 'local', updated_at: 'local', last_reviewed_at: 'local', last_touched_human: 'local', last_touched_ai: 'local' },
+  notes: { created_at: 'local' },
+  attachments: { created_at: 'utc' },
 }
 
 const NAIVE_TIMESTAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/

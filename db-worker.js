@@ -384,23 +384,26 @@ function attachTrustSignals(tasks) {
     if (!blocks[row.relation_task_id]) blocks[row.relation_task_id] = []
     blocks[row.relation_task_id].push(dependencySummary(row))
   }
+  // Terminal chokepoint for task rows leaving this process (getTask, getBacklog, every
+  // attachSubtasks caller), so timestamps are stamped once here rather than at 50+ read sites.
+  // Internal reads that feed logic back into SQL never pass through here, which is the point.
   return tasks.map(task => {
     const blocked_by = blockedBy[task.id] ?? []
-    return {
+    return withTimestampZones({
       ...task,
       hard_deadline: task.hard_deadline === 1 || task.hard_deadline === true,
       ...reviewSignal(task),
       blocked: blocked_by.some(dep => !dep.completed),
       blocked_by,
       blocks: blocks[task.id] ?? [],
-    }
+    }, 'tasks')
   })
 }
 
 function attachSubtasks(tasks) {
   if (!tasks.length) return tasks
   const ids = tasks.map(t => `'${t.id.replace(/'/g, "''")}'`).join(',')
-  const subs = db.prepare(`SELECT * FROM tasks WHERE parent_id IN (${ids}) ORDER BY sort_order ASC NULLS LAST, created_at ASC`).all()
+  const subs = withTimestampZones(db.prepare(`SELECT * FROM tasks WHERE parent_id IN (${ids}) ORDER BY sort_order ASC NULLS LAST, created_at ASC`).all(), 'tasks')
   const byParent = {}
   for (const s of subs) { if (!byParent[s.parent_id]) byParent[s.parent_id] = []; byParent[s.parent_id].push(s) }
   const attCounts = db.prepare(`SELECT task_id, COUNT(*) as cnt FROM attachments WHERE task_id IN (${ids}) GROUP BY task_id`).all()
@@ -844,7 +847,7 @@ function createSubtask(parentId, title) {
 
 // ── Notes ─────────────────────────────────────────────────────────────────────
 
-function listNotes(taskId) { return db.prepare(`SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC`).all(taskId) }
+function listNotes(taskId) { return withTimestampZones(db.prepare(`SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC`).all(taskId), 'notes') }
 function addNote(taskId, body) {
   if (!body?.trim()) throw validationError('body required')
   const id = crypto.randomUUID()
@@ -1068,13 +1071,14 @@ function updateHabit(body) {
 
 // ── Attachments ───────────────────────────────────────────────────────────────
 
-function listAttachments(taskId) { return db.prepare('SELECT * FROM attachments WHERE task_id = ? ORDER BY created_at ASC').all(taskId) }
+function listAttachments(taskId) { return withTimestampZones(db.prepare('SELECT * FROM attachments WHERE task_id = ? ORDER BY created_at ASC').all(taskId), 'attachments') }
 function insertAttachment(data) {
   const { id, taskId, filename, mimeType, sizeBytes, bucket, key, url, localPath, encrypted } = data
   db.prepare(`INSERT INTO attachments (id, task_id, filename, mimetype, size_bytes, bucket, key, url, local_path, encrypted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, taskId, filename, mimeType, sizeBytes, bucket, key, url, localPath, encrypted ?? 0)
-  return db.prepare('SELECT * FROM attachments WHERE id = ?').get(id)
+  return withTimestampZones(db.prepare('SELECT * FROM attachments WHERE id = ?').get(id), 'attachments')
 }
-function getAttachment(id) { return db.prepare('SELECT * FROM attachments WHERE id = ?').get(id) ?? null }
+// getPendingAttachments below is deliberately unstamped: it feeds the upload worker, not a caller.
+function getAttachment(id) { return withTimestampZones(db.prepare('SELECT * FROM attachments WHERE id = ?').get(id), 'attachments') ?? null }
 function deleteAttachment(id) { db.prepare('DELETE FROM attachments WHERE id = ?').run(id); return { ok: true } }
 function getPendingAttachments() { return db.prepare(`SELECT * FROM attachments WHERE bucket IS NULL AND local_path IS NOT NULL`).all() }
 function updateAttachmentStorage(id, bucket, key, url, encrypted = 0) {

@@ -132,9 +132,43 @@ form must never be written back into SQL, where comparisons expect the naive for
 specific ordering this audit got wrong, and that `created_at` resolves differently for the two
 tables — so the map cannot drift back.
 
+### Extended to tasks, notes, attachments (2026-08-11)
+
+`tasks` was added the next day, because tasks-vs-`agent_jobs` turned out to be the *most* reachable
+cross-zone comparison in the system, not a latent one: `agent_jobs.task_id` relates them directly,
+and `/tasks/:id/agent-jobs` hands a caller `task.created_at` (local) and `job.created_at` (UTC) at
+the same time — the identical shape of the comparison that produced the bad audit finding, on the
+most-used entity in the product. `notes` (local, `datetime('now','localtime')`) and `attachments`
+(UTC, `datetime('now')`) came with it: they are child records of the same task that already
+disagreed with each other.
+
+Rather than touch 55 task read sites in `db-worker.js` and ~37 across `mcp/tools/`, stamping happens
+at the two terminal chokepoints every externally-returned task row already passes through —
+`attachTrustSignals` (db-worker) and `enrichTaskRows` (MCP) — plus `attachSubtasks` for nested
+subtask rows, which never reach either as top-level rows. Internal reads that feed logic back into
+SQL do not pass through these, which is exactly what makes the chokepoint safe.
+
+Two handlers hand-build their response instead of returning a row (`create_task`, `mark_reviewed`)
+and are stamped individually. That gap was found by probing the running MCP handlers, not by reading
+the code — worth repeating when extending the map to another table.
+
+### `tasks.created_at` has a UTC default and local writers
+
+`tasks.created_at` is declared `DEFAULT (datetime('now'))` — UTC — while all six insert sites supply
+local `nowIso()`. The default therefore never fires today, and there is no live inconsistency. It is
+**deliberately not** changed to `datetime('now','localtime')`: SQLite cannot alter a default in
+place, so existing databases would keep the UTC default while new installs got the local one, which
+is strictly worse than the current uniform-by-accident state.
+
+The risk is a *future* insert that omits the column, which would put UTC values into a local column
+— and no zone map can describe a column with two zones. `scripts/test-timestamps.mjs` guards this by
+asserting every `INSERT INTO tasks` names `created_at` (and that db-worker's one dynamic insert
+builds its column list from an object that sets it).
+
 ### What is still not covered
 
-`tasks` columns (`created_at`, `last_touched_human`, `last_reviewed_at`, all local) are **not** in
-`TIMESTAMP_ZONES`. They are not currently compared against UTC columns in any forensic path, but
-they are the same latent hazard. Add them to the map if a task timestamp is ever compared to an
-`agent_jobs` or heartbeat timestamp.
+`contexts.created_at` (UTC) and `daily_notes.updated_at` (UTC) are not in the map — nothing compares
+them against anything. `getPendingAttachments` is deliberately left unstamped because it feeds the
+upload worker rather than a caller. Add tables to `TIMESTAMP_ZONES` when a real comparison appears,
+not speculatively; the map is only trustworthy while every entry has been verified against the
+actual writer.

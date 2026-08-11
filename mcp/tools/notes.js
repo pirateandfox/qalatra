@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { openDb, today } from '../db.js';
+import { openDb, today, withTimestampZones } from '../db.js';
 import { searchDailyNotes } from '../../server/daily-note-search.js';
 import { autoAttachMentionedFiles } from '../../server/mentioned-files.js';
 
@@ -87,7 +87,7 @@ export const handlers = {
        WHERE n.task_id = ?
        ORDER BY n.created_at ASC`
     ).all(args.task_id);
-    return { task_id: args.task_id, count: notes.length, notes };
+    return { task_id: args.task_id, count: notes.length, notes: withTimestampZones(notes, 'notes') };
   },
 
   add_task_note(args) {

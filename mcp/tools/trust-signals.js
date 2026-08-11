@@ -1,3 +1,5 @@
+import { withTimestampZones } from '../db.js';
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_ACTIVE_REVIEW_DAYS = 14;
 const DEFAULT_BACKLOG_REVIEW_DAYS = 30;
@@ -89,16 +91,18 @@ export function enrichTaskRows(db, rows, { daysOverride } = {}) {
     blocks[row.relation_task_id].push(dependencySummary(row));
   }
 
+  // Mirror of attachTrustSignals in db-worker.js: the terminal chokepoint where task rows leave
+  // the MCP process, so timestamps are stamped once rather than at every tool's own query.
   return rows.map(row => {
     const blocked_by = blockedBy[row.id] ?? [];
-    return {
+    return withTimestampZones({
       ...row,
       hard_deadline: row.hard_deadline === 1 || row.hard_deadline === true,
       ...reviewSignal(row, daysOverride),
       blocked: blocked_by.some(dep => !dep.completed),
       blocked_by,
       blocks: blocks[row.id] ?? [],
-    };
+    }, 'tasks');
   });
 }
 
