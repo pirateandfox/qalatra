@@ -29,9 +29,18 @@ const START_MCP = process.env.QALATRA_START_MCP !== '0'
 const START_WORKERS = process.env.QALATRA_START_WORKERS !== '0'
 const BACKUP_ON_SHUTDOWN = process.env.QALATRA_BACKUP_ON_SHUTDOWN !== '0'
 const SERVER_STARTED_AT = new Date().toISOString()
+const MCP_RESTART_BASE_MS = Math.max(50, parseInt(process.env.QALATRA_MCP_RESTART_BASE_MS || '500', 10) || 500)
+const MCP_START_FAILURE_LIMIT = Math.max(1, parseInt(process.env.QALATRA_MCP_START_FAILURE_LIMIT || '5', 10) || 5)
 
 let mcpProcess = null
+let mcpRestartTimer = null
+let mcpReady = false
+let mcpStatus = START_MCP ? 'pending' : 'disabled'
+let mcpLastError = null
+let mcpRestartCount = 0
+let mcpConsecutiveStartFailures = 0
 let backupTimer = null
+let shuttingDown = false
 const eventClients = new Set()
 
 function crashLogPath() {
@@ -65,8 +74,34 @@ function publishEvent(event) {
   }
 }
 
+function mcpHealth() {
+  return {
+    configured: START_MCP,
+    started: !!mcpProcess && mcpProcess.exitCode === null,
+    ready: mcpReady,
+    status: mcpStatus,
+    pid: mcpProcess?.pid ?? null,
+    restart_count: mcpRestartCount,
+    consecutive_start_failures: mcpConsecutiveStartFailures,
+    last_error: mcpLastError,
+  }
+}
+
+function scheduleMcpRestart() {
+  if (shuttingDown || mcpRestartTimer) return
+  const exponent = Math.max(0, mcpConsecutiveStartFailures - 1)
+  const delay = Math.min(MCP_RESTART_BASE_MS * (2 ** exponent), 30_000)
+  mcpStatus = 'restarting'
+  mcpRestartCount += 1
+  console.error(`[server] restarting MCP in ${delay}ms (attempt ${mcpConsecutiveStartFailures + 1}/${MCP_START_FAILURE_LIMIT})`)
+  mcpRestartTimer = setTimeout(() => {
+    mcpRestartTimer = null
+    startMcpServer()
+  }, delay)
+}
+
 function startMcpServer() {
-  if (!START_MCP) return
+  if (!START_MCP || shuttingDown || mcpProcess || mcpRestartTimer) return
   const entry = path.join(ROOT, 'mcp', 'http-server-entry.cjs')
   const env = {
     ...process.env,
@@ -74,12 +109,106 @@ function startMcpServer() {
     TASKOS_SETTINGS_FILE: SETTINGS_FILE,
     QALATRA_MCP_HOST: process.env.QALATRA_MCP_HOST || '127.0.0.1',
   }
-  mcpProcess = spawn(process.execPath, [entry], { stdio: 'inherit', env })
-  mcpProcess.on('exit', (code, signal) => {
-    if (signal === 'SIGTERM') return
-    console.error(`[server] MCP exited code=${code} signal=${signal}; restarting in 2s`)
-    setTimeout(startMcpServer, 2000)
+  mcpReady = false
+  mcpStatus = 'starting'
+  mcpLastError = null
+
+  const child = spawn(process.execPath, [entry], {
+    stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+    env,
   })
+  mcpProcess = child
+  let becameReady = false
+  let reportedFailure = null
+
+  child.on('message', message => {
+    if (mcpProcess !== child || !message || typeof message !== 'object') return
+    if (message.type === 'qalatra:mcp-ready') {
+      becameReady = true
+      mcpReady = true
+      mcpStatus = 'ready'
+      mcpLastError = null
+      mcpConsecutiveStartFailures = 0
+      console.log(`[server] MCP child ${child.pid} confirmed listening on ${message.host}:${message.port}`)
+    } else if (message.type === 'qalatra:mcp-bind-error') {
+      reportedFailure = `${message.code || 'bind error'} on ${message.host}:${message.port}`
+      mcpLastError = reportedFailure
+      mcpStatus = 'failed'
+    }
+  })
+
+  child.on('error', err => {
+    reportedFailure = formatError(err)
+    mcpLastError = reportedFailure
+    mcpStatus = 'failed'
+  })
+
+  child.on('exit', (code, signal) => {
+    if (mcpProcess !== child) return
+    mcpProcess = null
+    mcpReady = false
+    if (shuttingDown) {
+      mcpStatus = 'stopped'
+      return
+    }
+
+    const reason = reportedFailure || `exit code=${code} signal=${signal}`
+    mcpLastError = reason
+    console.error(`[server] MCP child ${child.pid} exited before shutdown: ${reason}`)
+    if (!becameReady) mcpConsecutiveStartFailures += 1
+    else mcpConsecutiveStartFailures = 0
+
+    if (mcpConsecutiveStartFailures >= MCP_START_FAILURE_LIMIT) {
+      mcpStatus = 'failed'
+      logProcessProblem('MCP failed to become ready', `${reason}; giving up after ${mcpConsecutiveStartFailures} attempts`)
+      process.exit(1)
+    }
+    scheduleMcpRestart()
+  })
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true)
+  return new Promise(resolve => {
+    let settled = false
+    const finish = value => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      child.off('exit', onExit)
+      resolve(value)
+    }
+    const onExit = () => finish(true)
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    child.once('exit', onExit)
+  })
+}
+
+async function stopMcpServer() {
+  if (mcpRestartTimer) {
+    clearTimeout(mcpRestartTimer)
+    mcpRestartTimer = null
+  }
+  mcpReady = false
+  const child = mcpProcess
+  if (!child) {
+    mcpStatus = START_MCP ? 'stopped' : 'disabled'
+    return
+  }
+
+  mcpStatus = 'stopping'
+  try { child.kill('SIGTERM') } catch {}
+  let exited = await waitForChildExit(child, 2_000)
+  if (!exited && child.connected) {
+    try { child.disconnect() } catch {}
+    exited = await waitForChildExit(child, 500)
+  }
+  if (!exited) {
+    try { child.kill('SIGKILL') } catch {}
+    await waitForChildExit(child, 500)
+  }
+  if (mcpProcess === child) mcpProcess = null
+  mcpStatus = START_MCP ? 'stopped' : 'disabled'
 }
 
 async function main() {
@@ -107,8 +236,6 @@ async function main() {
   // process against the same data dir fails EADDRINUSE, never enters the callback, and therefore
   // never runs resetStuckJobs / job processing / heartbeats against jobs the live instance owns
   // (bug C6). Do not move worker startup back before listen.
-  startMcpServer()
-
   const server = http.createServer(async (req, res) => {
     applyCors(res)
     if (req.method === 'OPTIONS') {
@@ -120,11 +247,13 @@ async function main() {
     const url = new URL(req.url, `http://${req.headers.host || `${API_HOST}:${API_PORT}`}`)
 
     if (url.pathname === '/health') {
-      sendJson(res, 200, {
-        ok: true,
+      const mcp = mcpHealth()
+      const ok = !START_MCP || mcp.ready
+      sendJson(res, ok ? 200 : 503, {
+        ok,
         started_at: SERVER_STARTED_AT,
         api: { host: API_HOST, port: API_PORT },
-        mcp: { started: !!mcpProcess },
+        mcp,
         workers: { started: START_WORKERS },
       })
       return
@@ -405,6 +534,10 @@ async function main() {
   server.listen(API_PORT, API_HOST, () => {
     console.log(`[server] API listening on http://${API_HOST}:${API_PORT}`)
     console.log(`[server] data dir: ${DATA_DIR}`)
+    // The API port is the single-instance lock. Only the generation that owns it may launch MCP;
+    // otherwise a losing API process can leave behind a competing MCP child before it discovers
+    // EADDRINUSE on 3456.
+    startMcpServer()
     // Start background workers only now that we hold the port (single-instance lock — see note
     // above): a second process fails EADDRINUSE, never enters this callback, and so never runs
     // resetStuckJobs / job processing / heartbeats against the live instance's jobs (bug C6).
@@ -416,22 +549,28 @@ async function main() {
     }
   })
 
-  const shutdown = async () => {
-    if (backupTimer) clearInterval(backupTimer)
-    if (START_WORKERS && BACKUP_ON_SHUTDOWN) {
-      await Promise.race([
-        runBackup(ctx).catch(() => {}),
-        new Promise(resolve => setTimeout(resolve, 10_000)),
-      ])
-    }
-    if (mcpProcess) mcpProcess.kill('SIGTERM')
-    terminalManager.close()
-    server.close()
-    await closeDbWorker()
-    process.exit(0)
+  let shutdownPromise = null
+  const shutdown = () => {
+    if (shutdownPromise) return shutdownPromise
+    shuttingDown = true
+    shutdownPromise = (async () => {
+      if (backupTimer) clearInterval(backupTimer)
+      await stopMcpServer()
+      if (START_WORKERS && BACKUP_ON_SHUTDOWN) {
+        await Promise.race([
+          runBackup(ctx).catch(() => {}),
+          new Promise(resolve => setTimeout(resolve, 10_000)),
+        ])
+      }
+      terminalManager.close()
+      server.close()
+      await closeDbWorker()
+      process.exit(0)
+    })()
+    return shutdownPromise
   }
-  process.on('SIGTERM', shutdown)
-  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', () => { void shutdown() })
+  process.on('SIGINT', () => { void shutdown() })
 }
 
 main().catch(err => {

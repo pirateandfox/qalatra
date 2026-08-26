@@ -118,6 +118,28 @@ systemctl --user status qalatra-updater.timer
 journalctl --user -u qalatra-updater.service -n 40 --no-pager
 ```
 
+### One-time MCP orphan cleanup after upgrading from 1.9.35 or earlier
+
+Qalatra 1.9.36 tethers the MCP child to its owning server generation. Older releases can leave
+`mcp/http-server-entry.cjs` processes alive after the parent is killed, including one stale process
+that continues holding port 3457. The new lifecycle prevents future orphans, but it cannot signal
+children that were created before the IPC tether existed.
+
+After the checkout has updated to 1.9.36, run the remediation once on each affected box:
+
+```bash
+cd /path/to/qalatra
+bash scripts/remediate-orphaned-mcp.sh
+```
+
+The script deliberately stops `qalatra-server.service` first, terminates only same-user processes
+whose argument exactly matches that checkout's `mcp/http-server-entry.cjs`, confirms the MCP port is
+free, restarts Qalatra, waits for generation-backed MCP readiness, and verifies that the sole MCP
+PID is a direct child of systemd's current `MainPID`. It leaves tmux and agent processes alone.
+
+If Qalatra uses non-default ports, the script reads them from the systemd unit. Set
+`QALATRA_SERVICE_NAME` only when the user service has a non-default name.
+
 ### Manual update / bootstrap the auto-updater on older installs
 
 Run as the Qalatra service user (not `sudo`):

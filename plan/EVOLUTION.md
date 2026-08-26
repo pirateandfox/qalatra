@@ -1,5 +1,37 @@
 # Qalatra — Evolution Notes
 
+## v1.9.36 — MCP child generation ownership and orphan remediation (2026-08-26)
+
+- Tethered the parent-managed MCP process to Qalatra Server with an IPC channel. A parent death now
+  closes that channel and forces the MCP child to exit even after OOM `SIGKILL`, preventing a stale
+  generation from retaining port 3457.
+- Moved MCP startup behind the API port's single-instance lock. A duplicate API generation that
+  loses port 3456 can no longer spawn an unauthoritative MCP child before detecting the conflict.
+- Added a child-to-parent listening acknowledgement. `/health` is now non-2xx until the exact MCP
+  child owned by the current server generation confirms its bind; it reports PID, readiness,
+  restart counts, consecutive startup failures, and the last error.
+- Parent-managed bind failures now exit immediately and are retried with bounded exponential
+  backoff. Five consecutive failures fail the server process visibly instead of preserving a
+  silent stale endpoint. Standalone MCP retains a bounded five-attempt compatibility window.
+- Graceful shutdown cancels restart timers, waits for the MCP child, disconnects it if needed, and
+  finally uses `SIGKILL` as a bounded backstop. Regression coverage exercises parent `SIGKILL`,
+  graceful shutdown, MCP port squatting, red health, and the API-before-MCP ownership lock.
+- Added `scripts/remediate-orphaned-mcp.sh` for one-time Linux fleet cleanup after upgrading. It
+  stops the service, targets only the checkout's exact MCP entry path, frees the port, restarts,
+  and verifies the sole ready MCP PID is parented by the current Qalatra Server.
+
+## Fleet dispatch and metrics health checks (2026-08-26)
+
+- Closed the pipeline's `reachable != can act` gap. Claude Bridge now exposes a non-destructive
+  `claude_session_create_preflight` that uses the real create-path navigation to reach the blank
+  Code composer and verifies the repository control without creating a session. The Shi code
+  orchestrator requires that proof after its sidebar read/warm check and aborts with a distinct
+  create-path alert if it fails; `claude_sessions_list` is explicitly logged as read-path only.
+- Removed the fleet metrics reporter's false-success path in both qalatra.com provisioning
+  generators. The reporter now logs every HTTP status and exits nonzero on transport or non-2xx
+  responses, so systemd records failures. The live Shi reporter was remediated in place and
+  verified with an accepted 204 plus a rejected unauthenticated canary that returned curl 22.
+
 ## v1.9.35 — MCP session recovery after restart (2026-08-10)
 
 - An unknown MCP session id now returns `404` on POST, GET, and DELETE instead of `400`, which is

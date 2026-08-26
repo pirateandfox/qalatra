@@ -22,6 +22,14 @@ import { toolDefs as capabilityDefs,  handlers as capabilityHandlers }  from './
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_FILE = process.env.TASKOS_SETTINGS_FILE
   ?? path.join(__dirname, '../db/settings.json');
+const MANAGED_BY_PARENT = typeof process.send === 'function' && process.connected;
+const BIND_RETRY_LIMIT = Math.max(1, parseInt(process.env.QALATRA_MCP_BIND_RETRY_LIMIT || '5', 10) || 5);
+const BIND_RETRY_DELAY_MS = Math.max(50, parseInt(process.env.QALATRA_MCP_BIND_RETRY_DELAY_MS || '30000', 10) || 30_000);
+
+function notifyParent(message) {
+  if (!MANAGED_BY_PARENT || !process.connected) return;
+  try { process.send(message); } catch {}
+}
 
 function loadSettings() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch { return {}; }
@@ -265,21 +273,39 @@ httpServer.headersTimeout   = REQUEST_TIMEOUT_MS + 1_000;
 // the MCP transport holds a connection open (SSE) but never delivers a result.
 httpServer.setTimeout(REQUEST_TIMEOUT_MS * 2);
 
-httpServer.listen(PORT, HOST, () => {
+let bindFailures = 0;
+let bindRetryTimer = null;
+
+function listen() {
+  httpServer.listen(PORT, HOST);
+}
+
+httpServer.on('listening', () => {
+  bindFailures = 0;
   console.log(`[mcp-http] listening on http://${HOST}:${PORT}`);
+  notifyParent({ type: 'qalatra:mcp-ready', pid: process.pid, host: HOST, port: PORT });
 });
 
 httpServer.on('error', err => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`[mcp-http] ${HOST}:${PORT} in use, retrying in 30s…`);
-    setTimeout(() => httpServer.listen(PORT, HOST), 30_000);
+    bindFailures += 1;
+    notifyParent({ type: 'qalatra:mcp-bind-error', code: err.code, host: HOST, port: PORT, attempt: bindFailures });
+    if (MANAGED_BY_PARENT || bindFailures >= BIND_RETRY_LIMIT) {
+      console.error(`[mcp-http] ${HOST}:${PORT} still in use; exiting after ${bindFailures} failed bind attempt(s)`);
+      process.exit(98);
+    }
+    console.error(`[mcp-http] ${HOST}:${PORT} in use (attempt ${bindFailures}/${BIND_RETRY_LIMIT}); retrying in ${BIND_RETRY_DELAY_MS}ms…`);
+    bindRetryTimer = setTimeout(listen, BIND_RETRY_DELAY_MS);
   } else {
     console.error('[mcp-http] server error:', err);
     process.exit(1);
   }
 });
 
+listen();
+
 process.on('SIGTERM', async () => {
+  if (bindRetryTimer) clearTimeout(bindRetryTimer);
   for (const sid of Object.keys(transports)) {
     try { await transports[sid].close(); } catch {}
     delete transports[sid];
