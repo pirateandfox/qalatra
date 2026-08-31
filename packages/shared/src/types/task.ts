@@ -39,7 +39,7 @@ export interface Task {
   agent_resume: 1 | 0
   agent_autorun: 1 | 0
   agent_autorun_time: string | null
-  agent_job_status?: 'queued' | 'running' | 'done' | 'failed' | 'orphaned' | null
+  agent_job_status?: 'queued' | 'running' | 'done' | 'failed' | 'orphaned' | 'timed_out' | null
   inbox: 0 | 1
   notes: string | null
 }

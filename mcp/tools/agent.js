@@ -15,7 +15,7 @@ export const toolDefs = [
   },
   {
     name: 'list_agent_jobs',
-    description: "List recent agent jobs, optionally filtered by task_id. status is one of queued|running|done|failed|orphaned. 'orphaned' means the app instance running the job stopped mid-run (restart/crash) — an infrastructure event, NOT an agent failure; branch on it separately from 'failed'. For orphaned jobs, terminated_by='app_restart' and terminated_boundary holds the started_at of the instance that killed it (compare a late reply's timestamp against it to tell whether work landed). Orphaned jobs are never auto-requeued — the consumer must decide.",
+    description: "List recent agent jobs, optionally filtered by task_id. status is one of queued|running|done|failed|orphaned|timed_out. Two statuses are NOT agent failures and must be branched on separately from 'failed': 'orphaned' means the app instance running the job stopped mid-run (restart/crash) — terminated_by='app_restart', and terminated_boundary holds the started_at of the instance that killed it (compare a late reply's timestamp against it to tell whether work landed); 'timed_out' means Qalatra's own timeout cut off an agent that was still working — terminated_by='timeout', and because the session id survives the kill the run is resumable, so sending a follow-up message on the task continues it rather than starting over. Neither is ever auto-requeued — the consumer decides. The runtime field records which CLI ran the job (claude|codex|raw).",
     inputSchema: {
       type: 'object',
       properties: {
@@ -26,7 +26,7 @@ export const toolDefs = [
   },
   {
     name: 'get_agent_job',
-    description: "Get the status and result of a specific agent job. status is one of queued|running|done|failed|orphaned; 'orphaned' (terminated_by='app_restart', terminated_boundary=killing instance's started_at) is an app-restart interruption, not an agent failure.",
+    description: "Get the status and result of a specific agent job. status is one of queued|running|done|failed|orphaned|timed_out. Neither 'orphaned' (terminated_by='app_restart', terminated_boundary=killing instance's started_at, an app-restart interruption) nor 'timed_out' (terminated_by='timeout', Qalatra's own limit cutting off a working agent — resumable, since the session id survives) is an agent failure. The runtime field records which CLI ran the job (claude|codex|raw).",
     inputSchema: {
       type: 'object',
       properties: {
