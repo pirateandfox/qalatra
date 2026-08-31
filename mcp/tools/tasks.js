@@ -230,13 +230,13 @@ export const toolDefs = [
   },
   {
     name: 'get_tasks_by_agent',
-    description: 'Get tasks assigned to a specific agent, each annotated with its latest job status (job_status: queued | running | done | failed | null). Matches against assigned_agent (human name) OR agent_path (folder path). Pass a name like "Code Planner" or a path fragment like "muzebook/agents/plan". Filter by job_status to find currently running jobs or only unstarted work.',
+    description: 'Get tasks assigned to a specific agent, each annotated with its latest job status (job_status: queued | running | done | failed | orphaned | timed_out | null). Neither orphaned (app restart mid-run) nor timed_out (Qalatra\'s own timeout cut off a working agent; resumable, since the session id survives) is an agent failure — branch on them separately from failed. Matches against assigned_agent (human name) OR agent_path (folder path). Pass a name like "Code Planner" or a path fragment like "muzebook/agents/plan". Filter by job_status to find currently running jobs or only unstarted work.',
     inputSchema: {
       type: 'object',
       properties: {
         agent:      { type: 'string', description: 'Agent name or path fragment (partial match against assigned_agent OR agent_path, case-insensitive)' },
         status:     { type: 'string', description: 'Task status: active | snoozed | backlog | archived | done. Defaults to active.' },
-        job_status: { type: 'string', description: 'Filter by latest agent job status: queued | running | done | failed | none (no job ever queued)' },
+        job_status: { type: 'string', description: 'Filter by latest agent job status: queued | running | done | failed | orphaned | timed_out | none (no job ever queued)' },
         context:    { type: 'string', description: 'Optional context filter' },
         limit:      { type: 'integer', description: 'Default 50' },
       },
