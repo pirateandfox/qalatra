@@ -256,6 +256,9 @@ function migrate() {
   //                          can tell "died before doing anything" from "died after work landed"
   //                          by comparing against when a late cloud reply arrived.
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN terminated_by TEXT')
+  // Which CLI adapter actually ran the job (claude | codex | raw). Recorded at claim time rather
+  // than read from agent.config on display, so history stays accurate after a config is retargeted.
+  tryAlter('ALTER TABLE agent_jobs ADD COLUMN runtime TEXT')
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN terminated_boundary TEXT')
   // One-time backfill: rows marked `failed` that carry the old orphan string were the same
   // infrastructure event under a wrong label. Reclassify so failure counts and the Pipeline
@@ -1128,7 +1131,7 @@ function getQueuedJobs(limit) {
     const task = job.task_id ? db.prepare('SELECT agent_resume FROM tasks WHERE id = ?').get(job.task_id) : null
     const canResume = task?.agent_resume !== 0
     const prev = canResume && job.task_id
-      ? db.prepare(`SELECT session_id FROM agent_jobs WHERE task_id = ? AND session_id IS NOT NULL AND status = 'done' ORDER BY completed_at DESC LIMIT 1`).get(job.task_id)
+      ? db.prepare(`SELECT session_id FROM agent_jobs WHERE task_id = ? AND session_id IS NOT NULL AND status IN ('done', 'timed_out') ORDER BY completed_at DESC LIMIT 1`).get(job.task_id)
       : null
     return { ...job, prevSessionId: prev?.session_id ?? null }
   })
@@ -1139,8 +1142,13 @@ function startAgentJob(id) {
   const info = db.prepare(`UPDATE agent_jobs SET status = 'running', started_at = datetime('now') WHERE id = ? AND status = 'queued'`).run(id)
   return { ok: info.changes === 1, claimed: info.changes === 1 }
 }
-function finishAgentJob(id, status, result, sessionId) {
-  db.prepare(`UPDATE agent_jobs SET status = ?, result = ?, session_id = ?, completed_at = datetime('now') WHERE id = ?`).run(status, result, sessionId, id)
+function setAgentJobRuntime(id, runtime) {
+  db.prepare('UPDATE agent_jobs SET runtime = ? WHERE id = ?').run(runtime, id)
+  return { ok: true }
+}
+function finishAgentJob(id, status, result, sessionId, terminatedBy = null) {
+  db.prepare(`UPDATE agent_jobs SET status = ?, result = ?, session_id = ?, terminated_by = ?, completed_at = datetime('now') WHERE id = ?`)
+    .run(status, result, sessionId, terminatedBy, id)
   return { ok: true }
 }
 function insertAgentNote(id, taskId, result, jobId) {
@@ -1339,7 +1347,7 @@ const METHODS = {
   listAttachments, insertAttachment, getAttachment, deleteAttachment,
   getPendingAttachments, updateAttachmentStorage,
   listAgentJobs, getAgentJob, createAgentJob,
-  getQueuedJobs, startAgentJob, finishAgentJob, insertAgentNote,
+  getQueuedJobs, startAgentJob, setAgentJobRuntime, finishAgentJob, insertAgentNote,
   resetStuckJobs, getAutorunTasks, insertAutorunJob,
   listHeartbeats, createHeartbeat, updateHeartbeat, deleteHeartbeat, toggleHeartbeat,
   getDueHeartbeats, markHeartbeatRun, createHeartbeatJob, listHeartbeatJobs,

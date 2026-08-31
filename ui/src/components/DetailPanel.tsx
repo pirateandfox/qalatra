@@ -9,6 +9,26 @@ import { useContexts } from '../lib/ContextsProvider'
 import './DetailPanel.css'
 
 const TIME_ESTIMATE_PRESETS = [15, 30, 60, 90, 120, 240]
+
+// The terminal resume command is CLI-specific. Jobs recorded before the runtime field, and any
+// non-coding `raw` runtime, fall back to claude — which is what they were implicitly running.
+function resumeCommand(job: AgentJob, agentPath?: string | null): string {
+  const cmd = job.runtime === 'codex'
+    ? `codex resume ${job.session_id}`
+    : `claude --resume ${job.session_id}`
+  return agentPath ? `cd "${agentPath}" && ${cmd}\r` : `${cmd}\r`
+}
+
+const RUNTIME_LABELS: Record<string, string> = { claude: 'Claude', codex: 'Codex', raw: 'raw' }
+
+function RuntimeBadge({ job }: { job: AgentJob }) {
+  if (!job.runtime) return null
+  return (
+    <span className={`detail-job-runtime detail-job-runtime--${job.runtime}`} title={`Ran on ${RUNTIME_LABELS[job.runtime] ?? job.runtime}`}>
+      {RUNTIME_LABELS[job.runtime] ?? job.runtime}
+    </span>
+  )
+}
 function fmtMinutes(mins: number): string {
   if (mins < 60) return `${mins}m`
   const h = Math.floor(mins / 60)
@@ -624,9 +644,10 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, onSel
             {latestJob && latestJob.status === 'done' && latestJob.session_id && (
               <div className="detail-agent-job">
                 <span className="detail-job-status detail-job-status--done">✓ Agent done</span>
+                <RuntimeBadge job={latestJob} />
                 <button
                   className="detail-resume-btn"
-                  onClick={() => onRunInTerminal?.(task.agent_path ? `cd "${task.agent_path}" && claude --resume ${latestJob.session_id}\r` : `claude --resume ${latestJob.session_id}\r`)}
+                  onClick={() => onRunInTerminal?.(resumeCommand(latestJob, task.agent_path))}
                   title="Resume this session in the terminal"
                 >Resume session</button>
               </div>
@@ -634,11 +655,28 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, onSel
             {latestJob && latestJob.status === 'failed' && (
               <div className="detail-agent-job detail-agent-job--failed">
                 <span className="detail-job-status detail-job-status--failed">✕ Agent failed</span>
+                <RuntimeBadge job={latestJob} />
                 {latestJob.session_id && (
                   <button
                     className="detail-resume-btn"
-                    onClick={() => onRunInTerminal?.(task.agent_path ? `cd "${task.agent_path}" && claude --resume ${latestJob.session_id}\r` : `claude --resume ${latestJob.session_id}\r`)}
+                    onClick={() => onRunInTerminal?.(resumeCommand(latestJob, task.agent_path))}
                     title="Resume this session in the terminal"
+                  >Resume session</button>
+                )}
+                {latestJob.result && (
+                  <pre className="detail-agent-error">{latestJob.result}</pre>
+                )}
+              </div>
+            )}
+            {latestJob && latestJob.status === 'timed_out' && (
+              <div className="detail-agent-job detail-agent-job--timed-out">
+                <span className="detail-job-status detail-job-status--timed-out">⧗ Timed out</span>
+                <RuntimeBadge job={latestJob} />
+                {latestJob.session_id && (
+                  <button
+                    className="detail-resume-btn"
+                    onClick={() => onRunInTerminal?.(resumeCommand(latestJob, task.agent_path))}
+                    title="Resume this session in the terminal — it was cut off by Qalatra's timeout, not by an agent failure"
                   >Resume session</button>
                 )}
                 {latestJob.result && (
@@ -649,10 +687,11 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, onSel
             {latestJob && latestJob.status === 'orphaned' && (
               <div className="detail-agent-job detail-agent-job--orphaned">
                 <span className="detail-job-status detail-job-status--orphaned">⟳ Interrupted by app restart</span>
+                <RuntimeBadge job={latestJob} />
                 {latestJob.session_id && (
                   <button
                     className="detail-resume-btn"
-                    onClick={() => onRunInTerminal?.(task.agent_path ? `cd "${task.agent_path}" && claude --resume ${latestJob.session_id}\r` : `claude --resume ${latestJob.session_id}\r`)}
+                    onClick={() => onRunInTerminal?.(resumeCommand(latestJob, task.agent_path))}
                     title="Resume this session in the terminal — partial work may already have landed"
                   >Resume session</button>
                 )}

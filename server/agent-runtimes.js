@@ -1,53 +1,145 @@
 /**
  * Agent runtime adapters.
  *
- * Qalatra spawns CLI coding agents in "prompt mode": it owns the argv and parses the agent's
- * structured output to recover the result text plus a resumable session id. Both of those are
- * CLI-specific, so each supported runtime supplies them here and the rest of the job pipeline
- * (env building, spawn, timeout, output rules, job lifecycle) stays provider-neutral.
+ * Qalatra spawns CLI coding agents in "prompt mode": it owns the argv and reads the agent's
+ * structured output to recover the result text plus a resumable session id. Both are CLI-specific,
+ * so each supported runtime supplies them here and the rest of the job pipeline (env building,
+ * spawn, timeouts, output rules, job lifecycle) stays provider-neutral.
  *
  * Template-mode commands — those containing {spec_file}, {description}, or {title} — bypass this
  * entirely: Qalatra runs them verbatim and never injects flags.
  *
  * Select one with `"runtime": "claude" | "codex" | "raw"` in agent.config. Absent runtime means
  * `claude`, which is what every pre-existing config was implicitly getting.
+ *
+ * Output is consumed incrementally rather than buffered and parsed at exit. That is what lets a
+ * killed job (timeout, idle kill) still report a session id and whatever the agent had said so far,
+ * and it keeps a long, chatty run from accumulating unbounded stdout in the worker process.
  */
 
 export const DEFAULT_RUNTIME = 'claude'
 
+/** Raw stdout kept for diagnostics and as a last-resort result when nothing parsed. */
+const TAIL_LIMIT = 64 * 1024
+/** A single "line" larger than this can't be a useful event; drop it instead of growing forever. */
+const MAX_PENDING_LINE = 8 * 1024 * 1024
+/** Cap on whole-output buffering for runtimes whose result *is* their stdout. */
+const MAX_BUFFERED_OUTPUT = 5 * 1024 * 1024
+
 /**
- * Parse newline-delimited JSON, skipping anything that isn't a JSON object. Codex interleaves
- * human-readable notices ("Reading additional input from stdin...") with its JSONL events, and a
- * login shell can add its own noise, so non-JSON lines are expected rather than exceptional.
+ * Streams newline-delimited JSON, tolerating non-JSON lines. Codex interleaves human-readable
+ * notices ("Reading additional input from stdin...") with its events and a login shell can add its
+ * own, so non-JSON lines are expected rather than exceptional. Lines are assembled across chunk
+ * boundaries — a JSON object routinely splits across two 'data' events.
  */
-function jsonLines(stdout) {
-  const events = []
-  for (const line of String(stdout ?? '').split('\n')) {
+function createNdjsonConsumer({ onEvent, finalize }) {
+  let pending = ''
+  let tail = ''
+  let eventCount = 0
+
+  const handleLine = line => {
     const trimmed = line.trim()
-    if (!trimmed.startsWith('{')) continue
-    try { events.push(JSON.parse(trimmed)) } catch {}
+    if (!trimmed.startsWith('{')) return
+    let event
+    try { event = JSON.parse(trimmed) } catch { return }
+    eventCount++
+    try { onEvent(event) } catch {}
   }
-  return events
+
+  return {
+    push(chunk) {
+      const text = String(chunk)
+      tail = (tail + text).slice(-TAIL_LIMIT)
+      const parts = (pending + text).split('\n')
+      pending = parts.pop() ?? ''       // trailing element is the incomplete line
+      for (const line of parts) handleLine(line)
+      if (pending.length > MAX_PENDING_LINE) pending = ''
+    },
+    finish() {
+      if (pending) { handleLine(pending); pending = '' }
+      return finalize({ tail, eventCount })
+    },
+  }
 }
 
+/** Accumulates whole output (bounded) and parses once at exit. */
+function createBufferedConsumer(parse) {
+  let text = ''
+  let truncated = false
+  return {
+    push(chunk) {
+      if (truncated) return
+      text += String(chunk)
+      if (text.length > MAX_BUFFERED_OUTPUT) {
+        text = text.slice(0, MAX_BUFFERED_OUTPUT) + '\n\n[output truncated by Qalatra at 5 MB]'
+        truncated = true
+      }
+    },
+    finish() { return parse(text) },
+  }
+}
+
+// ── Claude Code ───────────────────────────────────────────────────────────────
+
+/**
+ * Streaming is the default. `--output-format json` only emits at exit, so killing a job discards the
+ * session id along with it and the work becomes unresumable; every stream-json event carries
+ * `session_id`, so even a job killed seconds in stays resumable. Set `"stream": false` in
+ * agent.config to fall back to the single-blob form without a code change.
+ */
 const claude = {
   label: 'Claude Code',
-  buildArgs({ baseArgs, prompt, resumeMessage, resumeId }) {
+
+  buildArgs({ baseArgs, prompt, resumeMessage, resumeId, stream = true }) {
+    const format = stream ? ['--output-format', 'stream-json', '--verbose'] : ['--output-format', 'json']
     return resumeId
-      ? [...baseArgs, '--resume', resumeId, '-p', resumeMessage, '--output-format', 'json']
-      : [...baseArgs, '-p', prompt, '--output-format', 'json']
+      ? [...baseArgs, '--resume', resumeId, '-p', resumeMessage, ...format]
+      : [...baseArgs, '-p', prompt, ...format]
   },
-  parseOutput(stdout) {
-    let result = String(stdout ?? '').trim()
+
+  createConsumer({ stream = true } = {}) {
+    if (!stream) {
+      return createBufferedConsumer(stdout => {
+        let result = String(stdout ?? '').trim()
+        let sessionId = null
+        try {
+          const parsed = JSON.parse(stdout)
+          if (parsed.result != null) result = String(parsed.result)
+          sessionId = parsed.session_id ?? null
+        } catch {}
+        return { result, sessionId }
+      })
+    }
+
     let sessionId = null
-    try {
-      const parsed = JSON.parse(stdout)
-      if (parsed.result != null) result = String(parsed.result)
-      sessionId = parsed.session_id ?? null
-    } catch {}
-    return { result, sessionId }
+    let resultText = null
+    const assistantText = []
+
+    return createNdjsonConsumer({
+      onEvent(event) {
+        // Present on every event including the first, so this lands within moments of launch.
+        if (!sessionId && event.session_id) sessionId = String(event.session_id)
+        if (event.type === 'assistant') {
+          for (const block of event.message?.content ?? []) {
+            if (block?.type === 'text' && block.text) assistantText.push(String(block.text))
+          }
+        }
+        if (event.type === 'result' && event.result != null) resultText = String(event.result)
+      },
+      finalize({ tail, eventCount }) {
+        // No result event means the run was cut short; the assistant text collected so far is the
+        // best available answer, and beats reporting nothing at all. Falling back to the raw tail is
+        // only useful when nothing parsed — once events flowed, the tail is JSONL noise, and the
+        // caller's stderr/timeout notice carries the real explanation.
+        const fallback = eventCount ? '' : tail.trim()
+        const result = resultText ?? (assistantText.length ? assistantText.join('\n') : fallback)
+        return { result, sessionId }
+      },
+    })
   },
 }
+
+// ── Codex CLI ─────────────────────────────────────────────────────────────────
 
 /**
  * `codex exec resume` accepts a strict subset of `codex exec`'s options — no --sandbox, -C/--cd,
@@ -92,6 +184,7 @@ function filterCodexResumeArgs(baseArgs) {
 
 const codex = {
   label: 'Codex CLI',
+
   buildArgs({ baseArgs, prompt, resumeMessage, resumeId, onWarn }) {
     // `codex exec` is the non-interactive entry point. Drop a literal `exec` the config already
     // supplied so `"command": "codex exec --foo"` doesn't spawn `codex exec exec --foo`.
@@ -105,27 +198,38 @@ const codex = {
     }
     return ['exec', 'resume', ...kept, '--json', resumeId, resumeMessage]
   },
-  parseOutput(stdout) {
+
+  // codex --json is JSONL only; there is no single-blob mode, so codex always streams.
+  createConsumer() {
     let sessionId = null
-    let result = null
-    for (const event of jsonLines(stdout)) {
-      // Emitted first, before any model work — so this survives even a partial run.
-      if (event.type === 'thread.started' && event.thread_id) sessionId = event.thread_id
-      // Last agent_message of the run is the final response for the turn.
-      if (event.type === 'item.completed' && event.item?.type === 'agent_message' && event.item.text != null) {
-        result = String(event.item.text)
-      }
-    }
-    return { result: result ?? String(stdout ?? '').trim(), sessionId }
+    let resultText = null
+
+    return createNdjsonConsumer({
+      onEvent(event) {
+        // Emitted before any model work, so it survives a run killed early.
+        if (event.type === 'thread.started' && event.thread_id) sessionId = String(event.thread_id)
+        // Last agent_message of the run is the final response for the turn.
+        if (event.type === 'item.completed' && event.item?.type === 'agent_message' && event.item.text != null) {
+          resultText = String(event.item.text)
+        }
+      },
+      finalize({ tail, eventCount }) {
+        return { result: resultText ?? (eventCount ? '' : tail.trim()), sessionId }
+      },
+    })
   },
 }
+
+// ── Raw ───────────────────────────────────────────────────────────────────────
 
 const raw = {
   label: 'raw command',
   // Runs the configured command untouched and treats stdout as the result. For wrapper scripts and
   // dispatch commands that aren't a coding CLI and have no session to resume.
   buildArgs({ baseArgs }) { return [...baseArgs] },
-  parseOutput(stdout) { return { result: String(stdout ?? '').trim(), sessionId: null } },
+  createConsumer() {
+    return createBufferedConsumer(stdout => ({ result: String(stdout ?? '').trim(), sessionId: null }))
+  },
 }
 
 const RUNTIMES = { claude, codex, raw }

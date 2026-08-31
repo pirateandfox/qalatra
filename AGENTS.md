@@ -192,24 +192,53 @@ with `"runtime"` in `agent.config`:
 
 | runtime | spawns | resume | notes |
 |---|---|---|---|
-| `claude` (default) | `claude <flags> -p <prompt> --output-format json` | `--resume <session_id>` | What every config got implicitly before the field existed. |
+| `claude` (default) | `claude <flags> -p <prompt> --output-format stream-json --verbose` | `--resume <session_id>` | Every event carries `session_id`. |
 | `codex` | `codex exec <flags> --json <prompt>` | `codex exec resume <id> <prompt>` | `--json` is JSONL; session id arrives in the first `thread.started` event. |
 | `raw` | the command untouched | none | Explicit opt-in to template-mode semantics in a non-placeholder command. |
 
 Omitting `runtime` means `claude`, so existing configs are unaffected. An unknown value logs a
 warning and falls back to `claude`.
 
-**Adding a runtime:** implement `buildArgs({ baseArgs, prompt, resumeMessage, resumeId, onWarn })`
-and `parseOutput(stdout) -> { result, sessionId }`, then register it in `RUNTIMES`. Everything else
+### Streaming and why it matters
+
+Output is consumed **incrementally**, not buffered and parsed at exit. That is what makes a killed
+job recoverable: `--output-format json` emits only at exit, so a SIGKILLed agent took its session id
+to the grave and the work could not be continued. Under stream-json the session id lands within
+moments of launch, so a timed-out job stays resumable. Verified end-to-end — a job SIGKILLed 9s in
+resumed cleanly and the agent still knew its original task.
+
+Set `"stream": false` in agent.config to fall back to the single-blob form without a code change.
+Claude also supports `--include-partial-messages` for token-level events; not enabled, since whole
+assistant messages are enough to recover partial work and cost far fewer events.
+
+Streaming also bounds memory. Consumers keep only a session id, the final result, and a 64 KB tail
+instead of accumulating every byte of a 60-minute run; stderr is capped at 256 KB, and whole-output
+buffering (`raw`, `stream: false`) at 5 MB.
+
+### Timeouts
+
+- `timeout_minutes` — wall-clock, default **60**. A hung job holds one of only
+  `MAX_CONCURRENT_JOBS` (3) slots for the full window, so raise it deliberately.
+- `idle_timeout_minutes` — **opt-in**, off by default. Kills the job after N minutes with no output
+  at all. A wall clock can't tell a productive 50-minute run from one wedged after 90 seconds, but
+  streamed output can. Off by default because one long tool call (a full test suite, a big build)
+  legitimately emits nothing for a while.
+
+Either limit ends the job as status **`timed_out`** with `terminated_by = 'timeout'` — its own
+terminal status alongside `orphaned`, so Qalatra's own resource limits don't inflate agent failure
+counts. Because the session id survives, `timed_out` jobs are included in the resume lookup
+(`db-worker.js` `getQueuedJobs`), so the next message on the task continues where it left off.
+
+**Adding a runtime:** implement `buildArgs({ baseArgs, prompt, resumeMessage, resumeId, stream,
+onWarn })` and `createConsumer({ stream }) -> { push(chunk), finish() -> { result, sessionId } }`,
+then register it in `RUNTIMES`. Use the shared `createNdjsonConsumer` helper for a JSONL CLI — it
+handles cross-chunk line assembly and non-JSON noise. Everything else
 in the job pipeline — env, spawn, timeout, output rules, lifecycle — is provider-neutral.
 
 **Gotcha:** `codex exec resume` accepts only a subset of `codex exec`'s flags (no `--sandbox`,
 `-C/--cd`, `--profile`) and hard-errors on the rest, so the adapter drops unsupported ones on
 resumed turns and logs what it dropped. Dropping degrades toward Codex's *default* sandbox, never
 toward more access.
-
-**Job timeout:** defaults to 60 minutes, overridable per agent with `timeout_minutes`. A hung job
-holds one of only `MAX_CONCURRENT_JOBS` (3) slots for the full window, so raise it deliberately.
 
 ---
 

@@ -1,5 +1,37 @@
 # Qalatra — Evolution Notes
 
+## Streamed agent output: killed jobs stay resumable (2026-08-31)
+
+- Agent stdout is now consumed **incrementally** instead of buffered and parsed at exit. Adapters
+  expose `createConsumer() -> { push, finish }` in place of `parseOutput(stdout)`.
+- **The point:** `claude --output-format json` only emits at exit, so a SIGKILLed job lost its
+  session id and the work could not be continued. Claude's stream-json carries `session_id` on every
+  event (verified — even the first, a `rate_limit_event`), so the id lands within moments of launch.
+  Confirmed end-to-end: a job SIGKILLed 9 s in resumed cleanly and the agent still knew its original
+  task. Codex already had this via `thread.started`.
+- Claude prompt-mode now spawns `--output-format stream-json --verbose` by default;
+  `"stream": false` in agent.config falls back to the old single-blob form with no code change.
+  Template-mode commands never stream.
+- Timeouts became their own terminal status **`timed_out`** with `terminated_by = 'timeout'`,
+  following the `orphaned` precedent, so Qalatra's own resource limits stop inflating agent failure
+  counts. The resume lookup in `getQueuedJobs` now accepts `done` **or** `timed_out`, which is what
+  makes the recovered session id actually usable — without it the id would be stored but dead.
+- Timed-out results now lead with the limit that was hit, note the resumable session, and include
+  whatever partial output the agent had produced.
+- New opt-in `idle_timeout_minutes`: kill after N minutes with *no output*. A wall clock can't tell a
+  productive 50-minute run from one wedged after 90 seconds; streamed events can. Off by default
+  because a single long tool call legitimately emits nothing for a while.
+- **Memory.** The old `stdout += d` was unbounded, and stream-json is far more verbose — this would
+  have made it much worse. Consumers now retain only a session id, the final result and a 64 KB tail;
+  stderr is capped at 256 KB and whole-output buffering at 5 MB.
+- Fallback rule worth remembering: for a streaming runtime the raw tail is JSONL *machine noise*, so
+  it is only used as the result when **nothing** parsed (a plain-text launch error). Once events have
+  flowed, an unparsed run yields an empty result and the stderr/timeout notice explains it.
+- UI: jobs record which runtime ran them (new `agent_jobs.runtime` column, set at run time so history
+  survives a config being retargeted) and show it as a badge. Added a `timed_out` state to the task
+  row and detail panel. The three "Resume session" buttons hardcoded `claude --resume` for every job
+  — they now emit `codex resume <id>` for codex jobs.
+
 ## Provider-neutral agent runtimes + timeout default (2026-08-31)
 
 - **Runtime adapters.** Prompt-mode agent jobs were hard-wired to Claude Code's CLI contract in three

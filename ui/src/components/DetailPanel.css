@@ -645,6 +645,19 @@
 /* Orphaned = interrupted by app restart, not a failure — amber/neutral, not red. */
 .detail-job-status--orphaned { color: #f59e0b; }
 .detail-agent-job--orphaned { border-color: #f59e0b40; background: #f59e0b10; }
+.detail-job-status--timed-out { color: #f59e0b; }
+.detail-agent-job--timed-out { border-color: #f59e0b40; background: #f59e0b10; }
+.detail-job-runtime {
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  vertical-align: middle;
+}
 .detail-resume-btn {
   margin-left: 10px;
   padding: 2px 8px;

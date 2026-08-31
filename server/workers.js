@@ -8,6 +8,8 @@ import { syncPendingAttachments } from './attachments.js'
 import { getRuntime, isKnownRuntime, DEFAULT_RUNTIME, runtimeNames } from './agent-runtimes.js'
 
 const MAX_CONCURRENT_JOBS = 3
+/** stderr is stored verbatim in job results, so keep it bounded on a long or noisy run. */
+const MAX_STDERR = 256 * 1024
 let runningJobs = 0
 
 function defaultShell() {
@@ -227,9 +229,9 @@ export async function runAgentScan({ dbCall, loadSettings }) {
   return agents
 }
 
-export async function finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, outputRules = [] }) {
+export async function finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, terminatedBy = null, outputRules = [] }) {
   try {
-    await dbCall('finishAgentJob', job.id, status, result, sessionId)
+    await dbCall('finishAgentJob', job.id, status, result, sessionId, terminatedBy)
   } catch (err) {
     console.error(`[workers] failed to persist agent job ${job.id}: ${err.message}`)
     return
@@ -312,14 +314,25 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     if (cfg?.runtime != null && !isKnownRuntime(cfg.runtime)) {
       console.error(`[workers] agent ${job.agent_path} declares unknown runtime "${cfg.runtime}"; falling back to ${DEFAULT_RUNTIME} (known: ${runtimeNames().join(', ')})`)
     }
-    // Template commands run verbatim, so no runtime owns their argv. Parsing still goes through the
-    // claude adapter because its parser is the lenient one (structured result if the command happens
-    // to emit Claude JSON, raw stdout otherwise) — which is what template agents already relied on.
+    // Template commands run verbatim, so no runtime owns their argv. Their output still goes through
+    // the claude adapter's non-streaming parser, which is the lenient one (structured result if the
+    // command happens to emit Claude JSON, raw stdout otherwise) — exactly what they relied on before.
     const runtimeName = isTemplateCommand ? DEFAULT_RUNTIME : cfg?.runtime
     const runtime = getRuntime(runtimeName)
-    let stdout = ''
+    // Recorded for display. A template command isn't driven by a CLI adapter at all, so it reports
+    // 'raw' rather than claiming to be a Claude job just because it borrows that parser.
+    const resolvedRuntime = isTemplateCommand ? 'raw' : (isKnownRuntime(runtimeName) ? runtimeName : DEFAULT_RUNTIME)
+    // Best-effort: surfacing which CLI ran a job is useful but never worth failing the job over.
+    try { await dbCall('setAgentJobRuntime', job.id, resolvedRuntime) }
+    catch (err) { console.error(`[workers] failed to record runtime for job ${job.id}: ${err.message}`) }
+    // Template commands emit whatever they emit, so they can't be stream-parsed.
+    const stream = isTemplateCommand ? false : cfg?.stream !== false
+    const consumer = runtime.createConsumer({ stream })
     let stderr = ''
-    let timedOut = false
+    let timeoutKind = null           // 'wall-clock' | 'idle' once a timer fires
+    let idleTimer = null
+    let idleMinutes = 0
+    let bumpIdle = () => {}
     let settled = false
     let proc
     let promptFile = null
@@ -369,6 +382,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
           prompt: promptArg,
           resumeMessage: job.user_message || job.prompt,
           resumeId: job.prevSessionId || null,
+          stream,
           onWarn: message => console.error(`[workers] job ${job.id} (${runtimeName || DEFAULT_RUNTIME}): ${message}`),
         })
         proc = process.platform === 'win32'
@@ -387,29 +401,55 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       continue
     }
 
-    proc.stdout.on('data', d => { stdout += d })
-    proc.stderr.on('data', d => { stderr += d })
+    // stderr stays whole-buffered (it is small and used verbatim in failure messages) but is
+    // capped so a runaway agent logging to stderr for an hour can't exhaust the worker.
+    const appendStderr = d => {
+      if (stderr.length >= MAX_STDERR) return
+      stderr = (stderr + d).slice(0, MAX_STDERR)
+    }
+    proc.stdout.on('data', d => { consumer.push(d); bumpIdle() })
+    proc.stderr.on('data', d => { appendStderr(d); bumpIdle() })
     // 15 minutes was too tight for a modern coding agent, but a hung job holds one of only
     // MAX_CONCURRENT_JOBS slots for the whole window, so this stays bounded. 60 sits just above the
     // 45 that every deliberately-configured agent here settled on. Override with timeout_minutes.
     const timeoutMinutes = cfg?.timeout_minutes ?? 60
-    const timeout = setTimeout(() => { timedOut = true; proc.kill('SIGKILL') }, timeoutMinutes * 60 * 1000)
+    const timeout = setTimeout(() => { timeoutKind = 'wall-clock'; proc.kill('SIGKILL') }, timeoutMinutes * 60 * 1000)
+    // Opt-in second limit: a wall clock can't tell a productive 50-minute run from one wedged after
+    // 90 seconds, but streamed output can. Left off by default because a single long tool call
+    // (a full test suite, a big build) legitimately emits nothing for a while.
+    idleMinutes = Number(cfg?.idle_timeout_minutes) || 0
+    bumpIdle = () => {
+      if (!idleMinutes) return
+      clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => { timeoutKind = 'idle'; proc.kill('SIGKILL') }, idleMinutes * 60 * 1000)
+    }
+    bumpIdle()
 
     proc.on('close', code => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
+      clearTimeout(idleTimer)
       runningJobs--
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
 
-      let { result, sessionId } = runtime.parseOutput(stdout)
+      let { result, sessionId } = consumer.finish()
 
-      const status = code === 0 ? 'done' : 'failed'
-      if (!result) {
-        result = timedOut
-          ? `Agent timed out after ${timeoutMinutes} minutes (set timeout_minutes in agent.config to raise it).${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
-          : (stderr.trim() || `No output (exit code ${code})`)
+      // A timeout is Qalatra's own limit cutting off an agent that was still working — a resource
+      // event, not an agent failure — so it gets its own terminal status alongside `orphaned`
+      // rather than polluting failure counts. Streaming means sessionId survives the kill, so
+      // these stay resumable (see the resume lookup in db-worker.js).
+      const status = timeoutKind ? 'timed_out' : (code === 0 ? 'done' : 'failed')
+      const timeoutNotice = timeoutKind === 'idle'
+        ? `Agent killed after ${idleMinutes} minutes with no output (idle_timeout_minutes).`
+        : `Agent timed out after ${timeoutMinutes} minutes (set timeout_minutes in agent.config to raise it).`
+      if (timeoutKind) {
+        const partial = result ? `\n\nPartial output before the kill:\n${result}` : ''
+        const resumable = sessionId ? `\n\nSession ${sessionId} is resumable — send a follow-up message on this task to continue it.` : ''
+        result = `${timeoutNotice}${resumable}${partial}${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
+      } else if (!result) {
+        result = stderr.trim() || `No output (exit code ${code})`
       } else if (status === 'failed' && stderr.trim()) {
         result += `\n\nStderr:\n${stderr.trim()}`
       }
@@ -424,7 +464,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         })
       }
 
-      finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, outputRules: cfg?.output_rules })
+      finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, terminatedBy: timeoutKind ? 'timeout' : null, outputRules: cfg?.output_rules })
         .catch(err => console.error(`[workers] agent completion handler failed for job ${job.id}: ${err.message}`))
     })
 
@@ -432,6 +472,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (settled) return
       settled = true
       clearTimeout(timeout)
+      clearTimeout(idleTimer)
       runningJobs--
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
