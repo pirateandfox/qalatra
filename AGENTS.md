@@ -233,6 +233,26 @@ Windows). Because detaching also escapes the signal the service manager sends to
 group, `shutdown()` in `server/index.js` calls `killRunningAgentProcesses()` — without that, a
 service restart would strand live agents holding files, ports, and API quota.
 
+**Agents run in their own cgroup slice (Linux).** Qalatra Server, its MCP child, tmux sessions and
+every agent otherwise share one cgroup, and `memory.high` throttles reclaim across the whole group
+without distinguishing the hog — so one runaway agent starves `:3457` while the box looks healthy.
+Agents are therefore spawned through `systemd-run --user --scope --slice=qalatra-agents.slice`.
+Only the spawner can do this: cgroup membership follows process ancestry, so Ansible cannot move an
+agent into a slice.
+
+The launcher is *probed*, not platform-detected (following `ensureTmuxServer()` in
+`terminal-sessions.js`) — `systemd-run` needs a live user manager and `XDG_RUNTIME_DIR`, not merely
+Linux. macOS, non-systemd Linux and no-user-manager all fall back to the previous spawn unchanged.
+`killProcessTree` needs no change: verified on a live box that `--scope` execs through, so the
+tracked pid stays the agent's own shell and remains its process-group leader — a shell → agent →
+tool-subprocess tree showed three cgroup members before the kill and zero after.
+
+**The slice needs limits from the fleet.** An unknown `--slice=` is auto-created as transient with
+*no* limits, which places agents correctly and contains nothing. `qalatra-agents.slice` is installed
+with per-host `MemoryHigh`/`MemoryMax`/`MemorySwapMax` by `roles/mcp_hygiene` in `qalatra-fleet`.
+Verify placement with `cat /proc/<agent-pid>/cgroup` — it should name `qalatra-agents.slice`, not
+`qalatra-server.service`. Launch diagnostics report the active launcher, or "none".
+
 Either limit ends the job as status **`timed_out`** with `terminated_by = 'timeout'` — its own
 terminal status alongside `orphaned`, so Qalatra's own resource limits don't inflate agent failure
 counts. Because the session id survives, `timed_out` jobs are included in the resume lookup

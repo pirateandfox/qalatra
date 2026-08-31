@@ -18,6 +18,34 @@
   normally with no controlling terminal (no tty/job-control noise on stderr), and the kill-then-resume
   cycle still works end to end through the production path.
 
+## Agents run in their own cgroup slice (2026-08-31)
+
+- Qalatra Server, its MCP child, tmux sessions and every agent shared one cgroup. `memory.high`
+  throttles reclaim across the whole cgroup and cannot tell the hog from its neighbours, and because
+  it throttles allocation so hard a runaway never climbs the rest of the way to `memory.max` — so
+  nothing kills it. It stalls and takes the MCP endpoint with it. That is how wisp (a 5.6 GB `ugrep`)
+  and shi (an uncapped `nx run-many`) both stalled with `:3457` timing out while the boxes looked
+  healthy. Confirmed live: wisp's server cgroup held the server, the MCP child, an agent's `claude`
+  and a whole tmux session under one 6 GB limit.
+- Agents now spawn through `systemd-run --user --scope --slice=qalatra-agents.slice`. Only the
+  spawner can do this — cgroup membership follows process ancestry, so Ansible cannot move an agent
+  into a slice. The launcher is probed rather than platform-detected, following `ensureTmuxServer()`:
+  macOS, non-systemd Linux and no-user-manager fall back to the previous spawn unchanged.
+- **The brief's main risk turned out not to exist.** It flagged that under `--scope`, `proc.pid`
+  would be systemd-run's pid, breaking the negative-pid group kill, and recommended `--unit=` naming
+  plus a `systemctl stop` kill path. Measured on wisp instead: `--scope` *execs through*, so the
+  tracked pid is the agent's own shell and still leads its process group. A shell → agent →
+  tool-subprocess tree had three cgroup members before the kill and zero after, via the existing
+  `killProcessTree` unchanged. No `--unit=` naming and no scope-stop path were needed, which removed
+  a whole step and its coupling to the shutdown sweep.
+- An early probe appeared to show a survivor; that was an artifact of `pgrep -f` matching a marker
+  that every ancestor's argv also contained. Re-measured against the scope's own `cgroup.procs`.
+- Fleet half in `qalatra-fleet` `roles/mcp_hygiene`: a `qalatra-agents.slice` unit with per-host
+  memory limits. Off by default and promoted per host, matching the reaper — an unknown `--slice=` is
+  auto-created transient with *no* limits, so without this the code places agents correctly and
+  contains nothing.
+- Launch diagnostics now report the active launcher, or "none (agents share the server cgroup)".
+
 ## Streamed agent output: killed jobs stay resumable (2026-08-31)
 
 - Agent stdout is now consumed **incrementally** instead of buffered and parsed at exit. Adapters

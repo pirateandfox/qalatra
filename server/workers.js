@@ -59,6 +59,45 @@ function defaultShell() {
   return process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash'
 }
 
+/**
+ * Place agent runs in their own cgroup slice.
+ *
+ * Qalatra Server, its MCP child, tmux sessions and every agent otherwise share one cgroup, and
+ * `memory.high` throttles reclaim across the whole group without distinguishing the hog from its
+ * neighbours — so one runaway agent starves the MCP endpoint while the box still looks healthy.
+ * Measured on a live box: the server cgroup held the server, the MCP child, an agent's `claude`,
+ * and a tmux session, all under one 6 GB limit.
+ *
+ * Probed rather than detected by platform, following ensureTmuxServer() in terminal-sessions.js:
+ * systemd-run needs a live *user* manager and XDG_RUNTIME_DIR, not merely Linux. macOS, non-systemd
+ * Linux and no-user-manager all fall back to today's exact spawn. Cached because a long-running
+ * agent cannot retry the way spawnSync can, and this cannot change without the server restarting.
+ *
+ * The slice must also be given limits (MemoryHigh/MemoryMax) by the fleet — an unknown --slice= is
+ * auto-created as transient with *no* limits, which places correctly but contains nothing.
+ */
+let agentLauncherCache = null
+function agentLauncher() {
+  if (agentLauncherCache) return agentLauncherCache
+  const probe = spawnSync('systemd-run', ['--user', '--scope', '--quiet', '--collect', 'true'], { stdio: 'ignore' })
+  agentLauncherCache = probe.status === 0
+    ? ['systemd-run', '--user', '--scope', '--quiet', '--collect', '--slice=qalatra-agents.slice']
+    : []
+  return agentLauncherCache
+}
+
+/**
+ * Wrap a spawn in the launcher when one is available. Verified on a live box that `--scope` execs
+ * through rather than staying resident, so the tracked pid remains the agent's own shell and stays
+ * the leader of its process group: killProcessTree's negative-pid kill reaps the whole scope
+ * unchanged, and no scope-stop path is needed. Measured with a shell → agent → tool-subprocess tree,
+ * three cgroup members before, zero after.
+ */
+function withLauncher(command, args) {
+  const launcher = agentLauncher()
+  return launcher.length ? { command: launcher[0], args: [...launcher.slice(1), command, ...args] } : { command, args }
+}
+
 function shellQuote(value) {
   if (process.platform === 'win32') {
     return `"${String(value).replace(/"/g, '\\"').replace(/\r?\n/g, ' ')}"`
@@ -186,6 +225,9 @@ function launchDiagnostics({ cwd, shellBin, env, agentCommand, commandMode, runt
     `- shell: ${shellBin}`,
     `- command mode: ${commandMode}`,
     `- runtime: ${runtimeName || DEFAULT_RUNTIME}`,
+    // Whether the run was placed in its own cgroup slice. If this says "none", agents share the
+    // server's cgroup and one runaway can still throttle the MCP endpoint.
+    `- launcher: ${agentLauncher().length ? agentLauncher().join(' ') : 'none (agents share the server cgroup)'}`,
     `- command template: ${sanitizeCommand(agentCommand)}`,
     `- PATH: ${env.PATH || '(unset)'}`,
   ]
@@ -404,7 +446,10 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         spawnArgs = ['-i', '-l', '-c', resolvedCommand]
         proc = process.platform === 'win32'
           ? spawn('cmd.exe', ['/c', resolvedCommand], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
-          : spawn(shellBin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
+          : (() => {
+            const launched = withLauncher(shellBin, spawnArgs)
+            return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
+          })()
       } else {
         const parts = agentCommand.trim().split(/\s+/)
         bin = parts[0]
@@ -425,7 +470,14 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         })
         proc = process.platform === 'win32'
           ? spawn(bin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], shell: true, env: agentEnv })
-          : spawn(shellBin, ['-i', '-l', '-c', `${bin} "$@"`, '--', ...spawnArgs], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
+          : (() => {
+            // The -c '<bin> "$@"' -- ...args structure must survive intact — the args are
+            // deliberately not re-parsed by the shell — so the launcher wraps the whole shell
+            // invocation rather than being folded into the -c payload. bin/spawnArgs stay the
+            // agent's own, so launch diagnostics keep reporting the agent, not systemd-run.
+            const launched = withLauncher(shellBin, ['-i', '-l', '-c', `${bin} "$@"`, '--', ...spawnArgs])
+            return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
+          })()
       }
     } catch (spawnErr) {
       runningJobs--
