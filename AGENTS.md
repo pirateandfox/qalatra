@@ -224,6 +224,15 @@ buffering (`raw`, `stream: false`) at 5 MB.
   streamed output can. Off by default because one long tool call (a full test suite, a big build)
   legitimately emits nothing for a while.
 
+**Agents run detached, in their own process group.** SIGKILL to the tracked pid is not enough: the
+login shell `exec`s through to the agent CLI, so that pid *is* the agent — but the agent's own
+children (a test run, a build, an MCP server it started) get reparented and keep running. Measured
+directly: killing the pid alone left the tool subprocess alive. Timeouts therefore call
+`killProcessTree`, which signals the negative pid to take the whole group down (`taskkill /T` on
+Windows). Because detaching also escapes the signal the service manager sends to Qalatra's own
+group, `shutdown()` in `server/index.js` calls `killRunningAgentProcesses()` — without that, a
+service restart would strand live agents holding files, ports, and API quota.
+
 Either limit ends the job as status **`timed_out`** with `terminated_by = 'timeout'` — its own
 terminal status alongside `orphaned`, so Qalatra's own resource limits don't inflate agent failure
 counts. Because the session id survives, `timed_out` jobs are included in the resume lookup

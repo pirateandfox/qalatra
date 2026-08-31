@@ -1,5 +1,23 @@
 # Qalatra — Evolution Notes
 
+## Agent timeouts kill the whole process tree (2026-08-31)
+
+- A timeout called `proc.kill('SIGKILL')` on the tracked pid. That pid really is the agent — the
+  login shell `exec`s through to it — but the agent's *own* children were reparented and survived.
+  Reproduced with a shell → agent → tool-subprocess tree: killing the pid left the tool subprocess
+  running. For a coding agent that is a `npm test`, a build, or an MCP server continuing unsupervised
+  after Qalatra has already reported the job dead and freed the slot.
+- Agents now spawn `detached: true` (POSIX), so each run gets its own process group, and timeouts
+  call `killProcessTree`, signalling the negative pid to reach every descendant. Windows has no
+  equivalent to signal, so it shells out to `taskkill /T /F`.
+- Detaching escapes the signal a service manager sends to Qalatra's own process group, which would
+  have traded one leak for another: a service restart would strand live agents. `shutdown()` in
+  `server/index.js` now calls `killRunningAgentProcesses()` over a tracked set of live runs.
+- Verified: prompt-mode and template-mode trees are both fully reaped, the `close` event still fires
+  after a group kill (so the job lifecycle completes rather than hanging), a real Claude agent runs
+  normally with no controlling terminal (no tty/job-control noise on stderr), and the kill-then-resume
+  cycle still works end to end through the production path.
+
 ## Streamed agent output: killed jobs stay resumable (2026-08-31)
 
 - Agent stdout is now consumed **incrementally** instead of buffered and parsed at exit. Adapters

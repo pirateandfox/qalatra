@@ -14,7 +14,7 @@ import { applyPendingRestore, runBackup } from './backups.js'
 import { fileExists, findInheritedStyle, listDirectory, listWorkspaceRoots, readTextFile, resolveAllowedPath, writeFolderStyle, writeTextFile, writeUserStyle } from './files.js'
 import { applyCors, parseBody, parseRawBody, sendBinary, sendJson, streamFile } from './http.js'
 import { handleV1 } from './v1.js'
-import { startBackgroundWorkers } from './workers.js'
+import { startBackgroundWorkers, killRunningAgentProcesses } from './workers.js'
 import { createTerminalManager } from './terminal-sessions.js'
 import { createBoxWebProxy } from './box-web.js'
 
@@ -555,6 +555,10 @@ async function main() {
     shuttingDown = true
     shutdownPromise = (async () => {
       if (backupTimer) clearInterval(backupTimer)
+      // Agent runs are spawned detached (so a timeout can kill the agent's whole tool tree), which
+      // also means they escape the signal the service manager sends to this process's group. Take
+      // them down explicitly or a restart strands live agents holding files, ports and API quota.
+      killRunningAgentProcesses()
       await stopMcpServer()
       if (START_WORKERS && BACKUP_ON_SHUTDOWN) {
         await Promise.race([

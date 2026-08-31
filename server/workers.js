@@ -12,6 +12,44 @@ const MAX_CONCURRENT_JOBS = 3
 const MAX_STDERR = 256 * 1024
 let runningJobs = 0
 
+/** Live agent processes, so a server shutdown can take their process groups down with it. */
+const runningAgentProcs = new Set()
+
+/**
+ * Kill an agent run and everything it started.
+ *
+ * SIGKILL to the tracked pid is not enough. The login shell execs through to the agent CLI, so that
+ * pid really is the agent — but the agent's own children (a test run, a build, an MCP server it
+ * spawned) are reparented and keep running. Measured directly: killing the pid alone left the tool
+ * subprocess alive and holding resources. Agents are therefore spawned detached, which puts the run
+ * in its own process group, and a negative pid signals every descendant at once.
+ */
+function killProcessTree(proc) {
+  if (!proc?.pid) return
+  if (process.platform === 'win32') {
+    // Windows has no process groups to signal; taskkill /T walks the child tree instead.
+    try { spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' }) } catch {}
+    return
+  }
+  try {
+    process.kill(-proc.pid, 'SIGKILL')   // negative pid = the whole group from detached:true
+    return
+  } catch (err) {
+    // ESRCH just means the group is already gone; anything else is worth a line before we fall back.
+    if (err.code !== 'ESRCH') console.error(`[workers] group kill failed for pid ${proc.pid}: ${err.message}`)
+  }
+  try { proc.kill('SIGKILL') } catch {}
+}
+
+/**
+ * Detached agents outlive the signal the service manager sends to Qalatra's own process group, so
+ * shutdown has to take them down explicitly or a service restart strands live agent runs.
+ */
+export function killRunningAgentProcesses() {
+  for (const proc of runningAgentProcs) killProcessTree(proc)
+  runningAgentProcs.clear()
+}
+
 function defaultShell() {
   if (process.env.SHELL) return process.env.SHELL
   try {
@@ -366,7 +404,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         spawnArgs = ['-i', '-l', '-c', resolvedCommand]
         proc = process.platform === 'win32'
           ? spawn('cmd.exe', ['/c', resolvedCommand], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
-          : spawn(shellBin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
+          : spawn(shellBin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
       } else {
         const parts = agentCommand.trim().split(/\s+/)
         bin = parts[0]
@@ -387,7 +425,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         })
         proc = process.platform === 'win32'
           ? spawn(bin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], shell: true, env: agentEnv })
-          : spawn(shellBin, ['-i', '-l', '-c', `${bin} "$@"`, '--', ...spawnArgs], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
+          : spawn(shellBin, ['-i', '-l', '-c', `${bin} "$@"`, '--', ...spawnArgs], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
       }
     } catch (spawnErr) {
       runningJobs--
@@ -401,6 +439,8 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       continue
     }
 
+    runningAgentProcs.add(proc)
+
     // stderr stays whole-buffered (it is small and used verbatim in failure messages) but is
     // capped so a runaway agent logging to stderr for an hour can't exhaust the worker.
     const appendStderr = d => {
@@ -413,7 +453,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     // MAX_CONCURRENT_JOBS slots for the whole window, so this stays bounded. 60 sits just above the
     // 45 that every deliberately-configured agent here settled on. Override with timeout_minutes.
     const timeoutMinutes = cfg?.timeout_minutes ?? 60
-    const timeout = setTimeout(() => { timeoutKind = 'wall-clock'; proc.kill('SIGKILL') }, timeoutMinutes * 60 * 1000)
+    const timeout = setTimeout(() => { timeoutKind = 'wall-clock'; killProcessTree(proc) }, timeoutMinutes * 60 * 1000)
     // Opt-in second limit: a wall clock can't tell a productive 50-minute run from one wedged after
     // 90 seconds, but streamed output can. Left off by default because a single long tool call
     // (a full test suite, a big build) legitimately emits nothing for a while.
@@ -421,7 +461,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     bumpIdle = () => {
       if (!idleMinutes) return
       clearTimeout(idleTimer)
-      idleTimer = setTimeout(() => { timeoutKind = 'idle'; proc.kill('SIGKILL') }, idleMinutes * 60 * 1000)
+      idleTimer = setTimeout(() => { timeoutKind = 'idle'; killProcessTree(proc) }, idleMinutes * 60 * 1000)
     }
     bumpIdle()
 
@@ -430,6 +470,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       settled = true
       clearTimeout(timeout)
       clearTimeout(idleTimer)
+      runningAgentProcs.delete(proc)
       runningJobs--
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
@@ -473,6 +514,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       settled = true
       clearTimeout(timeout)
       clearTimeout(idleTimer)
+      runningAgentProcs.delete(proc)
       runningJobs--
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
