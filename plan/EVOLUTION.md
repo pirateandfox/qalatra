@@ -1,5 +1,45 @@
 # Qalatra — Evolution Notes
 
+## Provider-neutral agent runtimes + timeout default (2026-08-31)
+
+- **Runtime adapters.** Prompt-mode agent jobs were hard-wired to Claude Code's CLI contract in three
+  places: the argv (`-p`, `--output-format json`, `--resume`), the parsed output shape
+  (`result` / `session_id`), and the session-id resume model. `docs/capabilities.md` already advertised
+  `provider_support: ["claude", "codex"]`, but line 196 says it is informational in Phase 1 — nothing
+  in the runner read it.
+- New `server/agent-runtimes.js` holds one adapter per runtime, each supplying `buildArgs()` and
+  `parseOutput()`. `server/workers.js` dispatches on a new optional `"runtime"` field in
+  `agent.config` (`claude` | `codex` | `raw`). Everything else in the pipeline — env, spawn, timeout,
+  output rules, job lifecycle — was already provider-neutral and is untouched.
+- Back-compat: absent `runtime` resolves to `claude`, so all 96 existing configs behave exactly as
+  before. Template-mode commands (the 28 with `{spec_file}`/`{description}`/`{title}`) still run
+  verbatim and keep the lenient parser they relied on. An unknown runtime name logs a warning and
+  falls back rather than failing the job.
+- **Codex specifics, verified against codex-cli 0.151.0 rather than assumed.** The prompt is
+  positional (codex's `-p` is `--profile`, not print), `--json` emits JSONL, and the session id
+  arrives in the first `thread.started` event — so unlike Claude's end-of-run JSON, a killed codex
+  job still yields a resumable id.
+- `codex exec resume` accepts only a subset of `codex exec`'s flags and clap-errors on the rest, so
+  forwarding a config's flags blindly failed every resumed turn with exit 2. Caught by an end-to-end
+  spawn test, not by unit tests. The adapter now filters unsupported flags on resume and logs what it
+  dropped; dropping degrades toward codex's default sandbox, never toward more access.
+- Launch diagnostics are runtime-aware — a failed codex agent no longer dumps only Claude config
+  paths — and `CODEX_HOME` / `CODEX_API_KEY` / `OPENAI_API_KEY` joined the sanitized env-marker list.
+- Removed the now-duplicate `parseAgentOutput` from `workers.js` (nothing imported it; the claude
+  adapter owns that logic).
+
+## Agent job timeout default raised off 15 minutes (2026-08-31)
+
+- `server/workers.js` defaulted every agent job to a 15-minute SIGKILL when its `agent.config` had no
+  `timeout_minutes`, so unconfigured agents were killed mid-run and recorded as failures.
+- New default is **60 minutes**, flat. An earlier pass split this 180/60 on the `coding` flag, but the
+  flag turned out to be anti-correlated with the intent: the only agents with `coding: true` and no
+  explicit timeout are `flightdesk register` dispatch commands that return in seconds, while the
+  long-running local `claude` agents don't set it at all. 60 sits just above the 45 that every
+  deliberately-configured agent here settled on, and a hung job holds one of only 3 concurrency slots
+  for the whole window.
+- The timeout message now names the limit that was hit and points at `timeout_minutes`.
+
 ## v1.9.36 — MCP child generation ownership and orphan remediation (2026-08-26)
 
 - Tethered the parent-managed MCP process to Qalatra Server with an IPC channel. A parent death now

@@ -5,6 +5,7 @@ import { spawn, spawnSync } from 'child_process'
 import { v4 as uuidv4 } from 'uuid'
 import { scanAgents } from './agents.js'
 import { syncPendingAttachments } from './attachments.js'
+import { getRuntime, isKnownRuntime, DEFAULT_RUNTIME, runtimeNames } from './agent-runtimes.js'
 
 const MAX_CONCURRENT_JOBS = 3
 let runningJobs = 0
@@ -94,6 +95,9 @@ function presentEnvMarkers(env) {
     'CLAUDE_CODE_CHILD_SESSION',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_API_KEY',
+    'CODEX_HOME',
+    'CODEX_API_KEY',
+    'OPENAI_API_KEY',
   ].filter(key => env[key] !== undefined)
 }
 
@@ -130,9 +134,8 @@ function commandLookup(shellBin, env, cwd) {
   }
 }
 
-function launchDiagnostics({ cwd, shellBin, env, agentCommand, commandMode }) {
+function launchDiagnostics({ cwd, shellBin, env, agentCommand, commandMode, runtimeName }) {
   const home = env.HOME || os.homedir()
-  const anthropicConfigDir = env.ANTHROPIC_CONFIG_DIR || path.join(home, '.claude')
   const markers = presentEnvMarkers(env)
   const lines = [
     'Launch diagnostics (sanitized):',
@@ -142,13 +145,24 @@ function launchDiagnostics({ cwd, shellBin, env, agentCommand, commandMode }) {
     `- home: ${home}`,
     `- shell: ${shellBin}`,
     `- command mode: ${commandMode}`,
+    `- runtime: ${runtimeName || DEFAULT_RUNTIME}`,
     `- command template: ${sanitizeCommand(agentCommand)}`,
     `- PATH: ${env.PATH || '(unset)'}`,
-    `- ANTHROPIC_CONFIG_DIR: ${env.ANTHROPIC_CONFIG_DIR || `(unset; default ${anthropicConfigDir})`}`,
-    `- Claude config dir: ${pathState(anthropicConfigDir)} (${anthropicConfigDir})`,
-    `- ~/.claude.json: ${pathState(path.join(home, '.claude.json'))}`,
-    `- token/env markers present: ${markers.length ? markers.join(', ') : 'none'}`,
   ]
+  // Only surface the config paths that belong to the runtime that actually failed; dumping Claude's
+  // paths for a broken Codex agent sends you looking in the wrong place.
+  if (runtimeName === 'codex') {
+    const codexHome = env.CODEX_HOME || path.join(home, '.codex')
+    lines.push(`- CODEX_HOME: ${env.CODEX_HOME || `(unset; default ${codexHome})`}`)
+    lines.push(`- Codex config dir: ${pathState(codexHome)} (${codexHome})`)
+    lines.push(`- codex config.toml: ${pathState(path.join(codexHome, 'config.toml'))}`)
+  } else {
+    const anthropicConfigDir = env.ANTHROPIC_CONFIG_DIR || path.join(home, '.claude')
+    lines.push(`- ANTHROPIC_CONFIG_DIR: ${env.ANTHROPIC_CONFIG_DIR || `(unset; default ${anthropicConfigDir})`}`)
+    lines.push(`- Claude config dir: ${pathState(anthropicConfigDir)} (${anthropicConfigDir})`)
+    lines.push(`- ~/.claude.json: ${pathState(path.join(home, '.claude.json'))}`)
+  }
+  lines.push(`- token/env markers present: ${markers.length ? markers.join(', ') : 'none'}`)
   const lookup = commandLookup(shellBin, env, cwd)
   if (lookup) lines.push(`- login-shell lookup:\n${lookup}`)
   return lines.join('\n')
@@ -157,17 +171,6 @@ function launchDiagnostics({ cwd, shellBin, env, agentCommand, commandMode }) {
 function appendLaunchDiagnostics(result, context) {
   const diagnostics = launchDiagnostics(context)
   return `${result || ''}\n\n${diagnostics}`.trim()
-}
-
-export function parseAgentOutput(stdout) {
-  let result = String(stdout ?? '').trim()
-  let sessionId = null
-  try {
-    const parsed = JSON.parse(stdout)
-    if (parsed.result != null) result = String(parsed.result)
-    sessionId = parsed.session_id ?? null
-  } catch {}
-  return { result, sessionId }
 }
 
 export function findLastOutputRuleMatch(output, pattern) {
@@ -305,6 +308,15 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     const shellBin = defaultShell()
     const agentEnv = buildAgentEnv(settings, cfg, shellBin)
     const isTemplateCommand = agentCommand.includes('{spec_file}') || agentCommand.includes('{description}') || agentCommand.includes('{title}')
+
+    if (cfg?.runtime != null && !isKnownRuntime(cfg.runtime)) {
+      console.error(`[workers] agent ${job.agent_path} declares unknown runtime "${cfg.runtime}"; falling back to ${DEFAULT_RUNTIME} (known: ${runtimeNames().join(', ')})`)
+    }
+    // Template commands run verbatim, so no runtime owns their argv. Parsing still goes through the
+    // claude adapter because its parser is the lenient one (structured result if the command happens
+    // to emit Claude JSON, raw stdout otherwise) — which is what template agents already relied on.
+    const runtimeName = isTemplateCommand ? DEFAULT_RUNTIME : cfg?.runtime
+    const runtime = getRuntime(runtimeName)
     let stdout = ''
     let stderr = ''
     let timedOut = false
@@ -352,9 +364,13 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
           fs.writeFileSync(promptFile, job.prompt, 'utf8')
           promptArg = `"Read and follow the instructions in the file: ${promptFile}"`
         }
-        spawnArgs = job.prevSessionId
-          ? [...baseArgs, '--resume', job.prevSessionId, '-p', job.user_message || job.prompt, '--output-format', 'json']
-          : [...baseArgs, '-p', promptArg, '--output-format', 'json']
+        spawnArgs = runtime.buildArgs({
+          baseArgs,
+          prompt: promptArg,
+          resumeMessage: job.user_message || job.prompt,
+          resumeId: job.prevSessionId || null,
+          onWarn: message => console.error(`[workers] job ${job.id} (${runtimeName || DEFAULT_RUNTIME}): ${message}`),
+        })
         proc = process.platform === 'win32'
           ? spawn(bin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], shell: true, env: agentEnv })
           : spawn(shellBin, ['-i', '-l', '-c', `${bin} "$@"`, '--', ...spawnArgs], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
@@ -365,7 +381,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${spawnErr.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, commandMode: isTemplateCommand ? 'template' : 'prompt' },
+        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, commandMode: isTemplateCommand ? 'template' : 'prompt', runtimeName },
       )
       await dbCall('finishAgentJob', job.id, 'failed', result, null)
       continue
@@ -373,7 +389,11 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
 
     proc.stdout.on('data', d => { stdout += d })
     proc.stderr.on('data', d => { stderr += d })
-    const timeout = setTimeout(() => { timedOut = true; proc.kill('SIGKILL') }, (cfg?.timeout_minutes ?? 15) * 60 * 1000)
+    // 15 minutes was too tight for a modern coding agent, but a hung job holds one of only
+    // MAX_CONCURRENT_JOBS slots for the whole window, so this stays bounded. 60 sits just above the
+    // 45 that every deliberately-configured agent here settled on. Override with timeout_minutes.
+    const timeoutMinutes = cfg?.timeout_minutes ?? 60
+    const timeout = setTimeout(() => { timedOut = true; proc.kill('SIGKILL') }, timeoutMinutes * 60 * 1000)
 
     proc.on('close', code => {
       if (settled) return
@@ -383,12 +403,12 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
 
-      let { result, sessionId } = parseAgentOutput(stdout)
+      let { result, sessionId } = runtime.parseOutput(stdout)
 
       const status = code === 0 ? 'done' : 'failed'
       if (!result) {
         result = timedOut
-          ? `Agent timed out.${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
+          ? `Agent timed out after ${timeoutMinutes} minutes (set timeout_minutes in agent.config to raise it).${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
           : (stderr.trim() || `No output (exit code ${code})`)
       } else if (status === 'failed' && stderr.trim()) {
         result += `\n\nStderr:\n${stderr.trim()}`
@@ -400,6 +420,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
           env: agentEnv,
           agentCommand,
           commandMode: isTemplateCommand ? 'template' : 'prompt',
+          runtimeName,
         })
       }
 
@@ -416,7 +437,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, commandMode: isTemplateCommand ? 'template' : 'prompt' },
+        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, commandMode: isTemplateCommand ? 'template' : 'prompt', runtimeName },
       )
       finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null })
         .catch(err => console.error(`[workers] agent error handler failed for job ${job.id}: ${err.message}`))

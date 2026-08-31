@@ -132,10 +132,16 @@ Top-level fields remain for Qalatra's runtime:
   "context": "monroe",
   "project": "billing",
   "command": "claude --dangerously-skip-permissions",
+  "runtime": "claude",
   "timeout_minutes": 30,
   "coding": false
 }
 ```
+
+`runtime` selects the CLI adapter (`claude`, `codex`, or `raw`) and may be omitted, in which case it
+defaults to `claude`. See the Agent Runtimes section in `AGENTS.md` for the full contract. A Codex
+agent is the same config with `"runtime": "codex"` and a `codex` command, e.g.
+`"command": "codex --dangerously-bypass-approvals-and-sandbox"`.
 
 Capability fields are for AI discovery and routing:
 

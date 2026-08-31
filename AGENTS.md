@@ -177,6 +177,42 @@ node assets/build-icon.mjs
 
 ---
 
+## Agent Runtimes
+
+Agent jobs run in one of two modes, decided by whether `agent.config`'s `command` contains a
+placeholder (`{spec_file}`, `{description}`, `{title}`):
+
+- **Template mode** — the command is run verbatim. Qalatra injects nothing and treats stdout as the
+  result. Use this for wrapper scripts and dispatch commands (`flightdesk register ...`).
+- **Prompt mode** — Qalatra owns the argv: it appends the prompt, the structured-output flag, and
+  `--resume` on follow-ups, then parses the agent's output for the result text and a session id.
+
+Prompt mode is CLI-specific, so it goes through an adapter in `server/agent-runtimes.js`. Pick one
+with `"runtime"` in `agent.config`:
+
+| runtime | spawns | resume | notes |
+|---|---|---|---|
+| `claude` (default) | `claude <flags> -p <prompt> --output-format json` | `--resume <session_id>` | What every config got implicitly before the field existed. |
+| `codex` | `codex exec <flags> --json <prompt>` | `codex exec resume <id> <prompt>` | `--json` is JSONL; session id arrives in the first `thread.started` event. |
+| `raw` | the command untouched | none | Explicit opt-in to template-mode semantics in a non-placeholder command. |
+
+Omitting `runtime` means `claude`, so existing configs are unaffected. An unknown value logs a
+warning and falls back to `claude`.
+
+**Adding a runtime:** implement `buildArgs({ baseArgs, prompt, resumeMessage, resumeId, onWarn })`
+and `parseOutput(stdout) -> { result, sessionId }`, then register it in `RUNTIMES`. Everything else
+in the job pipeline — env, spawn, timeout, output rules, lifecycle — is provider-neutral.
+
+**Gotcha:** `codex exec resume` accepts only a subset of `codex exec`'s flags (no `--sandbox`,
+`-C/--cd`, `--profile`) and hard-errors on the rest, so the adapter drops unsupported ones on
+resumed turns and logs what it dropped. Dropping degrades toward Codex's *default* sandbox, never
+toward more access.
+
+**Job timeout:** defaults to 60 minutes, overridable per agent with `timeout_minutes`. A hung job
+holds one of only `MAX_CONCURRENT_JOBS` (3) slots for the full window, so raise it deliberately.
+
+---
+
 ## Key Behaviors & Gotchas
 
 - `sort_order` controls priority view ordering — `ORDER BY sort_order ASC NULLS LAST` is the primary sort for active tasks
