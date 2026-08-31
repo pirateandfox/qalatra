@@ -18,6 +18,26 @@
   normally with no controlling terminal (no tty/job-control noise on stderr), and the kill-then-resume
   cycle still works end to end through the production path.
 
+## `fields` projection on MCP read tools (2026-08-31)
+
+- Every read that matched a task returned its full `description` and `ai_context`. Both are freeform
+  and `ai_context` is append-only by design, so response size grew without bound and had nothing to
+  do with the query. Past the MCP output cap the call *fails* rather than truncating, so a status
+  read that cost nothing 99 times failed the 100th because of an unrelated task's history — observed
+  at 55,658 and 56,237 characters for a single matched task, from a caller that wanted about ten
+  scalar fields.
+- `search_tasks`, `get_tasks_by_agent`, `list_agent_jobs` and `get_agent_job` now accept `fields`.
+  Measured against the dev database: `search_tasks` 2,794 → 256 bytes, `list_agent_jobs` 5,326 → 297.
+- `get_agent_job` was the other half of the same report — a failed job's error could not be read
+  without dragging its prompt through the cap. Its description now points at
+  `fields="id,status,result,terminated_by"` for exactly that.
+- `id` is always included: a row the caller cannot then address is not actionable. An unknown field
+  throws and names the valid columns rather than being dropped — silently ignoring a typo returns
+  results that look complete while missing the column the caller was counting on.
+- Found while testing: `mcp/db.js` mirrors the `agent_jobs` migrations but had not been given the
+  new `runtime` column, so an MCP-first open of a fresh database would lack it. Added.
+- Covered by `scripts/test-field-select.mjs`, wired into `ci:server`.
+
 ## Agents run in their own cgroup slice (2026-08-31)
 
 - Qalatra Server, its MCP child, tmux sessions and every agent shared one cgroup. `memory.high`

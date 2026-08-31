@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { openDb, withTimestampZones } from '../db.js';
+import { selectFields, fieldsSchema } from '../field-select.js';
 
 export const toolDefs = [
   {
@@ -21,16 +22,18 @@ export const toolDefs = [
       properties: {
         task_id: { type: 'string', description: 'Filter by task ID' },
         limit:   { type: 'integer', description: 'Default 20' },
+        fields:  fieldsSchema('id,task_id,status,runtime,terminated_by,completed_at'),
       },
     },
   },
   {
     name: 'get_agent_job',
-    description: "Get the status and result of a specific agent job. status is one of queued|running|done|failed|orphaned|timed_out. Neither 'orphaned' (terminated_by='app_restart', terminated_boundary=killing instance's started_at, an app-restart interruption) nor 'timed_out' (terminated_by='timeout', Qalatra's own limit cutting off a working agent — resumable, since the session id survives) is an agent failure. The runtime field records which CLI ran the job (claude|codex|raw).",
+    description: "Get the status and result of a specific agent job. status is one of queued|running|done|failed|orphaned|timed_out. Neither 'orphaned' (terminated_by='app_restart', terminated_boundary=killing instance's started_at, an app-restart interruption) nor 'timed_out' (terminated_by='timeout', Qalatra's own limit cutting off a working agent — resumable, since the session id survives) is an agent failure. The runtime field records which CLI ran the job (claude|codex|raw). The job's prompt is usually the largest field by far and is rarely what you want — to diagnose a failure use fields=\"id,status,result,terminated_by\" rather than pulling the whole record through the output cap.",
     inputSchema: {
       type: 'object',
       properties: {
         job_id: { type: 'string' },
+        fields: fieldsSchema('id,status,result,terminated_by'),
       },
       required: ['job_id'],
     },
@@ -73,13 +76,13 @@ export const handlers = {
     const jobs = args.task_id
       ? db.prepare(`SELECT * FROM agent_jobs WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`).all(args.task_id, limit)
       : db.prepare(`SELECT * FROM agent_jobs ORDER BY created_at DESC LIMIT ?`).all(limit);
-    return withTimestampZones(jobs, 'agent_jobs');
+    return selectFields(withTimestampZones(jobs, 'agent_jobs'), args.fields);
   },
 
   get_agent_job(args) {
     const db = openDb();
     const job = db.prepare('SELECT * FROM agent_jobs WHERE id = ?').get(args.job_id);
     if (!job) throw new Error(`Job not found: ${args.job_id}`);
-    return withTimestampZones(job, 'agent_jobs');
+    return selectFields(withTimestampZones(job, 'agent_jobs'), args.fields);
   },
 };

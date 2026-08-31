@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate, daysBetween, offsetDate, withTimestampZones } from '../db.js';
 import { enrichTaskRows, getTaskDependencies, staleWhereClause } from './trust-signals.js';
+import { selectFields, fieldsSchema } from '../field-select.js';
 
 function spawnNextOccurrence(db, task, now) {
   if (!task.recurrence) return null;
@@ -225,6 +226,7 @@ export const toolDefs = [
         assigned_agent: { type: 'string', description: 'Filter by assigned_agent name (partial match, case-insensitive)' },
         agent_path:     { type: 'string', description: 'Filter by agent_path folder (partial match, e.g. "muzebook/agents/plan")' },
         limit:          { type: 'integer', description: 'Default 20' },
+        fields:         fieldsSchema('id,title,status,due_date,my_priority'),
       },
     },
   },
@@ -239,6 +241,7 @@ export const toolDefs = [
         job_status: { type: 'string', description: 'Filter by latest agent job status: queued | running | done | failed | orphaned | timed_out | none (no job ever queued)' },
         context:    { type: 'string', description: 'Optional context filter' },
         limit:      { type: 'integer', description: 'Default 50' },
+        fields:     fieldsSchema('id,title,status,agent_path,job_status,job_started_at'),
       },
       required: ['agent'],
     },
@@ -639,9 +642,10 @@ export const handlers = {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = args.limit ?? 20;
-    return db.prepare(
+    const rows = db.prepare(
       `SELECT * FROM tasks ${where} ORDER BY my_priority ASC, due_date ASC LIMIT ${limit}`
     ).all(params);
+    return selectFields(rows, args.fields);
   },
 
   get_tasks_by_agent(args) {
@@ -689,7 +693,7 @@ export const handlers = {
       }
     }
 
-    return { agent: args.agent, status, count: rows.length, tasks: rows };
+    return { agent: args.agent, status, count: rows.length, tasks: selectFields(rows, args.fields) };
   },
 
   complete_task(args) {
