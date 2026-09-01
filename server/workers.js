@@ -76,14 +76,46 @@ function defaultShell() {
  * The slice must also be given limits (MemoryHigh/MemoryMax) by the fleet — an unknown --slice= is
  * auto-created as transient with *no* limits, which places correctly but contains nothing.
  */
-let agentLauncherCache = null
+const AGENT_SLICE = 'qalatra-agents.slice'
+
+let systemdRunProbe = null
+function systemdRunAvailable() {
+  if (systemdRunProbe === null) {
+    systemdRunProbe = spawnSync('systemd-run', ['--user', '--scope', '--quiet', '--collect', 'true'], { stdio: 'ignore' }).status === 0
+  }
+  return systemdRunProbe
+}
+
+/**
+ * Is the slice a real unit with a finite ceiling?
+ *
+ * This is the safety interlock. systemd auto-creates an unknown --slice= with NO limits, so using
+ * the launcher before the fleet has installed the slice would move agents OUT of the server's capped
+ * cgroup and into an uncapped one — protecting the MCP endpoint but leaving a runaway agent
+ * completely unbounded, which is a worse blast radius than not doing this at all. Placement without
+ * limits is strictly worse than staying put, so refuse it.
+ *
+ * Deliberately NOT cached: the fleet installs the slice while the server is running, and this answer
+ * must be free to change from no to yes without waiting for a restart. One `systemctl show` per job
+ * launch, against a job that then runs for minutes.
+ */
+function agentSliceIsBounded() {
+  const shown = spawnSync('systemctl', ['--user', 'show', AGENT_SLICE, '-p', 'MemoryMax', '--value'], { encoding: 'utf8' })
+  if (shown.status !== 0) return false
+  const value = String(shown.stdout ?? '').trim()
+  return value !== '' && value !== 'infinity'
+}
+
+let lastLauncherState = null
 function agentLauncher() {
-  if (agentLauncherCache) return agentLauncherCache
-  const probe = spawnSync('systemd-run', ['--user', '--scope', '--quiet', '--collect', 'true'], { stdio: 'ignore' })
-  agentLauncherCache = probe.status === 0
-    ? ['systemd-run', '--user', '--scope', '--quiet', '--collect', '--slice=qalatra-agents.slice']
-    : []
-  return agentLauncherCache
+  let reason = null
+  if (!systemdRunAvailable()) reason = 'no systemd user manager'
+  else if (!agentSliceIsBounded()) reason = `${AGENT_SLICE} has no memory ceiling — agents stay in the server cgroup, which is at least bounded`
+  if (reason !== lastLauncherState) {
+    console.error(reason ? `[workers] agent slice isolation off: ${reason}` : `[workers] agent slice isolation on: ${AGENT_SLICE}`)
+    lastLauncherState = reason
+  }
+  return reason ? [] : ['systemd-run', '--user', '--scope', '--quiet', '--collect', `--slice=${AGENT_SLICE}`]
 }
 
 /**
@@ -227,7 +259,7 @@ function launchDiagnostics({ cwd, shellBin, env, agentCommand, commandMode, runt
     `- runtime: ${runtimeName || DEFAULT_RUNTIME}`,
     // Whether the run was placed in its own cgroup slice. If this says "none", agents share the
     // server's cgroup and one runaway can still throttle the MCP endpoint.
-    `- launcher: ${agentLauncher().length ? agentLauncher().join(' ') : 'none (agents share the server cgroup)'}`,
+    `- launcher: ${launcherDescription()}`,
     `- command template: ${sanitizeCommand(agentCommand)}`,
     `- PATH: ${env.PATH || '(unset)'}`,
   ]
@@ -248,6 +280,11 @@ function launchDiagnostics({ cwd, shellBin, env, agentCommand, commandMode, runt
   const lookup = commandLookup(shellBin, env, cwd)
   if (lookup) lines.push(`- login-shell lookup:\n${lookup}`)
   return lines.join('\n')
+}
+
+function launcherDescription() {
+  const launcher = agentLauncher()
+  return launcher.length ? launcher.join(' ') : `none (agents share the server cgroup; ${AGENT_SLICE} not installed or unbounded)`
 }
 
 function appendLaunchDiagnostics(result, context) {

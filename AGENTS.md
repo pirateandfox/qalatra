@@ -247,8 +247,15 @@ Linux. macOS, non-systemd Linux and no-user-manager all fall back to the previou
 tracked pid stays the agent's own shell and remains its process-group leader — a shell → agent →
 tool-subprocess tree showed three cgroup members before the kill and zero after.
 
-**The slice needs limits from the fleet.** An unknown `--slice=` is auto-created as transient with
-*no* limits, which places agents correctly and contains nothing. `qalatra-agents.slice` is installed
+**The slice needs limits from the fleet, and the code refuses to run without them.** An unknown
+`--slice=` is auto-created with *no* limits, so using the launcher before the fleet has installed the
+slice would move agents out of the server's capped cgroup into an uncapped one — protecting the MCP
+endpoint but leaving a runaway completely unbounded, which is a worse blast radius than not doing
+this at all. `agentLauncher()` therefore checks that the slice has a finite `MemoryMax` and falls
+back to the previous spawn when it does not: placement without limits is strictly worse than staying
+put. That check is deliberately not cached, so installing the slice takes effect on the next job
+without waiting for a server restart, and removing it reverts the same way. The ordering between the
+fleet role and the code is therefore a tidiness preference, not a safety requirement. `qalatra-agents.slice` is installed
 with per-host `MemoryHigh`/`MemoryMax`/`MemorySwapMax` by `roles/mcp_hygiene` in `qalatra-fleet`.
 Verify placement with `cat /proc/<agent-pid>/cgroup` — it should name `qalatra-agents.slice`, not
 `qalatra-server.service`. Launch diagnostics report the active launcher, or "none".

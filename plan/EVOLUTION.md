@@ -18,6 +18,25 @@
   normally with no controlling terminal (no tty/job-control noise on stderr), and the kill-then-resume
   cycle still works end to end through the production path.
 
+## Agent slice isolation refuses to run unbounded (2026-09-01)
+
+- The fleet role's assert only fires on a host that *enables* the slice. A host that never enables it
+  is silently unprotected — and that is exactly the state every host is in before this rolls out, so
+  the assert cannot cover the dangerous case. Shipping the code first would have moved agents out of
+  the server's capped cgroup into an uncapped auto-created slice: the MCP endpoint protected, but a
+  runaway agent completely unbounded, which is worse than not doing this at all.
+- `agentLauncher()` now checks that `qalatra-agents.slice` has a finite `MemoryMax` and falls back to
+  the previous spawn when it does not. Placement without limits is strictly worse than staying put,
+  so the code declines it rather than depending on deployment order.
+- The check is not cached, so the fleet installing the slice takes effect on the next job without a
+  server restart, and removing it reverts the same way. Verified on a box across all four states:
+  slice absent, present-but-unbounded, installed with limits, and limits removed again.
+- Also verified: an implicitly created slice (`Transient=no`, empty `FragmentPath`) does not shadow a
+  later on-disk unit file — after `daemon-reload` the fragment path moves to the file and its limits
+  apply. A leftover from earlier probing on a box is therefore harmless.
+- Measured agent footprint for sizing: a real `claude -p` agent is 254–347 MB resident, not the
+  ~85 MB a bare node process suggests, so three concurrent agents are ~1 GB at steady state.
+
 ## `fields` projection on MCP read tools (2026-08-31)
 
 - Every read that matched a task returned its full `description` and `ai_context`. Both are freeform
