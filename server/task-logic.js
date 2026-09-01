@@ -118,7 +118,70 @@ export function withTimestampZones(row, table) {
   return out
 }
 
-// ── ai_context ordering ─────────────────────────────────────────────────────────
+// ── ai_context ordering and cap ─────────────────────────────────────────────────
+
+// ai_context is append-only, and every read that matches a task carries the whole of it. Nothing
+// bounded it: a 15-minute heartbeat writing one entry per pass puts ~96 entries a day on a single
+// monitor task, so a caller doing a cheap status read eventually fails on the MCP output cap
+// because of history it never asked for. Keeping `description` short — the previous mitigation —
+// depends on caller discipline and does not touch ai_context at all.
+//
+// So the tail is capped here, at the one funnel every write goes through (MCP tools, the REST
+// worker, briefing/triage), and the oldest entries are dropped. Two budgets, whichever binds
+// first: entry count, and total characters for the case where a few entries are individually huge.
+export const AI_CONTEXT_MAX_ENTRIES = 50
+export const AI_CONTEXT_MAX_CHARS = 8000
+
+// An entry starts with its day stamp at the start of a line. Notes may themselves contain
+// newlines, so this — not every '\n' — is the entry boundary.
+const AI_CONTEXT_ENTRY_START = /^\[\d{4}-\d{2}-\d{2}\] /
+// Bracketed like an entry so the UI thread renders it (DetailPanel matches /^\[(.+?)\]\s*(.+)$/),
+// but not date-stamped, so re-parsing never mistakes it for one.
+const AI_CONTEXT_TRIM_MARKER = /^\[…\] (\d+) earlier entr(?:y|ies) trimmed$/
+
+function trimMarker(count) {
+  return `[…] ${count} earlier ${count === 1 ? 'entry' : 'entries'} trimmed`
+}
+
+// Split ai_context into its day-stamped entries. Anything before the first stamp (a previous trim
+// marker, or legacy unstamped content) comes back as the first chunk.
+function splitAiContext(text) {
+  const chunks = []
+  for (const line of text.split('\n')) {
+    if (chunks.length === 0 || AI_CONTEXT_ENTRY_START.test(line)) chunks.push(line)
+    else chunks[chunks.length - 1] += `\n${line}`
+  }
+  return chunks
+}
+
+// Keep the newest entries within both budgets, replacing what was dropped with a visible marker.
+// Trimming the *oldest* is only correct because appendAiContext is chronological (bug C24) — the
+// two have to be settled together or a cap silently destroys the newest context instead.
+export function capAiContext(text) {
+  if (!text) return text ?? null
+
+  const chunks = splitAiContext(text)
+  // Carry a previous marker's count forward rather than stacking markers, so the number stays a
+  // running total of everything ever dropped from this task.
+  const priorMarker = chunks.length ? chunks[0].match(AI_CONTEXT_TRIM_MARKER) : null
+  const entries = priorMarker ? chunks.slice(1) : chunks
+  const priorDropped = priorMarker ? Number(priorMarker[1]) : 0
+
+  const kept = []
+  let chars = 0
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const withEntry = chars + entries[i].length + (kept.length ? 1 : 0)
+    // `kept.length &&` on the char budget: one entry always survives, even an oversized one.
+    // Dropping it would erase the newest context — the one thing the caller definitely wants.
+    if (kept.length >= AI_CONTEXT_MAX_ENTRIES || (kept.length && withEntry > AI_CONTEXT_MAX_CHARS)) break
+    kept.unshift(entries[i])
+    chars = withEntry
+  }
+
+  const dropped = priorDropped + (entries.length - kept.length)
+  if (dropped === 0) return text
+  return `${trimMarker(dropped)}\n${kept.join('\n')}`
+}
 
 // Append a day-stamped note to a task's ai_context, chronological / newest-last (bug C24).
 // Both surfaces must use this same ordering so a task touched by both MCP and the UI keeps
@@ -126,7 +189,7 @@ export function withTimestampZones(row, table) {
 export function appendAiContext(existing, note) {
   if (!note) return existing ?? null
   const entry = `[${today()}] ${note}`
-  return existing ? `${existing}\n${entry}` : entry
+  return capAiContext(existing ? `${existing}\n${entry}` : entry)
 }
 
 // ── Recurrence ─────────────────────────────────────────────────────────────────

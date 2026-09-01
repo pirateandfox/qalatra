@@ -92,7 +92,7 @@ export const toolDefs = [
         source_url:      { type: 'string', description: 'Deep link back to the original task/item' },
         source_priority: { type: 'string', description: 'Priority in the originating system' },
         tags:            { type: 'string', description: 'Comma-separated tags' },
-        ai_context:      { type: 'string', description: 'Initial context note' },
+        ai_context:      { type: 'string', description: 'Initial context note (day-stamped automatically; later notes append newest-last)' },
         status:          { type: 'string', description: 'active (default) | snoozed | backlog | archived' },
         task_type:       { type: 'string', description: 'task (default) | event | reminder | reading | coding. Set coding only to explicitly route to the Code view. Agents can be assigned to any task type.' },
         event_time:      { type: 'string', description: 'HH:MM start time for events (e.g. 14:30). Null = all-day.' },
@@ -109,7 +109,7 @@ export const toolDefs = [
   },
   {
     name: 'update_task',
-    description: 'Update fields on a task. ai_context is prepended (timestamped) rather than overwritten.',
+    description: 'Update fields on a task. ai_context is appended (day-stamped, newest last) rather than overwritten, and its oldest entries are trimmed once it passes 50 entries or 8k characters — a visible "[…] N earlier entries trimmed" marker replaces them. Keep notes short; the full running history is not preserved forever.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -129,7 +129,7 @@ export const toolDefs = [
         surface_after:   { type: 'string' },
         source_url:      { type: 'string' },
         tags:            { type: 'string' },
-        ai_context:      { type: 'string', description: 'New note to prepend (timestamped automatically)' },
+        ai_context:      { type: 'string', description: 'New note to append (day-stamped automatically, newest last). Oldest entries are trimmed past 50 entries / 8k chars.' },
         task_type:       { type: 'string', description: 'task | event | reminder | coding | reading' },
         event_time:      { type: 'string', description: 'HH:MM start time for events. Null = all-day.' },
         end_time:        { type: 'string', description: 'HH:MM end time for events. Defaults to 1hr after event_time if omitted.' },

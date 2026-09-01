@@ -37,6 +37,34 @@
 - Measured agent footprint for sizing: a real `claude -p` agent is 254–347 MB resident, not the
   ~85 MB a bare node process suggests, so three concurrent agents are ~1 GB at steady state.
 
+## `ai_context` is capped, and append/prepend is settled (2026-09-01)
+
+- The other half of the same platform report as the `fields` projection below. `fields` lets a
+  disciplined caller skip `ai_context`; it does nothing for one that legitimately wants it, and
+  nothing about the growth itself. `appendAiContext` was unbounded, so the pipeline's 15-minute
+  heartbeat put ~96 entries a day onto one daily monitor task — the cap gets breached again no
+  matter how compact the `description` is kept.
+- `capAiContext` in `server/task-logic.js` now keeps the newest **50 entries / 8k characters**
+  (whichever binds first) and replaces what it drops with a visible `[…] N earlier entries trimmed`
+  marker. It is applied inside `appendAiContext`, the single funnel every write goes through (MCP
+  tools, the REST worker, briefing, triage), so no surface can bypass it.
+- **The ordering contradiction had to be settled first.** The code appends (newest last, enforced by
+  bug C24's parity test), but `update_task`'s own tool description said *"ai_context is prepended"*
+  and *"New note to prepend"* — so agents were told newest-first while reading oldest-first. A cap
+  written against the documented order would have trimmed the newest entries. The descriptions are
+  now corrected to match the code, and they state the cap.
+- Entry boundaries are day stamps at line start, not newlines, so a multi-line note stays one entry
+  rather than being shredded into fragments by the trim. A prior marker's count is carried forward
+  into the new one instead of markers stacking, so the number is a running total. One entry always
+  survives even if it alone exceeds the char budget — erasing it would destroy the newest context,
+  which is the one thing the caller definitely wants.
+- The marker is bracketed like an entry so `DetailPanel`'s thread renders it (in the date column as
+  `…`), but is not date-stamped, so re-parsing never mistakes it for one.
+- Covered by `scripts/test-ai-context-cap.mjs`, wired into `ci:server`.
+- Deliberately not done: §4 of the report (truncating `description`/`ai_context` in list responses
+  by default). It changes existing behaviour for every caller; `fields` plus this cap should make it
+  unnecessary.
+
 ## `fields` projection on MCP read tools (2026-08-31)
 
 - Every read that matched a task returned its full `description` and `ai_context`. Both are freeform

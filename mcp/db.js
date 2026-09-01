@@ -12,13 +12,13 @@ import { ensureDailyNoteSearchSchema } from '../server/daily-note-search.js';
 // them from '../db.js' as before, now backed by that one implementation.
 import {
   today, nowIso, offsetDate, daysBetween, addMinutesFromNow,
-  appendAiContext, LEGACY_RRULE, toRruleString, rruleToText,
+  appendAiContext, capAiContext, LEGACY_RRULE, toRruleString, rruleToText,
   nextRecurrenceDate, isAgentScheduleDue, nextRunAt,
   isHabitDueOn, DAY_ABBR_TO_DOW, withTimestampZones,
 } from '../server/task-logic.js';
 export {
   today, nowIso, offsetDate, daysBetween, addMinutesFromNow,
-  appendAiContext, LEGACY_RRULE, toRruleString, rruleToText,
+  appendAiContext, capAiContext, LEGACY_RRULE, toRruleString, rruleToText,
   nextRecurrenceDate, isAgentScheduleDue, nextRunAt,
   isHabitDueOn, DAY_ABBR_TO_DOW, withTimestampZones,
 };

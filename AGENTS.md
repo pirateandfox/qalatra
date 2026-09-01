@@ -280,6 +280,15 @@ toward more access.
 
 ## Key Behaviors & Gotchas
 
+- `ai_context` is **append-only and day-stamped, newest last** — `appendAiContext` in
+  `server/task-logic.js` is the single funnel every surface writes through. It caps the tail at the
+  newest 50 entries / 8k characters and leaves a visible `[…] N earlier entries trimmed` marker;
+  entry boundaries are day stamps at line start, so a multi-line note stays one entry. Never write
+  the column directly — a bypass loses both the ordering and the cap.
+- MCP read tools that can match many tasks (`search_tasks`, `get_tasks_by_agent`, `list_agent_jobs`,
+  `get_agent_job`) take a `fields` projection. Past the MCP output cap a response *fails* rather
+  than truncating, so bulk/status reads should name the columns they need instead of dragging
+  `description`, `ai_context`, or a job's `prompt` through.
 - `sort_order` controls priority view ordering — `ORDER BY sort_order ASC NULLS LAST` is the primary sort for active tasks
 - Events (`task_type = 'event'`) are permanent dated records — never go overdue, never get status transitions
 - `surface_after` is strictly for snoozing existing tasks — never set it when creating a new task
