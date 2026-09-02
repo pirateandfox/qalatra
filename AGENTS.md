@@ -224,6 +224,13 @@ buffering (`raw`, `stream: false`) at 5 MB.
   streamed output can. Off by default because one long tool call (a full test suite, a big build)
   legitimately emits nothing for a while.
 
+**Timeout clocks do not run on Qalatra Server's event loop.** Each live agent gets a small watchdog
+worker (`server/agent-watchdog.js`) whose independent event loop owns the wall-clock and idle timers
+and kills the agent process group itself. A shared atomic flag records which limit fired before the
+kill, so even if the server loop was blocked past the deadline its eventual close handler records
+`timed_out` accurately. If the watchdog cannot be armed, Qalatra stops the agent instead of allowing
+it to run without its configured safety boundary.
+
 **Agents run detached, in their own process group.** SIGKILL to the tracked pid is not enough: the
 login shell `exec`s through to the agent CLI, so that pid *is* the agent — but the agent's own
 children (a test run, a build, an MCP server it started) get reparented and keep running. Measured

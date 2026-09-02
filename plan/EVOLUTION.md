@@ -1,5 +1,32 @@
 # Qalatra — Evolution Notes
 
+## Agent timeouts are independent of the server event loop (2026-09-02)
+
+- Both `timeout_minutes` and `idle_timeout_minutes` were `setTimeout` callbacks on Qalatra Server's
+  own event loop. If output parsing, GC pressure, or another synchronous path froze that loop, the
+  callback intended to stop the offending job could not run. The configured 60-minute boundary was
+  therefore only a boundary while the server was healthy.
+- Every running agent now has a small worker-thread watchdog in `server/agent-watchdog.js`. Its
+  independent event loop owns both deadlines and directly kills the agent's detached process group
+  (`taskkill /T /F` on Windows); output activity is timestamped and sent to it to reset the optional
+  idle deadline.
+- The watchdog stores `wall-clock` versus `idle` in a `SharedArrayBuffer` before signalling the
+  process. When Qalatra's main loop eventually resumes, it reads that atomic state synchronously and
+  persists `timed_out` / `terminated_by = 'timeout'` exactly as before — no race with queued IPC or
+  child-close events. Failure to create the watchdog fails the job closed rather than silently
+  running it without a safety boundary.
+- `scripts/test-agent-watchdog.mjs` deliberately occupies the main event loop past both deadlines
+  and proves the independent watchdog still records the reason and kills the process. It also covers
+  idle activity reset and cancellation, and is wired into `ci:server`.
+
+## Release-gate dependency maintenance (2026-09-02)
+
+- Refreshed lockfile-resolved UI build dependencies to `@humanfs/node` 0.16.8 and `browserslist`
+  4.28.8 after new moderate/high advisories entered the release audit.
+- Refreshed the mobile lock's compatible patch releases, including Expo Metro 56.0.2 / Metro 0.84.5
+  and `browserslist` 4.28.8. The remaining three advisories are the existing, narrowly documented
+  exceptions in `scripts/audit-mobile.mjs`; no mobile artifact is published by this release.
+
 ## Agent timeouts kill the whole process tree (2026-08-31)
 
 - A timeout called `proc.kill('SIGKILL')` on the tracked pid. That pid really is the agent — the

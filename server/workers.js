@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { scanAgents } from './agents.js'
 import { syncPendingAttachments } from './attachments.js'
 import { getRuntime, isKnownRuntime, DEFAULT_RUNTIME, runtimeNames } from './agent-runtimes.js'
+import { createAgentWatchdog } from './agent-watchdog.js'
 
 const MAX_CONCURRENT_JOBS = 3
 /** stderr is stored verbatim in job results, so keep it bounded on a long or noisy run. */
@@ -446,8 +447,8 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     const stream = isTemplateCommand ? false : cfg?.stream !== false
     const consumer = runtime.createConsumer({ stream })
     let stderr = ''
-    let timeoutKind = null           // 'wall-clock' | 'idle' once a timer fires
-    let idleTimer = null
+    let watchdog = null
+    let watchdogArmError = null
     let idleMinutes = 0
     let bumpIdle = () => {}
     let settled = false
@@ -542,23 +543,30 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     // MAX_CONCURRENT_JOBS slots for the whole window, so this stays bounded. 60 sits just above the
     // 45 that every deliberately-configured agent here settled on. Override with timeout_minutes.
     const timeoutMinutes = cfg?.timeout_minutes ?? 60
-    const timeout = setTimeout(() => { timeoutKind = 'wall-clock'; killProcessTree(proc) }, timeoutMinutes * 60 * 1000)
     // Opt-in second limit: a wall clock can't tell a productive 50-minute run from one wedged after
     // 90 seconds, but streamed output can. Left off by default because a single long tool call
     // (a full test suite, a big build) legitimately emits nothing for a while.
     idleMinutes = Number(cfg?.idle_timeout_minutes) || 0
-    bumpIdle = () => {
-      if (!idleMinutes) return
-      clearTimeout(idleTimer)
-      idleTimer = setTimeout(() => { timeoutKind = 'idle'; killProcessTree(proc) }, idleMinutes * 60 * 1000)
+    try {
+      watchdog = createAgentWatchdog({
+        pid: proc.pid,
+        wallClockMs: timeoutMinutes * 60 * 1000,
+        idleTimeoutMs: idleMinutes * 60 * 1000,
+        label: job.id,
+      })
+    } catch (err) {
+      // Running without the configured safety boundary is worse than failing this one job visibly.
+      watchdogArmError = err.message
+      killProcessTree(proc)
+      console.error(`[workers] ${err.message}`)
     }
-    bumpIdle()
+    bumpIdle = () => watchdog?.activity()
 
     proc.on('close', code => {
       if (settled) return
       settled = true
-      clearTimeout(timeout)
-      clearTimeout(idleTimer)
+      const timeoutKind = watchdog?.timeoutKind ?? null
+      watchdog?.cancel()
       runningAgentProcs.delete(proc)
       runningJobs--
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
@@ -570,11 +578,13 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       // event, not an agent failure — so it gets its own terminal status alongside `orphaned`
       // rather than polluting failure counts. Streaming means sessionId survives the kill, so
       // these stay resumable (see the resume lookup in db-worker.js).
-      const status = timeoutKind ? 'timed_out' : (code === 0 ? 'done' : 'failed')
+      const status = watchdogArmError ? 'failed' : (timeoutKind ? 'timed_out' : (code === 0 ? 'done' : 'failed'))
       const timeoutNotice = timeoutKind === 'idle'
         ? `Agent killed after ${idleMinutes} minutes with no output (idle_timeout_minutes).`
         : `Agent timed out after ${timeoutMinutes} minutes (set timeout_minutes in agent.config to raise it).`
-      if (timeoutKind) {
+      if (watchdogArmError) {
+        result = `${watchdogArmError}\n\nThe agent was stopped rather than allowed to run without its configured timeout.${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
+      } else if (timeoutKind) {
         const partial = result ? `\n\nPartial output before the kill:\n${result}` : ''
         const resumable = sessionId ? `\n\nSession ${sessionId} is resumable — send a follow-up message on this task to continue it.` : ''
         result = `${timeoutNotice}${resumable}${partial}${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
@@ -601,8 +611,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     proc.on('error', err => {
       if (settled) return
       settled = true
-      clearTimeout(timeout)
-      clearTimeout(idleTimer)
+      watchdog?.cancel()
       runningAgentProcs.delete(proc)
       runningJobs--
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
