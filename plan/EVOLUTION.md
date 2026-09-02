@@ -26,6 +26,9 @@
 - Refreshed the mobile lock's compatible patch releases, including Expo Metro 56.0.2 / Metro 0.84.5
   and `browserslist` 4.28.8. The remaining three advisories are the existing, narrowly documented
   exceptions in `scripts/audit-mobile.mjs`; no mobile artifact is published by this release.
+- Hardened the MCP API-lock lifecycle test after a loaded GitHub runner took longer than its fixed
+  500 ms startup sleep. It now waits up to five seconds for the actual `EADDRINUSE` retry log, using
+  the test suite's existing bounded predicate helper.
 
 ## Agent timeouts kill the whole process tree (2026-08-31)
 

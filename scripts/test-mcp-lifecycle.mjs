@@ -175,7 +175,9 @@ async function testApiLockPrecedesMcpSpawn() {
     const mcpPort = await freePort()
     const run = startQalatra({ dataDir, apiPort, mcpPort })
     try {
-      await delay(500)
+      // A loaded CI runner can spend more than 500 ms opening the DB worker before listen() reaches
+      // EADDRINUSE. Wait for the behavior under test instead of racing startup with a fixed sleep.
+      await waitUntil(() => /API port .* in use/.test(run.output()), 5_000, 'API-port retry log')
       assert.equal(run.child.exitCode, null, `losing API process should remain in its existing retry path\n${run.output()}`)
       await assertPortCanBind(mcpPort)
       assert.match(run.output(), /API port .* in use/)
