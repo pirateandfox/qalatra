@@ -1,5 +1,15 @@
 # Qalatra — Evolution Notes
 
+## macOS 25.6 release signing uses the correct keychain password (2026-09-07)
+
+- The `v1.9.40` macOS build exposed an electron-builder bug that macOS 25.5 tolerated and 25.6
+  rejects: `security set-key-partition-list -k` received the imported `.p12` password instead of the
+  randomly generated temporary keychain password, so signing stopped at `SecKeychainUnlock` before
+  the certificate or notarization step.
+- electron-builder 26.16.1 contains the upstream v26 backport that threads the correct keychain
+  password into that command. Qalatra now requires that patched release so hosted macOS builds work
+  on the current GitHub runner image.
+
 ## Template-command quoting hazards are visible at launch (2026-09-05)
 
 - Template substitution already shell-quotes task titles and descriptions and correctly consumes an
