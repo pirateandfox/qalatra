@@ -142,12 +142,27 @@ function compactTemplateValue(value) {
   return String(value ?? '').replace(/\r?\n/g, ' ')
 }
 
-function replaceShellPlaceholder(command, name, value) {
+export function replaceShellPlaceholder(command, name, value, { onWarn = console.error } = {}) {
   const quoted = shellQuote(compactTemplateValue(value))
-  return command
+  const exactReplaced = command
     .replaceAll(`'{${name}}'`, quoted)
     .replaceAll(`"{${name}}"`, quoted)
-    .replaceAll(`{${name}}`, quoted)
+
+  // Bare placeholders are supported for compatibility, but a quote immediately before one after
+  // the exact quote-delimited forms have been consumed means the author almost certainly appended
+  // text inside the quote. Inserting our already-shell-quoted value there closes that quote early
+  // and can reduce a multi-word prompt to its first bare word.
+  const placeholder = `{${name}}`
+  let offset = exactReplaced.indexOf(placeholder)
+  while (offset !== -1) {
+    const openingQuote = exactReplaced[offset - 1]
+    if ((openingQuote === "'" || openingQuote === '"') && exactReplaced[offset + placeholder.length] !== openingQuote) {
+      onWarn(`unsafe quoted {${name}} placeholder: the opening ${openingQuote} is not immediately closed after the placeholder; keep ${openingQuote}{${name}}${openingQuote} exact and concatenate extra text outside it`)
+    }
+    offset = exactReplaced.indexOf(placeholder, offset + placeholder.length)
+  }
+
+  return exactReplaced.replaceAll(placeholder, quoted)
 }
 
 function validEnvName(name) {
@@ -220,6 +235,12 @@ function sanitizeCommand(command) {
     .replace(/(https?:\/\/[^:\s/]+:)[^@\s/]+@/gi, '$1[redacted]@')
 }
 
+export function commandDiagnosticLines(agentCommand, resolvedCommand = null) {
+  const lines = [`- command template: ${sanitizeCommand(agentCommand)}`]
+  if (resolvedCommand != null) lines.push(`- resolved command: ${sanitizeCommand(resolvedCommand)}`)
+  return lines
+}
+
 function commandLookup(shellBin, env, cwd) {
   if (process.platform === 'win32') return null
   const script = [
@@ -246,7 +267,7 @@ function commandLookup(shellBin, env, cwd) {
   }
 }
 
-function launchDiagnostics({ cwd, shellBin, env, agentCommand, commandMode, runtimeName }) {
+function launchDiagnostics({ cwd, shellBin, env, agentCommand, resolvedCommand, commandMode, runtimeName }) {
   const home = env.HOME || os.homedir()
   const markers = presentEnvMarkers(env)
   const lines = [
@@ -261,7 +282,7 @@ function launchDiagnostics({ cwd, shellBin, env, agentCommand, commandMode, runt
     // Whether the run was placed in its own cgroup slice. If this says "none", agents share the
     // server's cgroup and one runaway can still throttle the MCP endpoint.
     `- launcher: ${launcherDescription()}`,
-    `- command template: ${sanitizeCommand(agentCommand)}`,
+    ...commandDiagnosticLines(agentCommand, resolvedCommand),
     `- PATH: ${env.PATH || '(unset)'}`,
   ]
   // Only surface the config paths that belong to the runtime that actually failed; dumping Claude's
@@ -455,12 +476,13 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     let proc
     let promptFile = null
     let specFile = null
+    let resolvedCommand = null
     let bin = ''
     let spawnArgs = []
 
     try {
       if (isTemplateCommand) {
-        let resolvedCommand = agentCommand
+        resolvedCommand = agentCommand
         if (agentCommand.includes('{spec_file}')) {
           // Per-job spec filename (bug C13): a fixed spec.md is clobbered when two jobs for the
           // same agent land in one batch (they spawn back-to-back without awaiting), so job 1's
@@ -474,10 +496,14 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         if (agentCommand.includes('{description}') || agentCommand.includes('{title}')) {
           const task = job.task_id ? await dbCall('getTask', job.task_id) : null
           if (agentCommand.includes('{description}')) {
-            resolvedCommand = replaceShellPlaceholder(resolvedCommand, 'description', task?.description ?? job.user_message ?? '')
+            resolvedCommand = replaceShellPlaceholder(resolvedCommand, 'description', task?.description ?? job.user_message ?? '', {
+              onWarn: message => console.error(`[workers] job ${job.id} template warning: ${message}`),
+            })
           }
           if (agentCommand.includes('{title}')) {
-            resolvedCommand = replaceShellPlaceholder(resolvedCommand, 'title', task?.title ?? '')
+            resolvedCommand = replaceShellPlaceholder(resolvedCommand, 'title', task?.title ?? '', {
+              onWarn: message => console.error(`[workers] job ${job.id} template warning: ${message}`),
+            })
           }
         }
         bin = shellBin
@@ -523,7 +549,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${spawnErr.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, commandMode: isTemplateCommand ? 'template' : 'prompt', runtimeName },
+        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode: isTemplateCommand ? 'template' : 'prompt', runtimeName },
       )
       await dbCall('finishAgentJob', job.id, 'failed', result, null)
       continue
@@ -599,6 +625,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
           shellBin,
           env: agentEnv,
           agentCommand,
+          resolvedCommand,
           commandMode: isTemplateCommand ? 'template' : 'prompt',
           runtimeName,
         })
@@ -618,7 +645,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, commandMode: isTemplateCommand ? 'template' : 'prompt', runtimeName },
+        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode: isTemplateCommand ? 'template' : 'prompt', runtimeName },
       )
       finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null })
         .catch(err => console.error(`[workers] agent error handler failed for job ${job.id}: ${err.message}`))

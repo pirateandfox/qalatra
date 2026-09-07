@@ -1,5 +1,19 @@
 # Qalatra — Evolution Notes
 
+## Template-command quoting hazards are visible at launch (2026-09-05)
+
+- Template substitution already shell-quotes task titles and descriptions and correctly consumes an
+  author's exact `'{description}'`, `"{description}"`, `'{title}'`, or `"{title}"` wrapper. The bare
+  placeholder compatibility fallback could also fire inside an author's still-open quote when text
+  was appended before the closing quote. That produces nested shell quoting and can truncate a
+  multi-word cloud-agent prompt to its first bare word.
+- Launch now warns with the job id when the bare fallback sees a quote immediately before the
+  placeholder without the same quote immediately after it. Exact quote-delimited and genuinely bare
+  placeholders remain supported unchanged.
+- Failed-job launch diagnostics now include the sanitized resolved template command alongside the
+  sanitized command template, making the actual shell input available without reconstructing it by
+  hand. Regression coverage is in `scripts/test-worker-command-templates.mjs` and `ci:server`.
+
 ## Agent timeouts are independent of the server event loop (2026-09-02)
 
 - Both `timeout_minutes` and `idle_timeout_minutes` were `setTimeout` callbacks on Qalatra Server's
