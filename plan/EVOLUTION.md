@@ -1,5 +1,23 @@
 # Qalatra — Evolution Notes
 
+## Agent timeouts reap the systemd scope, including escaped tool processes (2026-09-07)
+
+- The independent watchdog killed an agent's detached process group, but Claude Code starts Bash
+  tools as their own process-group leaders. A tool that called `setsid`, reparented, or double-forked
+  could therefore survive the timeout while remaining charged to its transient systemd scope.
+  One leaked `ugrep` kept Drift's shared `qalatra-agents.slice` above `MemoryHigh` for 20.5 hours;
+  40 subsequent jobs stalled in cgroup reclaim and hit their exact 30-minute limits without output.
+- Linux/systemd launches now have deterministic `qalatra-agent-<job-id>.scope` names. The watchdog
+  and server shutdown path kill every process in that scope through systemd, while retaining the
+  process-group/tree fallbacks for non-systemd POSIX hosts and Windows. The scope name is decided
+  before spawn, so cleanup does not depend on `/proc/<agent-pid>` still existing at timeout.
+- Every transient scope also receives `MemoryHigh=1G`, `MemoryMax=2G`, and `OOMPolicy=kill`.
+  Reclaim pressure is contained and throttled at the individual run first; a runaway that reaches
+  the hard ceiling has its whole scope terminated instead of consuming the shared slice indefinitely.
+- The watchdog regression test starts a `setsid sleep` outside its agent's process group, triggers
+  the deadline, and verifies both the escaped process and collected scope are gone. It runs when a
+  systemd user manager is available and skips only that Linux-specific case elsewhere.
+
 ## macOS 25.6 release signing uses the correct keychain password (2026-09-07)
 
 - The `v1.9.40` macOS build exposed an electron-builder bug that macOS 25.5 tolerated and 25.6

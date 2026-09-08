@@ -11,17 +11,47 @@ function timeoutKind(code) {
   return null
 }
 
-function killProcessTree(pid) {
+function killSystemdScope(scopeUnit) {
+  if (process.platform !== 'linux' || !scopeUnit) return false
+  if (!/^[A-Za-z0-9_.@:-]+\.scope$/.test(scopeUnit)) {
+    throw new Error(`Refusing to kill invalid systemd scope name: ${scopeUnit}`)
+  }
+
+  const killed = spawnSync(
+    'systemctl',
+    ['--user', 'kill', '--kill-whom=all', '--signal=SIGKILL', scopeUnit],
+    { encoding: 'utf8', timeout: 5_000 },
+  )
+  if (killed.error) throw killed.error
+  if (killed.status === 0) return true
+  const detail = String(killed.stderr || killed.stdout || '').trim()
+  if (/not loaded|not found|does not exist/i.test(detail)) return false
+  throw new Error(`Could not kill agent scope ${scopeUnit}${detail ? `: ${detail}` : ` (systemctl exit ${killed.status})`}`)
+}
+
+function killProcessTree(pid, scopeUnit) {
   if (process.platform === 'win32') {
     const killed = spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
     if (killed.error) throw killed.error
     return
   }
 
+  // A tool can call setsid(), double-fork, or otherwise leave the agent's process group while
+  // remaining in its systemd scope. Kill the resource boundary first; unlike a negative-pid signal,
+  // systemd reaches every process still charged to the run's cgroup.
+  let scopeError = null
+  try {
+    if (killSystemdScope(scopeUnit)) return
+  } catch (err) {
+    scopeError = err
+  }
+
   try {
     process.kill(-pid, 'SIGKILL') // negative pid = the whole group from detached:true
+    if (scopeError) throw scopeError
     return
   } catch (err) {
+    if (scopeError && err === scopeError) throw err
     if (err.code !== 'ESRCH') throw err
   }
 
@@ -29,10 +59,11 @@ function killProcessTree(pid) {
   try { process.kill(pid, 'SIGKILL') } catch (err) {
     if (err.code !== 'ESRCH') throw err
   }
+  if (scopeError) throw scopeError
 }
 
 function startWatchdog() {
-  const { pid, wallClockDeadline, initialActivityAt, idleTimeoutMs, stateBuffer } = workerData
+  const { pid, scopeUnit, wallClockDeadline, initialActivityAt, idleTimeoutMs, stateBuffer } = workerData
   const state = new Int32Array(stateBuffer)
   let wallClockTimer = null
   let idleTimer = null
@@ -51,7 +82,7 @@ function startWatchdog() {
     // Store the reason before signalling. The server's close callback may run as soon as the
     // process dies; the shared atomic makes classification independent of IPC message ordering.
     Atomics.store(state, 0, code)
-    try { killProcessTree(pid) } catch (err) { reportError(err) }
+    try { killProcessTree(pid, scopeUnit) } catch (err) { reportError(err) }
   }
 
   const armAt = (deadline, callback) => {
@@ -85,11 +116,11 @@ if (!isMainThread) startWatchdog()
  * Arm a timeout in a separate Node worker event loop.
  *
  * A timer on Qalatra Server's main event loop cannot enforce the deadline when that same loop is
- * blocked. The worker owns both the clocks and the process-tree kill. A SharedArrayBuffer carries
- * the fired reason back synchronously, so a delayed main loop still persists `timed_out` rather
- * than mistaking the watchdog's SIGKILL for an agent failure.
+ * blocked. The worker owns both the clocks and the scope/process-tree kill. A SharedArrayBuffer
+ * carries the fired reason back synchronously, so a delayed main loop still persists `timed_out`
+ * rather than mistaking the watchdog's SIGKILL for an agent failure.
  */
-export function createAgentWatchdog({ pid, wallClockMs, idleTimeoutMs = 0, label = String(pid), logger = console }) {
+export function createAgentWatchdog({ pid, scopeUnit = null, wallClockMs, idleTimeoutMs = 0, label = String(pid), logger = console }) {
   const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT))
   const initialActivityAt = Date.now()
   const wallClockDeadline = initialActivityAt + wallClockMs
@@ -98,7 +129,7 @@ export function createAgentWatchdog({ pid, wallClockMs, idleTimeoutMs = 0, label
   try {
     worker = new Worker(new URL(import.meta.url), {
       name: `qalatra-agent-watchdog-${label}`,
-      workerData: { pid, wallClockDeadline, initialActivityAt, idleTimeoutMs, stateBuffer: state.buffer },
+      workerData: { pid, scopeUnit, wallClockDeadline, initialActivityAt, idleTimeoutMs, stateBuffer: state.buffer },
     })
   } catch (err) {
     throw new Error(`Could not arm independent timeout watchdog for agent ${label}: ${err.message}`)

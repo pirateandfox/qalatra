@@ -13,7 +13,7 @@ const MAX_CONCURRENT_JOBS = 3
 const MAX_STDERR = 256 * 1024
 let runningJobs = 0
 
-/** Live agent processes, so a server shutdown can take their process groups down with it. */
+/** Live agent runs, so a server shutdown can take their scopes/process groups down with it. */
 const runningAgentProcs = new Set()
 
 /**
@@ -22,16 +22,33 @@ const runningAgentProcs = new Set()
  * SIGKILL to the tracked pid is not enough. The login shell execs through to the agent CLI, so that
  * pid really is the agent — but the agent's own children (a test run, a build, an MCP server it
  * spawned) are reparented and keep running. Measured directly: killing the pid alone left the tool
- * subprocess alive and holding resources. Agents are therefore spawned detached, which puts the run
- * in its own process group, and a negative pid signals every descendant at once.
+ * subprocess alive and holding resources. On Linux/systemd, the named per-job scope is the durable
+ * boundary: it still contains descendants that call setsid or double-fork. Other POSIX hosts use a
+ * detached process group as the best available boundary, and Windows uses taskkill's tree walk.
  */
-function killProcessTree(proc) {
+function killProcessTree(run) {
+  const proc = run?.proc ?? run
+  const scopeUnit = run?.scopeUnit ?? null
   if (!proc?.pid) return
   if (process.platform === 'win32') {
     // Windows has no process groups to signal; taskkill /T walks the child tree instead.
     try { spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' }) } catch {}
     return
   }
+
+  if (scopeUnit) {
+    const killed = spawnSync(
+      'systemctl',
+      ['--user', 'kill', '--kill-whom=all', '--signal=SIGKILL', scopeUnit],
+      { encoding: 'utf8', timeout: 5_000 },
+    )
+    if (!killed.error && killed.status === 0) return
+    const detail = killed.error?.message || String(killed.stderr || killed.stdout || '').trim() || `exit ${killed.status}`
+    if (!/not loaded|not found|does not exist/i.test(detail)) {
+      console.error(`[workers] scope kill failed for ${scopeUnit}: ${detail}; falling back to process-group kill`)
+    }
+  }
+
   try {
     process.kill(-proc.pid, 'SIGKILL')   // negative pid = the whole group from detached:true
     return
@@ -78,6 +95,8 @@ function defaultShell() {
  * auto-created as transient with *no* limits, which places correctly but contains nothing.
  */
 const AGENT_SLICE = 'qalatra-agents.slice'
+const PER_AGENT_MEMORY_HIGH = '1G'
+const PER_AGENT_MEMORY_MAX = '2G'
 
 let systemdRunProbe = null
 function systemdRunAvailable() {
@@ -108,7 +127,31 @@ function agentSliceIsBounded() {
 }
 
 let lastLauncherState = null
-function agentLauncher() {
+function agentScopeUnit(jobId) {
+  const safeId = String(jobId).replace(/[^A-Za-z0-9_.:-]/g, '-').slice(0, 180)
+  return `qalatra-agent-${safeId}.scope`
+}
+
+export function buildSystemdAgentLauncher(jobId) {
+  const scopeUnit = agentScopeUnit(jobId)
+  return {
+    scopeUnit,
+    args: [
+      'systemd-run',
+      '--user',
+      '--scope',
+      '--quiet',
+      '--collect',
+      `--unit=${scopeUnit}`,
+      `--slice=${AGENT_SLICE}`,
+      `--property=MemoryHigh=${PER_AGENT_MEMORY_HIGH}`,
+      `--property=MemoryMax=${PER_AGENT_MEMORY_MAX}`,
+      '--property=OOMPolicy=kill',
+    ],
+  }
+}
+
+function agentLauncher(jobId) {
   let reason = null
   if (!systemdRunAvailable()) reason = 'no systemd user manager'
   else if (!agentSliceIsBounded()) reason = `${AGENT_SLICE} has no memory ceiling — agents stay in the server cgroup, which is at least bounded`
@@ -116,19 +159,21 @@ function agentLauncher() {
     console.error(reason ? `[workers] agent slice isolation off: ${reason}` : `[workers] agent slice isolation on: ${AGENT_SLICE}`)
     lastLauncherState = reason
   }
-  return reason ? [] : ['systemd-run', '--user', '--scope', '--quiet', '--collect', `--slice=${AGENT_SLICE}`]
+  if (reason) return { args: [], scopeUnit: null }
+
+  return buildSystemdAgentLauncher(jobId)
 }
 
 /**
- * Wrap a spawn in the launcher when one is available. Verified on a live box that `--scope` execs
- * through rather than staying resident, so the tracked pid remains the agent's own shell and stays
- * the leader of its process group: killProcessTree's negative-pid kill reaps the whole scope
- * unchanged, and no scope-stop path is needed. Measured with a shell → agent → tool-subprocess tree,
- * three cgroup members before, zero after.
+ * Wrap a spawn in a deterministic per-job scope when the launcher is available. The name is known
+ * before spawn, so the watchdog can kill the scope even after the tracked agent pid has disappeared.
+ * A per-scope ceiling limits one run independently of its siblings in the shared agent slice.
  */
-function withLauncher(command, args) {
-  const launcher = agentLauncher()
-  return launcher.length ? { command: launcher[0], args: [...launcher.slice(1), command, ...args] } : { command, args }
+function withLauncher(command, args, jobId) {
+  const launcher = agentLauncher(jobId)
+  return launcher.args.length
+    ? { command: launcher.args[0], args: [...launcher.args.slice(1), command, ...args], scopeUnit: launcher.scopeUnit }
+    : { command, args, scopeUnit: null }
 }
 
 function shellQuote(value) {
@@ -305,8 +350,8 @@ function launchDiagnostics({ cwd, shellBin, env, agentCommand, resolvedCommand, 
 }
 
 function launcherDescription() {
-  const launcher = agentLauncher()
-  return launcher.length ? launcher.join(' ') : `none (agents share the server cgroup; ${AGENT_SLICE} not installed or unbounded)`
+  const launcher = agentLauncher('<job-id>')
+  return launcher.args.length ? launcher.args.join(' ') : `none (agents share the server cgroup; ${AGENT_SLICE} not installed or unbounded)`
 }
 
 function appendLaunchDiagnostics(result, context) {
@@ -474,6 +519,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     let bumpIdle = () => {}
     let settled = false
     let proc
+    let scopeUnit = null
     let promptFile = null
     let specFile = null
     let resolvedCommand = null
@@ -511,7 +557,8 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         proc = process.platform === 'win32'
           ? spawn('cmd.exe', ['/c', resolvedCommand], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
           : (() => {
-            const launched = withLauncher(shellBin, spawnArgs)
+            const launched = withLauncher(shellBin, spawnArgs, job.id)
+            scopeUnit = launched.scopeUnit
             return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
           })()
       } else {
@@ -539,7 +586,8 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
             // deliberately not re-parsed by the shell — so the launcher wraps the whole shell
             // invocation rather than being folded into the -c payload. bin/spawnArgs stay the
             // agent's own, so launch diagnostics keep reporting the agent, not systemd-run.
-            const launched = withLauncher(shellBin, ['-i', '-l', '-c', `${bin} "$@"`, '--', ...spawnArgs])
+            const launched = withLauncher(shellBin, ['-i', '-l', '-c', `${bin} "$@"`, '--', ...spawnArgs], job.id)
+            scopeUnit = launched.scopeUnit
             return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
           })()
       }
@@ -555,7 +603,8 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       continue
     }
 
-    runningAgentProcs.add(proc)
+    const runHandle = { proc, scopeUnit }
+    runningAgentProcs.add(runHandle)
 
     // stderr stays whole-buffered (it is small and used verbatim in failure messages) but is
     // capped so a runaway agent logging to stderr for an hour can't exhaust the worker.
@@ -576,6 +625,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     try {
       watchdog = createAgentWatchdog({
         pid: proc.pid,
+        scopeUnit,
         wallClockMs: timeoutMinutes * 60 * 1000,
         idleTimeoutMs: idleMinutes * 60 * 1000,
         label: job.id,
@@ -583,7 +633,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     } catch (err) {
       // Running without the configured safety boundary is worse than failing this one job visibly.
       watchdogArmError = err.message
-      killProcessTree(proc)
+      killProcessTree(runHandle)
       console.error(`[workers] ${err.message}`)
     }
     bumpIdle = () => watchdog?.activity()
@@ -593,7 +643,10 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       settled = true
       const timeoutKind = watchdog?.timeoutKind ?? null
       watchdog?.cancel()
-      runningAgentProcs.delete(proc)
+      // The tracked command can exit while a daemonized tool remains in the scope with closed
+      // stdio. Reap any such remainder on every terminal path, not only when the watchdog fired.
+      if (scopeUnit) killProcessTree(runHandle)
+      runningAgentProcs.delete(runHandle)
       runningJobs--
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
@@ -639,7 +692,8 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (settled) return
       settled = true
       watchdog?.cancel()
-      runningAgentProcs.delete(proc)
+      if (scopeUnit) killProcessTree(runHandle)
+      runningAgentProcs.delete(runHandle)
       runningJobs--
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }

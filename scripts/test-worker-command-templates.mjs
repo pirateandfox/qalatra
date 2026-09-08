@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  buildSystemdAgentLauncher,
   commandDiagnosticLines,
   replaceShellPlaceholder,
 } from '../server/workers.js'
@@ -40,6 +41,21 @@ const diagnostics = commandDiagnosticLines(
 assert.deepEqual(diagnostics, [
   "- command template: runner --token [redacted] '{description}'",
   "- resolved command: runner --token [redacted] 'Execute the plan'",
+])
+
+const launcher = buildSystemdAgentLauncher('job/unsafe value')
+assert.equal(launcher.scopeUnit, 'qalatra-agent-job-unsafe-value.scope')
+assert.deepEqual(launcher.args, [
+  'systemd-run',
+  '--user',
+  '--scope',
+  '--quiet',
+  '--collect',
+  '--unit=qalatra-agent-job-unsafe-value.scope',
+  '--slice=qalatra-agents.slice',
+  '--property=MemoryHigh=1G',
+  '--property=MemoryMax=2G',
+  '--property=OOMPolicy=kill',
 ])
 
 console.log('worker command-template tests passed')

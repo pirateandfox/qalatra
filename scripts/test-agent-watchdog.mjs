@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
 import { createAgentWatchdog } from '../server/agent-watchdog.js'
 
@@ -23,6 +23,29 @@ async function expectKilled(child, closePromise) {
   assert.notEqual(outcome.code, 0)
 }
 
+async function waitFor(predicate, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await delay(50)
+  }
+  return false
+}
+
+function processExists(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return err.code !== 'ESRCH'
+  }
+}
+
+function systemdUserScopesAvailable() {
+  if (process.platform !== 'linux') return false
+  return spawnSync('systemd-run', ['--user', '--scope', '--quiet', '--collect', 'true'], { stdio: 'ignore' }).status === 0
+}
+
 // The main regression: a normal setTimeout cannot run while this loop is occupied. The watchdog's
 // separate event loop must still fire, record the cause atomically, and kill the agent process.
 {
@@ -39,6 +62,66 @@ async function expectKilled(child, closePromise) {
   assert.equal(watchdog.timeoutKind, 'wall-clock')
   await expectKilled(child, closePromise)
   watchdog.cancel()
+}
+
+// A tool can create a new process group with setsid. Killing the tracked agent's negative pid does
+// not reach it, but killing the named systemd scope must remove both processes and collect the unit.
+if (systemdUserScopesAvailable()) {
+  const scopeUnit = `qalatra-watchdog-test-${process.pid}-${Date.now()}.scope`
+  let child = null
+  let escapedPid = null
+  try {
+    child = spawn(
+      'systemd-run',
+      [
+        '--user',
+        '--scope',
+        '--quiet',
+        '--collect',
+        `--unit=${scopeUnit}`,
+        '/bin/bash',
+        '-c',
+        'setsid sleep 600 & echo $!; wait',
+      ],
+      { detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
+    )
+    await once(child, 'spawn')
+    const pidChunk = await Promise.race([
+      once(child.stdout, 'data').then(([chunk]) => chunk),
+      once(child, 'close').then(([code]) => { throw new Error(`test scope exited before reporting its escaped pid (code ${code})`) }),
+      delay(3_000).then(() => { throw new Error('test scope did not report its escaped pid') }),
+    ])
+    escapedPid = Number(String(pidChunk).trim())
+    assert.ok(Number.isInteger(escapedPid) && escapedPid > 1, 'test agent did not report its escaped child pid')
+    assert.ok(processExists(escapedPid), 'escaped child exited before the watchdog fired')
+
+    const closePromise = once(child, 'close')
+    const watchdog = createAgentWatchdog({
+      pid: child.pid,
+      scopeUnit,
+      wallClockMs: 150,
+      label: 'scope-boundary-test',
+    })
+    await expectKilled(child, closePromise)
+    assert.equal(watchdog.timeoutKind, 'wall-clock')
+    assert.ok(await waitFor(() => !processExists(escapedPid)), `escaped pid ${escapedPid} survived the scope kill`)
+    const collected = await waitFor(() => {
+      const shown = spawnSync('systemctl', ['--user', 'show', scopeUnit, '-p', 'LoadState', '--value'], { encoding: 'utf8' })
+      return shown.status !== 0 || String(shown.stdout).trim() === 'not-found'
+    })
+    assert.ok(collected, `${scopeUnit} was not collected after its timeout`)
+    watchdog.cancel()
+  } finally {
+    spawnSync('systemctl', ['--user', 'kill', '--kill-whom=all', '--signal=SIGKILL', scopeUnit], { stdio: 'ignore' })
+    if (escapedPid && processExists(escapedPid)) {
+      try { process.kill(escapedPid, 'SIGKILL') } catch {}
+    }
+    if (child?.pid && processExists(child.pid)) {
+      try { process.kill(-child.pid, 'SIGKILL') } catch {}
+    }
+  }
+} else {
+  console.log('systemd scope watchdog regression skipped (no systemd user manager)')
 }
 
 // Idle enforcement lives in the same independent watchdog and records its distinct cause.

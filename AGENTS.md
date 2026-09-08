@@ -226,33 +226,37 @@ buffering (`raw`, `stream: false`) at 5 MB.
 
 **Timeout clocks do not run on Qalatra Server's event loop.** Each live agent gets a small watchdog
 worker (`server/agent-watchdog.js`) whose independent event loop owns the wall-clock and idle timers
-and kills the agent process group itself. A shared atomic flag records which limit fired before the
-kill, so even if the server loop was blocked past the deadline its eventual close handler records
-`timed_out` accurately. If the watchdog cannot be armed, Qalatra stops the agent instead of allowing
-it to run without its configured safety boundary.
+and kills the agent's named systemd scope on Linux, or its process tree on other platforms. A shared
+atomic flag records which limit fired before the kill, so even if the server loop was blocked past
+the deadline its eventual close handler records `timed_out` accurately. If the watchdog cannot be
+armed, Qalatra stops the agent instead of allowing it to run without its configured safety boundary.
 
 **Agents run detached, in their own process group.** SIGKILL to the tracked pid is not enough: the
 login shell `exec`s through to the agent CLI, so that pid *is* the agent — but the agent's own
 children (a test run, a build, an MCP server it started) get reparented and keep running. Measured
-directly: killing the pid alone left the tool subprocess alive. Timeouts therefore call
-`killProcessTree`, which signals the negative pid to take the whole group down (`taskkill /T` on
-Windows). Because detaching also escapes the signal the service manager sends to Qalatra's own
-group, `shutdown()` in `server/index.js` calls `killRunningAgentProcesses()` — without that, a
-service restart would strand live agents holding files, ports, and API quota.
+directly: killing the pid alone left the tool subprocess alive. A negative-pid signal reaches the
+detached group on non-systemd POSIX hosts (`taskkill /T` on Windows), but it cannot reach a tool that
+starts a new group with `setsid` or double-forks. Linux therefore kills the whole named scope instead.
+Because detaching also escapes the signal the service manager sends to Qalatra's own group,
+`shutdown()` in `server/index.js` calls `killRunningAgentProcesses()` — without that, a service
+restart would strand live agent runs holding files, ports, and API quota.
 
 **Agents run in their own cgroup slice (Linux).** Qalatra Server, its MCP child, tmux sessions and
 every agent otherwise share one cgroup, and `memory.high` throttles reclaim across the whole group
 without distinguishing the hog — so one runaway agent starves `:3457` while the box looks healthy.
-Agents are therefore spawned through `systemd-run --user --scope --slice=qalatra-agents.slice`.
-Only the spawner can do this: cgroup membership follows process ancestry, so Ansible cannot move an
-agent into a slice.
+Agents are therefore spawned through `systemd-run --user --scope --slice=qalatra-agents.slice` with
+a deterministic `qalatra-agent-<job-id>.scope` unit name. Only the spawner can do this: cgroup
+membership follows process ancestry, so Ansible cannot move an agent into a slice.
 
 The launcher is *probed*, not platform-detected (following `ensureTmuxServer()` in
 `terminal-sessions.js`) — `systemd-run` needs a live user manager and `XDG_RUNTIME_DIR`, not merely
 Linux. macOS, non-systemd Linux and no-user-manager all fall back to the previous spawn unchanged.
-`killProcessTree` needs no change: verified on a live box that `--scope` execs through, so the
-tracked pid stays the agent's own shell and remains its process-group leader — a shell → agent →
-tool-subprocess tree showed three cgroup members before the kill and zero after.
+The watchdog passes that known scope name to `systemctl --user kill --kill-whom=all`, which reaches
+tools even after they leave the agent's process group or the tracked pid disappears. The negative-pid
+kill remains the fallback when no usable systemd user manager exists. Each transient scope also has
+`MemoryHigh=1G`, `MemoryMax=2G`, and `OOMPolicy=kill`: reclaim pressure is charged and throttled at
+the individual run first, while the hard ceiling takes down the complete scope rather than leaving
+siblings behind.
 
 **The slice needs limits from the fleet, and the code refuses to run without them.** An unknown
 `--slice=` is auto-created with *no* limits, so using the launcher before the fleet has installed the
