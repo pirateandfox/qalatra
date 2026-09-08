@@ -297,9 +297,12 @@ toward more access.
   entry boundaries are day stamps at line start, so a multi-line note stays one entry. Never write
   the column directly — a bypass loses both the ordering and the cap.
 - MCP read tools that can match many tasks (`search_tasks`, `get_tasks_by_agent`, `list_agent_jobs`,
-  `get_agent_job`) take a `fields` projection. Past the MCP output cap a response *fails* rather
-  than truncating, so bulk/status reads should name the columns they need instead of dragging
-  `description`, `ai_context`, or a job's `prompt` through.
+  `get_agent_job`) return compact fields by default and take a `fields` projection. Pass `fields:
+  "*"` only when the complete record is needed. Past the MCP output cap a response *fails* rather
+  than truncating, so routine reads should not drag `description`, `ai_context`, or a job's `prompt`
+  through. MCP logs emit privacy-safe `tool_call` metrics with duration and byte counts, never
+  argument or result contents. Completed agent jobs expose provider token totals as `usage` and an
+  observed `mcp_tool_calls` count when the runtime's event stream reports them.
 - `sort_order` controls priority view ordering — `ORDER BY sort_order ASC NULLS LAST` is the primary sort for active tasks
 - Events (`task_type = 'event'`) are permanent dated records — never go overdue, never get status transitions
 - `surface_after` is strictly for snoozing existing tasks — never set it when creating a new task

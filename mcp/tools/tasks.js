@@ -3,6 +3,9 @@ import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate, daysBetween
 import { enrichTaskRows, getTaskDependencies, staleWhereClause } from './trust-signals.js';
 import { selectFields, fieldsSchema } from '../field-select.js';
 
+const SEARCH_TASK_FIELDS = 'id,title,status,task_type,context,project,due_date,surface_after,my_priority,assigned_agent,agent_path';
+const AGENT_TASK_FIELDS = 'id,title,status,task_type,context,project,due_date,my_priority,assigned_agent,agent_path,job_id,job_status,job_started_at,job_completed_at';
+
 function spawnNextOccurrence(db, task, now) {
   if (!task.recurrence) return null;
   // Advance from the task's due_date (or start_date) to today-or-future in one shot,
@@ -226,13 +229,13 @@ export const toolDefs = [
         assigned_agent: { type: 'string', description: 'Filter by assigned_agent name (partial match, case-insensitive)' },
         agent_path:     { type: 'string', description: 'Filter by agent_path folder (partial match, e.g. "muzebook/agents/plan")' },
         limit:          { type: 'integer', description: 'Default 20' },
-        fields:         fieldsSchema('id,title,status,due_date,my_priority'),
+        fields:         fieldsSchema('id,title,status,due_date,my_priority', SEARCH_TASK_FIELDS),
       },
     },
   },
   {
     name: 'get_tasks_by_agent',
-    description: 'Get tasks assigned to a specific agent, each annotated with its latest job status (job_status: queued | running | done | failed | orphaned | timed_out | null). Neither orphaned (app restart mid-run) nor timed_out (Qalatra\'s own timeout cut off a working agent; resumable, since the session id survives) is an agent failure — branch on them separately from failed. Matches against assigned_agent (human name) OR agent_path (folder path). Pass a name like "Code Planner" or a path fragment like "muzebook/agents/plan". Filter by job_status to find currently running jobs or only unstarted work.',
+    description: 'List an agent\'s tasks with latest job status. Matches assigned_agent or agent_path. orphaned and timed_out are infrastructure states, not agent failures; timed_out sessions may be resumed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -241,7 +244,7 @@ export const toolDefs = [
         job_status: { type: 'string', description: 'Filter by latest agent job status: queued | running | done | failed | orphaned | timed_out | none (no job ever queued)' },
         context:    { type: 'string', description: 'Optional context filter' },
         limit:      { type: 'integer', description: 'Default 50' },
-        fields:     fieldsSchema('id,title,status,agent_path,job_status,job_started_at'),
+        fields:     fieldsSchema('id,title,status,agent_path,job_status,job_started_at', AGENT_TASK_FIELDS),
       },
       required: ['agent'],
     },
@@ -645,7 +648,7 @@ export const handlers = {
     const rows = db.prepare(
       `SELECT * FROM tasks ${where} ORDER BY my_priority ASC, due_date ASC LIMIT ${limit}`
     ).all(params);
-    return selectFields(rows, args.fields);
+    return selectFields(rows, args.fields ?? SEARCH_TASK_FIELDS);
   },
 
   get_tasks_by_agent(args) {
@@ -693,7 +696,7 @@ export const handlers = {
       }
     }
 
-    return { agent: args.agent, status, count: rows.length, tasks: selectFields(rows, args.fields) };
+    return { agent: args.agent, status, count: rows.length, tasks: selectFields(rows, args.fields ?? AGENT_TASK_FIELDS) };
   },
 
   complete_task(args) {

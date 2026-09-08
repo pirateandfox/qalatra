@@ -26,6 +26,28 @@ const MAX_PENDING_LINE = 8 * 1024 * 1024
 /** Cap on whole-output buffering for runtimes whose result *is* their stdout. */
 const MAX_BUFFERED_OUTPUT = 5 * 1024 * 1024
 
+function normalizedUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null
+  const value = {
+    input_tokens: Number(usage.input_tokens ?? usage.inputTokens) || 0,
+    output_tokens: Number(usage.output_tokens ?? usage.outputTokens) || 0,
+    cache_creation_input_tokens: Number(usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens) || 0,
+    cache_read_input_tokens: Number(usage.cache_read_input_tokens ?? usage.cached_input_tokens ?? usage.cacheReadInputTokens) || 0,
+  }
+  return Object.values(value).some(Boolean) ? value : null
+}
+
+function addUsage(total, next) {
+  const normalized = normalizedUsage(next)
+  if (!normalized) return total
+  if (!total) return normalized
+  return Object.fromEntries(Object.keys(normalized).map(key => [key, (total[key] ?? 0) + normalized[key]]))
+}
+
+function isQalatraToolName(name) {
+  return String(name ?? '').toLowerCase().includes('qalatra')
+}
+
 /**
  * Streams newline-delimited JSON, tolerating non-JSON lines. Codex interleaves human-readable
  * notices ("Reading additional input from stdin...") with its events and a login shell can add its
@@ -102,29 +124,38 @@ const claude = {
       return createBufferedConsumer(stdout => {
         let result = String(stdout ?? '').trim()
         let sessionId = null
+        let usage = null
         try {
           const parsed = JSON.parse(stdout)
           if (parsed.result != null) result = String(parsed.result)
           sessionId = parsed.session_id ?? null
+          usage = normalizedUsage(parsed.usage)
         } catch {}
-        return { result, sessionId }
+        return { result, sessionId, usage, mcpToolCalls: null }
       })
     }
 
     let sessionId = null
     let resultText = null
     const assistantText = []
+    let usage = null
+    let mcpToolCalls = 0
 
     return createNdjsonConsumer({
       onEvent(event) {
         // Present on every event including the first, so this lands within moments of launch.
         if (!sessionId && event.session_id) sessionId = String(event.session_id)
         if (event.type === 'assistant') {
+          usage = addUsage(usage, event.message?.usage)
           for (const block of event.message?.content ?? []) {
             if (block?.type === 'text' && block.text) assistantText.push(String(block.text))
+            if (block?.type === 'tool_use' && isQalatraToolName(block.name)) mcpToolCalls++
           }
         }
-        if (event.type === 'result' && event.result != null) resultText = String(event.result)
+        if (event.type === 'result') {
+          if (event.result != null) resultText = String(event.result)
+          usage = normalizedUsage(event.usage) ?? usage
+        }
       },
       finalize({ tail, eventCount }) {
         // No result event means the run was cut short; the assistant text collected so far is the
@@ -133,7 +164,7 @@ const claude = {
         // caller's stderr/timeout notice carries the real explanation.
         const fallback = eventCount ? '' : tail.trim()
         const result = resultText ?? (assistantText.length ? assistantText.join('\n') : fallback)
-        return { result, sessionId }
+        return { result, sessionId, usage, mcpToolCalls }
       },
     })
   },
@@ -203,6 +234,8 @@ const codex = {
   createConsumer() {
     let sessionId = null
     let resultText = null
+    let usage = null
+    let mcpToolCalls = 0
 
     return createNdjsonConsumer({
       onEvent(event) {
@@ -212,9 +245,13 @@ const codex = {
         if (event.type === 'item.completed' && event.item?.type === 'agent_message' && event.item.text != null) {
           resultText = String(event.item.text)
         }
+        if (event.type === 'item.completed' && event.item?.type === 'mcp_tool_call' && isQalatraToolName(event.item.server ?? event.item.name)) {
+          mcpToolCalls++
+        }
+        if (event.type === 'turn.completed') usage = normalizedUsage(event.usage) ?? usage
       },
       finalize({ tail, eventCount }) {
-        return { result: resultText ?? (eventCount ? '' : tail.trim()), sessionId }
+        return { result: resultText ?? (eventCount ? '' : tail.trim()), sessionId, usage, mcpToolCalls }
       },
     })
   },
@@ -228,7 +265,7 @@ const raw = {
   // dispatch commands that aren't a coding CLI and have no session to resume.
   buildArgs({ baseArgs }) { return [...baseArgs] },
   createConsumer() {
-    return createBufferedConsumer(stdout => ({ result: String(stdout ?? '').trim(), sessionId: null }))
+    return createBufferedConsumer(stdout => ({ result: String(stdout ?? '').trim(), sessionId: null, usage: null, mcpToolCalls: null }))
   },
 }
 

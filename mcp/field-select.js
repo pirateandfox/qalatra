@@ -12,11 +12,12 @@
  * full body remains available from `get_task` / `get_agent_job` without a projection.
  */
 
-/** Accepts "a,b" or ["a","b"]; returns null when no projection was requested. */
+/** Accepts "a,b" or ["a","b"]; `*` explicitly requests the complete record. */
 export function normalizeFields(fields) {
   if (fields == null) return null;
   const list = Array.isArray(fields) ? fields : String(fields).split(',');
   const cleaned = list.map(field => String(field).trim()).filter(Boolean);
+  if (cleaned.includes('*')) return null;
   return cleaned.length ? cleaned : null;
 }
 
@@ -52,13 +53,14 @@ export function selectFields(rows, fields, { always = ['id'] } = {}) {
 }
 
 /** Shared schema entry so every tool documents the option identically. */
-export function fieldsSchema(example) {
+export function fieldsSchema(example, defaultFields = null) {
+  const defaultDescription = defaultFields
+    ? 'Defaults to compact fields; "*" returns the complete record. '
+    : 'Omit for the complete record. ';
   return {
     type: 'string',
     description:
-      `Comma-separated columns to return, e.g. "${example}". Omit for every column. ` +
-      'Use this for routine/bulk reads: description and ai_context are unbounded freeform text, and ' +
-      'a response over the output cap fails outright rather than truncating. id is always included. ' +
-      'An unknown name errors and lists the valid ones.',
+      `Comma-separated columns to return, e.g. "${example}". ${defaultDescription}` +
+      'id is always included; unknown names error.',
   };
 }

@@ -13,6 +13,7 @@ assert.equal(selectFields(rows, undefined), rows)
 assert.equal(selectFields(rows, null), rows)
 assert.equal(selectFields(rows, ''), rows)
 assert.equal(selectFields(rows, '   '), rows)
+assert.equal(selectFields(rows, '*'), rows)
 
 // The point of the feature: the freeform bodies are gone.
 const picked = selectFields(rows, 'title,status')
@@ -55,5 +56,7 @@ assert.deepEqual(normalizeFields(['a', ' b ']), ['a', 'b'])
 // The shared schema entry carries the example through, so each tool documents itself.
 assert.match(fieldsSchema('id,title').description, /id,title/)
 assert.equal(fieldsSchema('x').type, 'string')
+assert.match(fieldsSchema('id,title', 'id,title,status').description, /Defaults to compact fields/)
+assert.match(fieldsSchema('id,title', 'id,title,status').description, /"\*" returns the complete record/)
 
 console.log('field selection tests passed')

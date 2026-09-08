@@ -2,6 +2,20 @@ import { v4 as uuidv4 } from 'uuid';
 import { openDb, withTimestampZones } from '../db.js';
 import { selectFields, fieldsSchema } from '../field-select.js';
 
+const AGENT_JOB_LIST_FIELDS = 'id,task_id,status,runtime,created_at,started_at,completed_at,terminated_by,mcp_tool_calls,usage';
+const AGENT_JOB_DETAIL_FIELDS = 'id,task_id,status,runtime,result,session_id,created_at,started_at,completed_at,terminated_by,terminated_boundary,mcp_tool_calls,usage';
+
+function withUsage(rows) {
+  const convert = row => {
+    if (!row) return row;
+    const { usage_json, ...rest } = row;
+    let usage = null;
+    try { usage = usage_json ? JSON.parse(usage_json) : null; } catch {}
+    return { ...rest, usage };
+  };
+  return Array.isArray(rows) ? rows.map(convert) : convert(rows);
+}
+
 export const toolDefs = [
   {
     name: 'queue_agent_job',
@@ -16,24 +30,24 @@ export const toolDefs = [
   },
   {
     name: 'list_agent_jobs',
-    description: "List recent agent jobs, optionally filtered by task_id. status is one of queued|running|done|failed|orphaned|timed_out. Two statuses are NOT agent failures and must be branched on separately from 'failed': 'orphaned' means the app instance running the job stopped mid-run (restart/crash) — terminated_by='app_restart', and terminated_boundary holds the started_at of the instance that killed it (compare a late reply's timestamp against it to tell whether work landed); 'timed_out' means Qalatra's own timeout cut off an agent that was still working — terminated_by='timeout', and because the session id survives the kill the run is resumable, so sending a follow-up message on the task continues it rather than starting over. Neither is ever auto-requeued — the consumer decides. The runtime field records which CLI ran the job (claude|codex|raw).",
+    description: "List recent agent jobs. Status: queued|running|done|failed|orphaned|timed_out. orphaned and timed_out are infrastructure states, not failures; timed_out jobs may be resumed. runtime is claude|codex|raw.",
     inputSchema: {
       type: 'object',
       properties: {
         task_id: { type: 'string', description: 'Filter by task ID' },
         limit:   { type: 'integer', description: 'Default 20' },
-        fields:  fieldsSchema('id,task_id,status,runtime,terminated_by,completed_at'),
+        fields:  fieldsSchema('id,task_id,status,runtime,terminated_by,completed_at', AGENT_JOB_LIST_FIELDS),
       },
     },
   },
   {
     name: 'get_agent_job',
-    description: "Get the status and result of a specific agent job. status is one of queued|running|done|failed|orphaned|timed_out. Neither 'orphaned' (terminated_by='app_restart', terminated_boundary=killing instance's started_at, an app-restart interruption) nor 'timed_out' (terminated_by='timeout', Qalatra's own limit cutting off a working agent — resumable, since the session id survives) is an agent failure. The runtime field records which CLI ran the job (claude|codex|raw). The job's prompt is usually the largest field by far and is rarely what you want — to diagnose a failure use fields=\"id,status,result,terminated_by\" rather than pulling the whole record through the output cap.",
+    description: "Get one agent job's status and result. orphaned and timed_out are infrastructure states, not failures; timed_out jobs may be resumed. Prompt is excluded by default.",
     inputSchema: {
       type: 'object',
       properties: {
         job_id: { type: 'string' },
-        fields: fieldsSchema('id,status,result,terminated_by'),
+        fields: fieldsSchema('id,status,result,terminated_by', AGENT_JOB_DETAIL_FIELDS),
       },
       required: ['job_id'],
     },
@@ -76,13 +90,13 @@ export const handlers = {
     const jobs = args.task_id
       ? db.prepare(`SELECT * FROM agent_jobs WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`).all(args.task_id, limit)
       : db.prepare(`SELECT * FROM agent_jobs ORDER BY created_at DESC LIMIT ?`).all(limit);
-    return selectFields(withTimestampZones(jobs, 'agent_jobs'), args.fields);
+    return selectFields(withUsage(withTimestampZones(jobs, 'agent_jobs')), args.fields ?? AGENT_JOB_LIST_FIELDS);
   },
 
   get_agent_job(args) {
     const db = openDb();
     const job = db.prepare('SELECT * FROM agent_jobs WHERE id = ?').get(args.job_id);
     if (!job) throw new Error(`Job not found: ${args.job_id}`);
-    return selectFields(withTimestampZones(job, 'agent_jobs'), args.fields);
+    return selectFields(withUsage(withTimestampZones(job, 'agent_jobs')), args.fields ?? AGENT_JOB_DETAIL_FIELDS);
   },
 };

@@ -413,9 +413,9 @@ export async function runAgentScan({ dbCall, loadSettings }) {
   return agents
 }
 
-export async function finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, terminatedBy = null, outputRules = [] }) {
+export async function finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, terminatedBy = null, usage = null, mcpToolCalls = null, outputRules = [] }) {
   try {
-    await dbCall('finishAgentJob', job.id, status, result, sessionId, terminatedBy)
+    await dbCall('finishAgentJob', job.id, status, result, sessionId, terminatedBy, usage, mcpToolCalls)
   } catch (err) {
     console.error(`[workers] failed to persist agent job ${job.id}: ${err.message}`)
     return
@@ -651,7 +651,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
 
-      let { result, sessionId } = consumer.finish()
+      let { result, sessionId, usage, mcpToolCalls } = consumer.finish()
 
       // A timeout is Qalatra's own limit cutting off an agent that was still working — a resource
       // event, not an agent failure — so it gets its own terminal status alongside `orphaned`
@@ -684,7 +684,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         })
       }
 
-      finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, terminatedBy: timeoutKind ? 'timeout' : null, outputRules: cfg?.output_rules })
+      finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, terminatedBy: timeoutKind ? 'timeout' : null, usage, mcpToolCalls, outputRules: cfg?.output_rules })
         .catch(err => console.error(`[workers] agent completion handler failed for job ${job.id}: ${err.message}`))
     })
 

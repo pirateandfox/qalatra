@@ -1,5 +1,26 @@
 # Qalatra — Evolution Notes
 
+## MCP context and agent-usage efficiency is measurable by default (2026-09-08)
+
+- A Claude context report attributed roughly half of one server's agent usage to Qalatra, but the
+  server had no per-tool evidence to distinguish definition overhead from large results. MCP now
+  emits one-line JSON metrics for `tools/list` and every call: tool name, duration, argument/result
+  byte counts, result count, and error code. It deliberately never logs arguments or results.
+- `search_tasks`, `get_tasks_by_agent`, `list_agent_jobs`, and `get_agent_job` now return compact,
+  operationally useful fields when `fields` is omitted. Callers can still request any projection or
+  explicitly pass `fields: "*"` for the complete record. On the current development database this
+  cuts representative 20-row payloads by 82% for task search and 89% for agent-job listing.
+- MCP result JSON is compact rather than pretty-printed. The initialization response includes short
+  server instructions that help Claude Tool Search discover Qalatra without eagerly loading every
+  definition. Long status descriptions and repeated projection guidance were tightened as well.
+- Claude and Codex runtime consumers retain provider-reported input/output/cache token counts on
+  each completed job as `usage`, plus the number of Qalatra MCP tool calls visible in their event
+  stream. Partial Claude usage survives a timeout once an assistant event has arrived. The storage
+  is forward-compatible JSON, and list/detail tools expose parsed objects rather than JSON strings.
+- A separate restricted MCP profile was deliberately not added: it duplicates surface/configuration
+  management, while Tool Search already defers definitions and the result-size fixes benefit every
+  caller.
+
 ## Agent timeouts reap the systemd scope, including escaped tool processes (2026-09-07)
 
 - The independent watchdog killed an agent's detached process group, but Claude Code starts Bash

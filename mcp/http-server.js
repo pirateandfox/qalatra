@@ -7,6 +7,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { initAuth, authenticate, requireScope } from '../server/auth.js';
+import { logMcpMetric, toolCallMetric, toolListMetric } from './telemetry.js';
 
 import { toolDefs as taskDefs,     handlers as taskHandlers }     from './tools/tasks.js';
 import { toolDefs as triageDefs,   handlers as triageHandlers }   from './tools/triage.js';
@@ -80,22 +81,31 @@ const allHandlers = { ...taskHandlers, ...triageHandlers, ...briefingHandlers, .
 function createMcpServer({ fullAccess = false } = {}) {
   const server = new Server(
     { name: 'qalatra', version: '1.0.0' },
-    { capabilities: { tools: {} } }
+    {
+      capabilities: { tools: {} },
+      instructions: 'Search Qalatra tools when managing tasks, agent jobs, notes, habits, heartbeats, or capabilities. Routine list/search calls return compact records; pass fields="*" only when the complete record is required.',
+    }
   );
 
   // Listing tool definitions is harmless metadata — allowed for any authenticated caller.
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: allDefs }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    logMcpMetric('tools_list', toolListMetric(allDefs));
+    return { tools: allDefs };
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const startedAt = Date.now();
     // Scope gate (bug C7): invoking any tool requires full_access, mirroring the HTTP API
     // (server/index.js requires full_access for every /api/ route). Without this a read_only
     // token — the default token class — could call every mutating tool via the MCP port.
     if (!fullAccess) {
+      logMcpMetric('tool_call', toolCallMetric({ name, args, result: null, startedAt, ok: false, errorCode: 'forbidden' }));
       return { content: [{ type: 'text', text: JSON.stringify({ error: 'Forbidden: this token lacks the full_access scope required to call MCP tools' }) }], isError: true };
     }
     const handler = allHandlers[name];
     if (!handler) {
+      logMcpMetric('tool_call', toolCallMetric({ name, args, result: null, startedAt, ok: false, errorCode: 'unknown_tool' }));
       return { content: [{ type: 'text', text: JSON.stringify({ error: `Unknown tool: ${name}` }) }], isError: true };
     }
     // Retry on SQLITE_BUSY — multiple concurrent agents can cause write-lock contention.
@@ -105,17 +115,22 @@ function createMcpServer({ fullAccess = false } = {}) {
     for (let attempt = 0; attempt <= delays.length; attempt++) {
       try {
         const result = await handler(args ?? {});
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        logMcpMetric('tool_call', toolCallMetric({ name, args, result, startedAt, ok: true }));
+        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (err) {
         if (err.code === 'SQLITE_BUSY' && attempt < delays.length) {
           lastErr = err;
           await new Promise(r => setTimeout(r, delays[attempt]));
           continue;
         }
-        return { content: [{ type: 'text', text: JSON.stringify({ error: err.message }) }], isError: true };
+        const errorResult = { error: err.message };
+        logMcpMetric('tool_call', toolCallMetric({ name, args, result: errorResult, startedAt, ok: false, errorCode: err.code ?? 'handler_error' }));
+        return { content: [{ type: 'text', text: JSON.stringify(errorResult) }], isError: true };
       }
     }
-    return { content: [{ type: 'text', text: JSON.stringify({ error: `DB busy after retries: ${lastErr.message}` }) }], isError: true };
+    const errorResult = { error: `DB busy after retries: ${lastErr.message}` };
+    logMcpMetric('tool_call', toolCallMetric({ name, args, result: errorResult, startedAt, ok: false, errorCode: 'SQLITE_BUSY' }));
+    return { content: [{ type: 'text', text: JSON.stringify(errorResult) }], isError: true };
   });
 
   return server;

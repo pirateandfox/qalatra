@@ -24,14 +24,23 @@ const rule = {
 }
 
 const commandOutput = `Registered successfully\nTask ID: ${flightDeskTaskId}`
-assert.deepEqual(parseBuffered(commandOutput), { result: commandOutput, sessionId: null })
+assert.deepEqual(parseBuffered(commandOutput), { result: commandOutput, sessionId: null, usage: null, mcpToolCalls: null })
 
 const agentResult = [
   `You are an agent running inside Qalatra. Task ID: ${qalatraTaskId}`,
   `Task ID: ${flightDeskTaskId}`,
 ].join('\n')
-const parsedAgentOutput = parseBuffered(JSON.stringify({ result: agentResult, session_id: 'session-1' }))
-assert.deepEqual(parsedAgentOutput, { result: agentResult, sessionId: 'session-1' })
+const parsedAgentOutput = parseBuffered(JSON.stringify({
+  result: agentResult,
+  session_id: 'session-1',
+  usage: { input_tokens: 120, output_tokens: 30, cache_read_input_tokens: 900 },
+}))
+assert.deepEqual(parsedAgentOutput, {
+  result: agentResult,
+  sessionId: 'session-1',
+  usage: { input_tokens: 120, output_tokens: 30, cache_creation_input_tokens: 0, cache_read_input_tokens: 900 },
+  mcpToolCalls: null,
+})
 
 const calls = []
 const notifications = []
@@ -46,6 +55,8 @@ await finishAgentJobSafely({
   status: 'done',
   result: parsedAgentOutput.result,
   sessionId: parsedAgentOutput.sessionId,
+  usage: parsedAgentOutput.usage,
+  mcpToolCalls: parsedAgentOutput.mcpToolCalls,
   outputRules: [rule],
 })
 
@@ -101,11 +112,16 @@ assert.deepEqual(failedJobCalls.map(call => call[0]), ['finishAgentJob'])
 // text rather than the surrounding JSONL envelope.
 const streamed = parseStreamed([
   '{"type":"system","subtype":"init","session_id":"session-2"}',
-  `{"type":"assistant","session_id":"session-2","message":{"content":[{"type":"text","text":"working"}]}}`,
-  `{"type":"result","subtype":"success","session_id":"session-2","result":${JSON.stringify(agentResult)}}`,
+  `{"type":"assistant","session_id":"session-2","message":{"content":[{"type":"text","text":"working"},{"type":"tool_use","name":"mcp__qalatra__search_tasks"}]}}`,
+  `{"type":"result","subtype":"success","session_id":"session-2","result":${JSON.stringify(agentResult)},"usage":{"input_tokens":200,"output_tokens":40,"cache_creation_input_tokens":10,"cache_read_input_tokens":500}}`,
   '',
 ].join('\n'))
-assert.deepEqual(streamed, { result: agentResult, sessionId: 'session-2' })
+assert.deepEqual(streamed, {
+  result: agentResult,
+  sessionId: 'session-2',
+  usage: { input_tokens: 200, output_tokens: 40, cache_creation_input_tokens: 10, cache_read_input_tokens: 500 },
+  mcpToolCalls: 1,
+})
 
 const streamedRuleCalls = []
 await applyOutputRules({
@@ -128,7 +144,7 @@ const killed = parseStreamed([
   '{"type":"assistant","session_id":"session-3","message":{"content":[{"type":"text","text":"partial work"}]}}',
   '{"type":"assistant","session_id":"session-3","message":{"con',   // truncated by SIGKILL mid-write
 ].join('\n'))
-assert.deepEqual(killed, { result: 'partial work', sessionId: 'session-3' })
+assert.deepEqual(killed, { result: 'partial work', sessionId: 'session-3', usage: null, mcpToolCalls: 0 })
 
 // A timed-out job records the cause so consumers can tell a resource limit from an agent failure.
 const timedOutCalls = []
@@ -144,6 +160,6 @@ await finishAgentJobSafely({
 })
 // No note and no output rules for a non-done job, and the cause is persisted.
 assert.deepEqual(timedOutCalls.map(call => call[0]), ['finishAgentJob'])
-assert.deepEqual(timedOutCalls[0], ['finishAgentJob', 'job-6', 'timed_out', 'Agent timed out after 60 minutes', 'session-3', 'timeout'])
+assert.deepEqual(timedOutCalls[0], ['finishAgentJob', 'job-6', 'timed_out', 'Agent timed out after 60 minutes', 'session-3', 'timeout', null, null])
 
 console.log('output_rules tests passed')

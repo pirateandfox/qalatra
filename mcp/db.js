@@ -266,6 +266,12 @@ function initSchema(db) {
   if (!agentJobCols.includes('runtime')) {
     db.exec(`ALTER TABLE agent_jobs ADD COLUMN runtime TEXT`);
   }
+  if (!agentJobCols.includes('usage_json')) {
+    db.exec(`ALTER TABLE agent_jobs ADD COLUMN usage_json TEXT`);
+  }
+  if (!agentJobCols.includes('mcp_tool_calls')) {
+    db.exec(`ALTER TABLE agent_jobs ADD COLUMN mcp_tool_calls INTEGER`);
+  }
 
   // Migrations for attachments table
   const attachmentCols = db.prepare(`PRAGMA table_info(attachments)`).all().map(r => r.name);

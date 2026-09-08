@@ -259,6 +259,10 @@ function migrate() {
   // Which CLI adapter actually ran the job (claude | codex | raw). Recorded at claim time rather
   // than read from agent.config on display, so history stays accurate after a config is retargeted.
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN runtime TEXT')
+  // Provider-reported token usage plus the number of Qalatra MCP calls observed in the agent's
+  // structured event stream. JSON keeps provider additions forward-compatible without migrations.
+  tryAlter('ALTER TABLE agent_jobs ADD COLUMN usage_json TEXT')
+  tryAlter('ALTER TABLE agent_jobs ADD COLUMN mcp_tool_calls INTEGER')
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN terminated_boundary TEXT')
   // One-time backfill: rows marked `failed` that carry the old orphan string were the same
   // infrastructure event under a wrong label. Reclassify so failure counts and the Pipeline
@@ -1146,9 +1150,9 @@ function setAgentJobRuntime(id, runtime) {
   db.prepare('UPDATE agent_jobs SET runtime = ? WHERE id = ?').run(runtime, id)
   return { ok: true }
 }
-function finishAgentJob(id, status, result, sessionId, terminatedBy = null) {
-  db.prepare(`UPDATE agent_jobs SET status = ?, result = ?, session_id = ?, terminated_by = ?, completed_at = datetime('now') WHERE id = ?`)
-    .run(status, result, sessionId, terminatedBy, id)
+function finishAgentJob(id, status, result, sessionId, terminatedBy = null, usage = null, mcpToolCalls = null) {
+  db.prepare(`UPDATE agent_jobs SET status = ?, result = ?, session_id = ?, terminated_by = ?, usage_json = ?, mcp_tool_calls = ?, completed_at = datetime('now') WHERE id = ?`)
+    .run(status, result, sessionId, terminatedBy, usage ? JSON.stringify(usage) : null, mcpToolCalls, id)
   return { ok: true }
 }
 function insertAgentNote(id, taskId, result, jobId) {
