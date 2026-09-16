@@ -70,6 +70,41 @@ Agents can also define process environment overrides for Qalatra-launched jobs:
 
 Values support `~`, `$VAR`, and `${VAR}` expansion against the worker process environment. Set a value to `null` to unset it. The server settings file may also contain a top-level `agentEnv` object for defaults shared by every agent; `agent.config.env` wins for a specific agent.
 
+### Command forms
+
+`command` is either a **shell string** or an **argv array**.
+
+A shell string runs through the user's login shell, so `$(…)`, `cd`, `&&` and pipes all work — and so does every shell-quoting mistake. Placeholders (`{title}`, `{description}`, `{spec_file}`) are shell-quoted for you, but only when the placeholder is bare or wrapped in exactly one pair of quotes; text appended inside the same quotes (`'{description} extra'`) nests quoting and can truncate the value. Qalatra warns at launch when it sees that shape.
+
+An argv array is spawned directly with no shell. Each element is one argument, placeholder values are spliced in verbatim (newlines and all), and there is no quoting to get wrong:
+
+```json
+{
+  "name": "Remote Coder",
+  "command": ["flightdesk", "register", "--title", "{title}", "--prompt", "{description}"]
+}
+```
+
+A placeholder may also sit inside a larger element (`"--prompt=Task: {description}"`). Do not carry quotes over from a shell string — `"'{description}'"` delivers the quotes literally, and Qalatra warns if it sees that. The array's first element is resolved on the login shell's `PATH`, the same as a shell-string command. On Windows the array is spawned without `cmd.exe`, so a `.cmd` shim must be named explicitly (`["cmd", "/c", "flightdesk", …]`).
+
+Every agent run — both forms, and prompt-mode agents too — also receives the task values in its environment, so a shell string that needs shell features can keep them without the value ever entering the command text:
+
+| variable | value |
+|---|---|
+| `QALATRA_TITLE` | task title |
+| `QALATRA_DESCRIPTION` | task description, or the job's user message when the task has none |
+| `QALATRA_TASK_ID` | task id (unset when the job has no task) |
+| `QALATRA_JOB_ID` | agent job id |
+| `QALATRA_SPEC_FILE` | path to the per-job spec file, written only when the command mentions `{spec_file}` or `QALATRA_SPEC_FILE` |
+
+```json
+{
+  "command": "cd \"$(ls -d ~/repos/* | head -1)\" && flightdesk register --title \"$QALATRA_TITLE\" --prompt \"$QALATRA_DESCRIPTION\""
+}
+```
+
+Title and description are capped at 64 KiB in the environment. These names are reserved; an `env` entry with the same name is overridden.
+
 Qalatra infers a default capability from that:
 
 - `kind = "agent"`

@@ -187,6 +187,14 @@ placeholder (`{spec_file}`, `{description}`, `{title}`):
 - **Prompt mode** — Qalatra owns the argv: it appends the prompt, the structured-output flag, and
   `--resume` on follow-ups, then parses the agent's output for the result text and a session id.
 
+`command` is a shell string (login shell; `$(…)`, `cd`, `&&` work; quoting is the author's problem)
+or an argv array (spawned with no shell; placeholder values become argv entries verbatim, so there is
+no quoting to get wrong). Both forms also get `QALATRA_TITLE`, `QALATRA_DESCRIPTION`,
+`QALATRA_TASK_ID`, `QALATRA_JOB_ID` and (when referenced) `QALATRA_SPEC_FILE` in the environment, so
+a shell string can write `--prompt "$QALATRA_DESCRIPTION"` and never splice the value into command
+text. Prefer the array form or the env vars for new configs; see `docs/capabilities.md`
+("Command forms").
+
 Prompt mode is CLI-specific, so it goes through an adapter in `server/agent-runtimes.js`. Pick one
 with `"runtime"` in `agent.config`:
 

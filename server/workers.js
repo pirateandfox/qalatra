@@ -187,6 +187,91 @@ function compactTemplateValue(value) {
   return String(value ?? '').replace(/\r?\n/g, ' ')
 }
 
+const TEMPLATE_PLACEHOLDERS = ['spec_file', 'description', 'title']
+
+/**
+ * An agent.config `command` is either a shell string (run through the login shell, so `$(…)`,
+ * `cd`, `&&` all work and quoting is the author's problem) or an argv array (spawned directly, no
+ * shell, so there is no quoting to get wrong). Placeholders are recognised in both forms.
+ */
+export function isArgvCommand(command) {
+  return Array.isArray(command)
+}
+
+/** Returns a reason string when an argv command cannot be spawned, else null. */
+export function argvCommandError(command) {
+  if (!Array.isArray(command)) return null
+  if (command.length === 0) return 'agent.config "command" array is empty'
+  const bad = command.findIndex(part => typeof part !== 'string' || part.length === 0)
+  if (bad !== -1) return `agent.config "command" array element ${bad} must be a non-empty string`
+  return null
+}
+
+function commandMentions(command, text) {
+  const parts = Array.isArray(command) ? command : [String(command)]
+  return parts.some(part => String(part).includes(text))
+}
+
+export function commandHasPlaceholder(command) {
+  return TEMPLATE_PLACEHOLDERS.some(name => commandMentions(command, `{${name}}`))
+}
+
+/**
+ * Substitute placeholders into an argv array. Each element is a single argument, so the value is
+ * spliced in verbatim — no shell quoting, no newline flattening — and `--prompt={description}`
+ * style embedding works the same as a bare `{description}` element.
+ */
+export function resolveArgvTemplate(argv, values, { onWarn = console.error } = {}) {
+  return argv.map(part => {
+    let out = part
+    for (const name of TEMPLATE_PLACEHOLDERS) {
+      const placeholder = `{${name}}`
+      if (!out.includes(placeholder)) continue
+      // A quote hugging the placeholder is almost always a shell-string config ported over
+      // literally; in argv form the quotes are delivered to the agent as part of the value.
+      if (out.includes(`'${placeholder}'`) || out.includes(`"${placeholder}"`)) {
+        onWarn(`argv elements are not shell-parsed: the quotes around ${placeholder} will reach the command literally; use a bare ${placeholder} element instead`)
+      }
+      out = out.replaceAll(placeholder, String(values[name] ?? ''))
+    }
+    return out
+  })
+}
+
+/**
+ * Login-shell wrapper for an argv spawn. The shell only supplies the user's profile (PATH and
+ * friends); the argv is handed through `"$0" "$@"` untouched, so nothing in it is re-parsed.
+ */
+function loginShellArgv(bin, args) {
+  return ['-i', '-l', '-c', '"$0" "$@"', bin, ...args]
+}
+
+/**
+ * Task values are exposed to every agent run as environment variables, so a shell-string command
+ * can write `--description "$QALATRA_DESCRIPTION"` and keep its shell features without the value
+ * ever entering the command text. Capped well under the per-string environment limit so a huge
+ * task description cannot turn into an E2BIG spawn failure for an agent that never asked for it.
+ */
+const MAX_TEMPLATE_ENV_VALUE = 64 * 1024
+
+function envValue(value) {
+  const text = String(value ?? '')
+  return text.length > MAX_TEMPLATE_ENV_VALUE
+    ? `${text.slice(0, MAX_TEMPLATE_ENV_VALUE)}\n[… truncated to ${MAX_TEMPLATE_ENV_VALUE} characters]`
+    : text
+}
+
+export function templateEnv({ job, values }) {
+  const env = {
+    QALATRA_JOB_ID: String(job.id),
+    QALATRA_TITLE: envValue(values.title),
+    QALATRA_DESCRIPTION: envValue(values.description),
+  }
+  if (job.task_id) env.QALATRA_TASK_ID = String(job.task_id)
+  if (values.spec_file) env.QALATRA_SPEC_FILE = values.spec_file
+  return env
+}
+
 export function replaceShellPlaceholder(command, name, value, { onWarn = console.error } = {}) {
   const quoted = shellQuote(compactTemplateValue(value))
   const exactReplaced = command
@@ -202,7 +287,7 @@ export function replaceShellPlaceholder(command, name, value, { onWarn = console
   while (offset !== -1) {
     const openingQuote = exactReplaced[offset - 1]
     if ((openingQuote === "'" || openingQuote === '"') && exactReplaced[offset + placeholder.length] !== openingQuote) {
-      onWarn(`unsafe quoted {${name}} placeholder: the opening ${openingQuote} is not immediately closed after the placeholder; keep ${openingQuote}{${name}}${openingQuote} exact and concatenate extra text outside it`)
+      onWarn(`unsafe quoted {${name}} placeholder: the opening ${openingQuote} is not immediately closed after the placeholder; keep ${openingQuote}{${name}}${openingQuote} exact and concatenate extra text outside it, reference "$QALATRA_${name.toUpperCase()}" instead, or switch "command" to an argv array`)
     }
     offset = exactReplaced.indexOf(placeholder, offset + placeholder.length)
   }
@@ -273,8 +358,14 @@ function presentEnvMarkers(env) {
   ].filter(key => env[key] !== undefined)
 }
 
+/** Render an argv command the way a shell user would read it, so the sanitizer's flag patterns still apply. */
+function describeCommand(command) {
+  if (!Array.isArray(command)) return String(command)
+  return command.map(part => (/[\s"'\\]/.test(part) ? JSON.stringify(part) : part)).join(' ')
+}
+
 function sanitizeCommand(command) {
-  return String(command)
+  return describeCommand(command)
     .replace(/([A-Za-z_][A-Za-z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|PASS)[A-Za-z0-9_]*=)([^ \t]+)/gi, '$1[redacted]')
     .replace(/(--(?:api-?key|token|secret|password|pass)\s+)([^ \t]+)/gi, '$1[redacted]')
     .replace(/(https?:\/\/[^:\s/]+:)[^@\s/]+@/gi, '$1[redacted]@')
@@ -506,9 +597,18 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       catch (err) { console.error(`[workers] failed to set coding type for job ${job.id}: ${err.message}`) }
     }
 
+    const argvError = argvCommandError(agentCommand)
+    if (argvError) {
+      runningJobs--
+      await dbCall('finishAgentJob', job.id, 'failed', `${argvError} (${job.agent_path})`, null)
+      continue
+    }
+
     const shellBin = defaultShell()
     const agentEnv = buildAgentEnv(settings, cfg, shellBin)
-    const isTemplateCommand = agentCommand.includes('{spec_file}') || agentCommand.includes('{description}') || agentCommand.includes('{title}')
+    const argvCommand = isArgvCommand(agentCommand)
+    const isTemplateCommand = commandHasPlaceholder(agentCommand)
+    const commandMode = isTemplateCommand ? (argvCommand ? 'template (argv)' : 'template (shell)') : 'prompt'
 
     if (cfg?.runtime != null && !isKnownRuntime(cfg.runtime)) {
       console.error(`[workers] agent ${job.agent_path} declares unknown runtime "${cfg.runtime}"; falling back to ${DEFAULT_RUNTIME} (known: ${runtimeNames().join(', ')})`)
@@ -542,30 +642,45 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     let spawnArgs = []
 
     try {
-      if (isTemplateCommand) {
+      const onTemplateWarn = message => console.error(`[workers] job ${job.id} template warning: ${message}`)
+      const task = job.task_id ? await dbCall('getTask', job.task_id) : null
+      const values = {
+        title: task?.title ?? '',
+        description: task?.description ?? job.user_message ?? '',
+      }
+      if (commandMentions(agentCommand, '{spec_file}') || commandMentions(agentCommand, 'QALATRA_SPEC_FILE')) {
+        // Per-job spec filename (bug C13): a fixed spec.md is clobbered when two jobs for the
+        // same agent land in one batch (they spawn back-to-back without awaiting), so job 1's
+        // shell reads job 2's spec. A unique name per job keeps them isolated.
+        const specName = `spec-${job.id}.md`
+        const specPath = path.join(job.agent_path, specName)
+        fs.writeFileSync(specPath, job.prompt, 'utf8')
+        specFile = specPath
+        values.spec_file = `./${specName}`
+      }
+      // Reserved names: set after buildAgentEnv so an agent.config `env` entry cannot shadow them.
+      Object.assign(agentEnv, templateEnv({ job, values }))
+
+      if (isTemplateCommand && argvCommand) {
+        // Argv form: every element is one argument, spawned without a shell. Placeholder values
+        // land as (parts of) argv entries, so there is no quoting for an author to get wrong.
+        const argv = resolveArgvTemplate(agentCommand, values, { onWarn: onTemplateWarn })
+        resolvedCommand = argv
+        bin = argv[0]
+        spawnArgs = argv.slice(1)
+        proc = process.platform === 'win32'
+          ? spawn(bin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
+          : (() => {
+            const launched = withLauncher(shellBin, loginShellArgv(bin, spawnArgs), job.id)
+            scopeUnit = launched.scopeUnit
+            return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
+          })()
+      } else if (isTemplateCommand) {
         resolvedCommand = agentCommand
-        if (agentCommand.includes('{spec_file}')) {
-          // Per-job spec filename (bug C13): a fixed spec.md is clobbered when two jobs for the
-          // same agent land in one batch (they spawn back-to-back without awaiting), so job 1's
-          // shell reads job 2's spec. A unique name per job keeps them isolated.
-          const specName = `spec-${job.id}.md`
-          const specPath = path.join(job.agent_path, specName)
-          fs.writeFileSync(specPath, job.prompt, 'utf8')
-          specFile = specPath
-          resolvedCommand = resolvedCommand.replace(/\{spec_file\}/g, `./${specName}`)
-        }
-        if (agentCommand.includes('{description}') || agentCommand.includes('{title}')) {
-          const task = job.task_id ? await dbCall('getTask', job.task_id) : null
-          if (agentCommand.includes('{description}')) {
-            resolvedCommand = replaceShellPlaceholder(resolvedCommand, 'description', task?.description ?? job.user_message ?? '', {
-              onWarn: message => console.error(`[workers] job ${job.id} template warning: ${message}`),
-            })
-          }
-          if (agentCommand.includes('{title}')) {
-            resolvedCommand = replaceShellPlaceholder(resolvedCommand, 'title', task?.title ?? '', {
-              onWarn: message => console.error(`[workers] job ${job.id} template warning: ${message}`),
-            })
-          }
+        if (values.spec_file) resolvedCommand = resolvedCommand.replace(/\{spec_file\}/g, values.spec_file)
+        for (const name of ['description', 'title']) {
+          if (!agentCommand.includes(`{${name}}`)) continue
+          resolvedCommand = replaceShellPlaceholder(resolvedCommand, name, values[name], { onWarn: onTemplateWarn })
         }
         bin = shellBin
         spawnArgs = ['-i', '-l', '-c', resolvedCommand]
@@ -577,7 +692,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
             return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
           })()
       } else {
-        const parts = agentCommand.trim().split(/\s+/)
+        const parts = argvCommand ? agentCommand : agentCommand.trim().split(/\s+/)
         bin = parts[0]
         const baseArgs = parts.slice(1)
         let promptArg = job.prompt
@@ -599,11 +714,11 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         proc = process.platform === 'win32'
           ? spawn(bin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], shell: true, env: agentEnv })
           : (() => {
-            // The -c '<bin> "$@"' -- ...args structure must survive intact — the args are
+            // The -c '"$0" "$@"' bin ...args structure must survive intact — the args are
             // deliberately not re-parsed by the shell — so the launcher wraps the whole shell
             // invocation rather than being folded into the -c payload. bin/spawnArgs stay the
             // agent's own, so launch diagnostics keep reporting the agent, not systemd-run.
-            const launched = withLauncher(shellBin, ['-i', '-l', '-c', `${bin} "$@"`, '--', ...spawnArgs], job.id)
+            const launched = withLauncher(shellBin, loginShellArgv(bin, spawnArgs), job.id)
             scopeUnit = launched.scopeUnit
             return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
           })()
@@ -614,7 +729,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${spawnErr.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode: isTemplateCommand ? 'template' : 'prompt', runtimeName },
+        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName },
       )
       await dbCall('finishAgentJob', job.id, 'failed', result, null)
       continue
@@ -696,7 +811,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
           env: agentEnv,
           agentCommand,
           resolvedCommand,
-          commandMode: isTemplateCommand ? 'template' : 'prompt',
+          commandMode,
           runtimeName,
         })
       }
@@ -716,7 +831,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode: isTemplateCommand ? 'template' : 'prompt', runtimeName },
+        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName },
       )
       finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null })
         .catch(err => console.error(`[workers] agent error handler failed for job ${job.id}: ${err.message}`))

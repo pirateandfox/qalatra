@@ -26,7 +26,7 @@ export async function scanAgents(root, excludeFolders = []) {
           context: cfg.context || null,
           project: cfg.project || null,
           description: cfg.description || null,
-          command: cfg.command || null,
+          command: Array.isArray(cfg.command) ? JSON.stringify(cfg.command) : (cfg.command || null),
           coding: !!cfg.coding,
           relativePath: rel,
           folder: topFolder,

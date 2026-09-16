@@ -81,6 +81,28 @@
   password into that command. Qalatra now requires that patched release so hosted macOS builds work
   on the current GitHub runner image.
 
+## Argv-form agent commands remove template shell quoting (2026-09-16)
+
+- The structural follow-up to the 2026-09-05 quoting mitigations. `agent.config` `command` may now
+  be an argv array. It is spawned with no shell: each element is one argument and placeholder values
+  (`{title}`, `{description}`, `{spec_file}`) are spliced in verbatim — newlines intact, nothing
+  quoted — so there is no shell quoting for an author to get wrong. The login shell still supplies
+  the user's `PATH` via `-i -l -c '"$0" "$@"'`, which hands the argv through without re-parsing.
+  Prompt-mode agents use the same wrapper (previously `${bin} "$@"`, which broke on a `bin` with a
+  space) and accept the array form too, which fixes the whitespace split for base flags with spaces.
+- Shell-string commands are unchanged so no fleet config has to move; the fleet's `execute-plan`
+  still depends on `$(…)`, `cd`, `&&`. Every run now also gets `QALATRA_TITLE`,
+  `QALATRA_DESCRIPTION`, `QALATRA_TASK_ID`, `QALATRA_JOB_ID` and, when the command references it,
+  `QALATRA_SPEC_FILE` in its environment, so a shell string can keep its shell features and write
+  `"$QALATRA_DESCRIPTION"` instead of splicing the value into the command text. Title and description
+  are capped at 64 KiB in the environment so a huge description cannot become an E2BIG spawn failure
+  for an agent that never asked for it. The unsafe-quote launch warning now points at both
+  alternatives. The `agents` table stores an array command as JSON.
+- Launch diagnostics report `command mode: template (argv)` / `template (shell)` / `prompt`, and
+  render argv commands shell-style so the secret-redaction patterns still apply. Coverage in
+  `scripts/test-worker-command-templates.mjs`; verified end-to-end through the real zsh wrapper with
+  `$(…)`, backticks, mixed quotes and a multi-line description.
+
 ## Template-command quoting hazards are visible at launch (2026-09-05)
 
 - Template substitution already shell-quotes task titles and descriptions and correctly consumes an
