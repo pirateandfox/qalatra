@@ -29,10 +29,8 @@ This skill is path-portable: it uses **relative paths only**. The qalatra repo a
 ### 3. Commit all code changes
 - `git add -A`
 - Commit with a descriptive message covering everything since the last tag.
-- End the commit message with the required co-author trailer:
-  ```
-  Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
-  ```
+- End the commit message with the `Co-Authored-By:` trailer your harness specifies for the model
+  you are running as (Claude Code and Codex each supply their own; don't hardcode one here).
 
 ### 4. Bump version + commit the bump (MUST come before the tag)
 - Edit `package.json` `version` to the new version.
