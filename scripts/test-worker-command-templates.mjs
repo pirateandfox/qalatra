@@ -3,6 +3,7 @@ import {
   buildSystemdAgentLauncher,
   commandDiagnosticLines,
   replaceShellPlaceholder,
+  resumeMessageForJob,
 } from '../server/workers.js'
 
 const warnings = []
@@ -57,5 +58,25 @@ assert.deepEqual(launcher.args, [
   '--property=MemoryMax=2G',
   '--property=OOMPolicy=kill',
 ])
+
+const accumulatedPrompt = `original task\n${'old agent output\n'.repeat(20_000)}`
+assert.equal(
+  resumeMessageForJob({
+    task_id: 'task-123',
+    prompt: accumulatedPrompt,
+    user_message: 'Please apply the review feedback.',
+  }),
+  'Please apply the review feedback.',
+  'a resumed turn must contain only the explicit new instruction',
+)
+
+const scheduledResume = resumeMessageForJob({
+  task_id: 'task-123',
+  prompt: accumulatedPrompt,
+  user_message: null,
+})
+assert.match(scheduledResume, /Continue working on Qalatra task task-123/)
+assert.ok(Buffer.byteLength(scheduledResume) < 512, 'a resumed run without feedback must stay compact')
+assert.ok(!scheduledResume.includes('old agent output'), 'accumulated task history must not be replayed')
 
 console.log('worker command-template tests passed')

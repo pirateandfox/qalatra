@@ -1,8 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
 import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate, daysBetween, offsetDate, withTimestampZones } from '../db.js';
 import { enrichTaskRows, getTaskDependencies, staleWhereClause } from './trust-signals.js';
-import { selectFields, fieldsSchema } from '../field-select.js';
+import { selectFields, fieldsSchema, withoutBodies } from '../field-select.js';
 
+// Freeform bodies get_task leaves out unless asked. A pipeline polling a task's status every pass
+// otherwise re-reads the whole plan each time, and the plan is the bulk of the record.
+const TASK_BODY_FIELDS = ['description', 'ai_context', 'notes'];
 const SEARCH_TASK_FIELDS = 'id,title,status,task_type,context,project,due_date,surface_after,my_priority,assigned_agent,agent_path';
 const AGENT_TASK_FIELDS = 'id,title,status,task_type,context,project,due_date,my_priority,assigned_agent,agent_path,job_id,job_status,job_started_at,job_completed_at';
 
@@ -150,11 +153,12 @@ export const toolDefs = [
   },
   {
     name: 'get_task',
-    description: 'Get full details for a single task by ID.',
+    description: 'Get a single task by ID. description, ai_context and notes are omitted by default; their sizes are reported under `omitted`. Pass fields="description" (or "*") when the plan text is needed.',
     inputSchema: {
       type: 'object',
       properties: {
         task_id: { type: 'string' },
+        fields:  { type: 'string', description: 'Comma-separated columns to return, e.g. "status,due_date,agent_path" or "description". Defaults to every column except description, ai_context and notes; "*" returns the complete record. id is always included; unknown names error.' },
       },
       required: ['task_id'],
     },
@@ -534,7 +538,7 @@ export const handlers = {
     const db = openDb();
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(args.task_id);
     if (!task) throw new Error(`Task not found: ${args.task_id}`);
-    return enrichTaskRows(db, [task])[0];
+    return withoutBodies(enrichTaskRows(db, [task])[0], args.fields, TASK_BODY_FIELDS);
   },
 
   mark_reviewed(args) {

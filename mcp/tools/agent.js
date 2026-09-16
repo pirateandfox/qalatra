@@ -1,6 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
 import { openDb, withTimestampZones } from '../db.js';
-import { selectFields, fieldsSchema } from '../field-select.js';
+import { selectFields, fieldsSchema, wantsEverything, tailText } from '../field-select.js';
+
+const JOB_STATUSES = ['queued', 'running', 'done', 'failed', 'orphaned', 'timed_out'];
+const DEFAULT_LIST_LIMIT = 10;
+// A status poll wants the end of the result — the summary and any error live there — not the
+// whole log. Full text is one `result_chars` or `fields: "*"` away.
+const DEFAULT_RESULT_CHARS = 2000;
 
 const AGENT_JOB_LIST_FIELDS = 'id,task_id,status,runtime,created_at,started_at,completed_at,terminated_by,mcp_tool_calls,usage';
 const AGENT_JOB_DETAIL_FIELDS = 'id,task_id,status,runtime,result,session_id,created_at,started_at,completed_at,terminated_by,terminated_boundary,mcp_tool_calls,usage';
@@ -35,19 +41,21 @@ export const toolDefs = [
       type: 'object',
       properties: {
         task_id: { type: 'string', description: 'Filter by task ID' },
-        limit:   { type: 'integer', description: 'Default 20' },
+        status:  { type: 'string', description: 'Filter by status; comma-separated for several, e.g. "queued,running"' },
+        limit:   { type: 'integer', description: `Default ${DEFAULT_LIST_LIMIT}` },
         fields:  fieldsSchema('id,task_id,status,runtime,terminated_by,completed_at', AGENT_JOB_LIST_FIELDS),
       },
     },
   },
   {
     name: 'get_agent_job',
-    description: "Get one agent job's status and result. orphaned and timed_out are infrastructure states, not failures; timed_out jobs may be resumed. Prompt is excluded by default.",
+    description: `Get one agent job's status and result. orphaned and timed_out are infrastructure states, not failures; timed_out jobs may be resumed. Prompt is excluded by default and result is trimmed to its last ${DEFAULT_RESULT_CHARS} characters (result_length carries the full size).`,
     inputSchema: {
       type: 'object',
       properties: {
-        job_id: { type: 'string' },
-        fields: fieldsSchema('id,status,result,terminated_by', AGENT_JOB_DETAIL_FIELDS),
+        job_id:       { type: 'string' },
+        fields:       fieldsSchema('id,status,result,terminated_by', AGENT_JOB_DETAIL_FIELDS),
+        result_chars: { type: 'integer', description: `Characters of result to return, from the end. Default ${DEFAULT_RESULT_CHARS}; 0 or fields="*" returns it whole.` },
       },
       required: ['job_id'],
     },
@@ -86,10 +94,22 @@ export const handlers = {
 
   list_agent_jobs(args) {
     const db = openDb();
-    const limit = args.limit ?? 20;
-    const jobs = args.task_id
-      ? db.prepare(`SELECT * FROM agent_jobs WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`).all(args.task_id, limit)
-      : db.prepare(`SELECT * FROM agent_jobs ORDER BY created_at DESC LIMIT ?`).all(limit);
+    const limit = args.limit ?? DEFAULT_LIST_LIMIT;
+    const where = [];
+    const params = [];
+    if (args.task_id) { where.push('task_id = ?'); params.push(args.task_id); }
+    if (args.status) {
+      const statuses = String(args.status).split(',').map(s => s.trim()).filter(Boolean);
+      const unknown = statuses.filter(s => !JOB_STATUSES.includes(s));
+      if (unknown.length) throw new Error(`Unknown status: ${unknown.join(', ')}. Valid: ${JOB_STATUSES.join(', ')}`);
+      where.push(`status IN (${statuses.map(() => '?').join(',')})`);
+      params.push(...statuses);
+    }
+    const jobs = db.prepare(`
+      SELECT * FROM agent_jobs
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY created_at DESC LIMIT ?
+    `).all(...params, limit);
     return selectFields(withUsage(withTimestampZones(jobs, 'agent_jobs')), args.fields ?? AGENT_JOB_LIST_FIELDS);
   },
 
@@ -97,6 +117,11 @@ export const handlers = {
     const db = openDb();
     const job = db.prepare('SELECT * FROM agent_jobs WHERE id = ?').get(args.job_id);
     if (!job) throw new Error(`Job not found: ${args.job_id}`);
-    return selectFields(withUsage(withTimestampZones(job, 'agent_jobs')), args.fields ?? AGENT_JOB_DETAIL_FIELDS);
+    const resultChars = args.result_chars ?? DEFAULT_RESULT_CHARS;
+    const whole = wantsEverything(args.fields) || resultChars === 0;
+    const row = withUsage(withTimestampZones(job, 'agent_jobs'));
+    row.result_length = job.result == null ? 0 : String(job.result).length;
+    if (!whole) row.result = tailText(row.result, resultChars);
+    return selectFields(row, args.fields ?? `${AGENT_JOB_DETAIL_FIELDS},result_length`);
   },
 };

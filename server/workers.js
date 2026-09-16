@@ -286,6 +286,21 @@ export function commandDiagnosticLines(agentCommand, resolvedCommand = null) {
   return lines
 }
 
+/**
+ * A resumed CLI session already contains the prompt and conversation from its earlier turns.
+ * Re-sending job.prompt duplicates that history in one argv entry; task notes make it grow without
+ * bound and can eventually exceed the operating system's per-argument limit before the CLI starts.
+ * Explicit human feedback is the next turn. Scheduled/manual re-runs without feedback get only a
+ * compact instruction to inspect the live task, whose id is already part of the resumed session.
+ */
+export function resumeMessageForJob(job) {
+  if (typeof job?.user_message === 'string' && job.user_message.trim()) return job.user_message
+  if (job?.task_id) {
+    return `Continue working on Qalatra task ${job.task_id} from the existing session. Check the task and its notes in Qalatra for updates since your previous run, then act on the current instructions.`
+  }
+  return 'Continue from the existing session and carry out the current run.'
+}
+
 function commandLookup(shellBin, env, cwd) {
   if (process.platform === 'win32') return null
   const script = [
@@ -574,7 +589,9 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         spawnArgs = runtime.buildArgs({
           baseArgs,
           prompt: promptArg,
-          resumeMessage: job.user_message || job.prompt,
+          // --resume restores the prior transcript provider-side. Only the new turn belongs here;
+          // job.prompt contains the complete task-note history and must never be replayed.
+          resumeMessage: resumeMessageForJob(job),
           resumeId: job.prevSessionId || null,
           stream,
           onWarn: message => console.error(`[workers] job ${job.id} (${runtimeName || DEFAULT_RUNTIME}): ${message}`),

@@ -79,7 +79,7 @@ Use these as needed after capability or memory search:
 - `get_capability`: load one full capability record.
 - `rescan_capabilities`: refresh Qalatra after changing agent configs.
 - `search_tasks`: find active or historical task context.
-- `get_task`: load a specific task.
+- `get_task`: load a specific task (status and metadata; pass `fields="description"` or `"*"` for the plan text).
 - `get_task_notes`: load a task thread and agent results.
 - `get_daily_note`: load a full daily note by date.
 - `get_week_notes`: load recent daily notes when the date range matters more than keyword search.

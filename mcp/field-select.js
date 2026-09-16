@@ -12,6 +12,13 @@
  * full body remains available from `get_task` / `get_agent_job` without a projection.
  */
 
+/** True when the caller wrote `*` (alone or in a list): the complete record, bodies included. */
+export function wantsEverything(fields) {
+  if (fields == null) return false;
+  const list = Array.isArray(fields) ? fields : String(fields).split(',');
+  return list.some(field => String(field).trim() === '*');
+}
+
 /** Accepts "a,b" or ["a","b"]; `*` explicitly requests the complete record. */
 export function normalizeFields(fields) {
   if (fields == null) return null;
@@ -63,4 +70,41 @@ export function fieldsSchema(example, defaultFields = null) {
       `Comma-separated columns to return, e.g. "${example}". ${defaultDescription}` +
       'id is always included; unknown names error.',
   };
+}
+
+/**
+ * Drop `bodies` from a single row unless `fields` names them (or is `*`), reporting the size of
+ * each omitted body under `omitted` so the caller knows there is something to fetch and how big it
+ * is. A detail read that only needs status and ids should not pay for a plan, and a caller that
+ * does need the plan can ask for exactly that column.
+ */
+export function withoutBodies(row, fields, bodies) {
+  if (!row) return row;
+  if (wantsEverything(fields)) return row;
+  const requested = normalizeFields(fields);
+  if (requested) return selectFields(row, requested);
+  const omitted = {};
+  const kept = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (bodies.includes(key)) {
+      const length = value == null ? 0 : String(value).length;
+      if (length > 0) omitted[key] = length;
+    } else {
+      kept[key] = value;
+    }
+  }
+  return Object.keys(omitted).length ? { ...kept, omitted } : kept;
+}
+
+/**
+ * Keep the last `maxChars` of `text`, replacing what was cut with a visible marker in the same
+ * shape `appendAiContext` uses. The tail is what a status check wants — the agent's final summary
+ * and any error sit at the end — and the marker tells the caller the full body exists.
+ */
+export function tailText(text, maxChars) {
+  if (text == null) return text;
+  const value = String(text);
+  if (!Number.isFinite(maxChars) || maxChars <= 0 || value.length <= maxChars) return value;
+  const tail = value.slice(value.length - maxChars);
+  return `[…] ${value.length - maxChars} earlier characters trimmed\n${tail}`;
 }

@@ -83,7 +83,7 @@ function createMcpServer({ fullAccess = false } = {}) {
     { name: 'qalatra', version: '1.0.0' },
     {
       capabilities: { tools: {} },
-      instructions: 'Search Qalatra tools when managing tasks, agent jobs, notes, habits, heartbeats, or capabilities. Routine list/search calls return compact records; pass fields="*" only when the complete record is required.',
+      instructions: 'Search Qalatra tools when managing tasks, agent jobs, notes, habits, heartbeats, or capabilities. Reads return compact records by default: get_task omits description/ai_context/notes, get_agent_job returns a result tail. Pass fields="*" (or name the column) only when the complete text is required.',
     }
   );
 

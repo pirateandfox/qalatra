@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { selectFields, normalizeFields, fieldsSchema } from '../mcp/field-select.js'
+import { selectFields, normalizeFields, fieldsSchema, wantsEverything, withoutBodies, tailText } from '../mcp/field-select.js'
 
 // Shaped like a real task read: two scalar columns the caller wants, and the two unbounded
 // freeform bodies that overflow the MCP output cap.
@@ -58,5 +58,33 @@ assert.match(fieldsSchema('id,title').description, /id,title/)
 assert.equal(fieldsSchema('x').type, 'string')
 assert.match(fieldsSchema('id,title', 'id,title,status').description, /Defaults to compact fields/)
 assert.match(fieldsSchema('id,title', 'id,title,status').description, /"\*" returns the complete record/)
+
+// get_task default: every column except the freeform bodies, with their sizes reported so the
+// caller can tell a task with a 10k plan from one with none.
+const task = { id: 't1', title: 'One', status: 'active', description: 'x'.repeat(10000), ai_context: 'y'.repeat(300), notes: null, blocked: false }
+const bodies = ['description', 'ai_context', 'notes']
+assert.deepEqual(withoutBodies(task, undefined, bodies),
+  { id: 't1', title: 'One', status: 'active', blocked: false, omitted: { description: 10000, ai_context: 300 } })
+// No bodies present → no `omitted` key to explain.
+assert.deepEqual(withoutBodies({ id: 't2', title: 'Two', description: null, ai_context: '', notes: null }, undefined, bodies), { id: 't2', title: 'Two' })
+// "*" is the complete record, bodies included — not "no projection given".
+assert.equal(withoutBodies(task, '*', bodies), task)
+assert.equal(withoutBodies(task, 'status,*', bodies), task)
+// Naming a body fetches exactly that body.
+assert.deepEqual(withoutBodies(task, 'description', bodies), { id: 't1', description: task.description })
+assert.deepEqual(withoutBodies(task, 'status', bodies), { id: 't1', status: 'active' })
+assert.equal(withoutBodies(null, undefined, bodies), null)
+
+assert.equal(wantsEverything(undefined), false)
+assert.equal(wantsEverything('status'), false)
+assert.equal(wantsEverything('*'), true)
+assert.equal(wantsEverything(['status', ' * ']), true)
+
+// get_agent_job default: the end of the result, with a marker naming what was cut.
+assert.equal(tailText(null, 100), null)
+assert.equal(tailText('short', 100), 'short')
+assert.equal(tailText('a'.repeat(100), 100), 'a'.repeat(100))
+assert.equal(tailText('a'.repeat(95) + 'END', 3), '[…] 95 earlier characters trimmed\nEND')
+assert.equal(tailText('a'.repeat(50), 0), 'a'.repeat(50))
 
 console.log('field selection tests passed')

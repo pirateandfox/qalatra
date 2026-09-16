@@ -1,5 +1,37 @@
 # Qalatra — Evolution Notes
 
+## Detail reads no longer carry the plan or the log by default (2026-09-15)
+
+- A per-box usage report attributed roughly half of agent spend to Qalatra tool results: a pipeline
+  orchestrator runs hourly and every pass calls `get_task` (full plan text), `list_agent_jobs`, and
+  `get_agent_job` (the complete job output), and each blob then sits in that session for its
+  remaining life. The earlier `fields` work covered the list tools; the two detail reads still
+  returned everything.
+- `get_task` now returns every column except `description`, `ai_context` and `notes`, with the
+  omitted sizes under `omitted` so a caller can tell a 10k plan from an empty one. It accepts the
+  same `fields` projection as the other reads; `fields="description"` or `"*"` fetches the text.
+  On the dev database's largest task: 12,787 → 1,370 bytes.
+- `get_agent_job` returns the last 2,000 characters of `result` with a `[…] N earlier characters
+  trimmed` marker and a `result_length`, since the agent's summary and any error sit at the end.
+  `result_chars` adjusts the tail; `0` or `fields="*"` returns it whole.
+- `list_agent_jobs` pages 10 rather than 20 and takes a `status` filter (`"queued,running"`), so a
+  poller asks for the jobs it cares about instead of paging through finished ones.
+- These are server-side defaults, so every agent on every box benefits without an agent change.
+  Covered in `scripts/test-field-select.mjs`.
+
+## Resumed agents receive only the new turn (2026-09-09)
+
+- Claude and Codex restore the earlier transcript provider-side when Qalatra resumes a session, but
+  Qalatra also used `job.user_message || job.prompt` for the new turn. A run without an explicit
+  user message therefore replayed `job.prompt`, which contains the task description and every task
+  note. Repeated pipeline dispatches made that single argument grow without bound until Linux could
+  reject the spawn with `E2BIG`, before the agent CLI executed anything.
+- Resumed task jobs now send only the explicit user message. Manual or scheduled re-runs without a
+  new message receive a short instruction to continue and inspect the live Qalatra task and notes
+  for updates. Fresh sessions still receive the complete initial prompt, preserving their context.
+- Regression coverage constructs a large accumulated prompt and proves neither explicit follow-ups
+  nor message-less resumed runs replay it.
+
 ## MCP context and agent-usage efficiency is measurable by default (2026-09-08)
 
 - A Claude context report attributed roughly half of one server's agent usage to Qalatra, but the

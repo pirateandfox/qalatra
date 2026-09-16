@@ -296,13 +296,17 @@ toward more access.
   newest 50 entries / 8k characters and leaves a visible `[…] N earlier entries trimmed` marker;
   entry boundaries are day stamps at line start, so a multi-line note stays one entry. Never write
   the column directly — a bypass loses both the ordering and the cap.
-- MCP read tools that can match many tasks (`search_tasks`, `get_tasks_by_agent`, `list_agent_jobs`,
-  `get_agent_job`) return compact fields by default and take a `fields` projection. Pass `fields:
-  "*"` only when the complete record is needed. Past the MCP output cap a response *fails* rather
-  than truncating, so routine reads should not drag `description`, `ai_context`, or a job's `prompt`
-  through. MCP logs emit privacy-safe `tool_call` metrics with duration and byte counts, never
-  argument or result contents. Completed agent jobs expose provider token totals as `usage` and an
-  observed `mcp_tool_calls` count when the runtime's event stream reports them.
+- MCP read tools (`get_task`, `search_tasks`, `get_tasks_by_agent`, `list_agent_jobs`,
+  `get_agent_job`) return compact records by default and take a `fields` projection. `get_task`
+  drops `description`, `ai_context` and `notes` and reports their sizes under `omitted`;
+  `get_agent_job` drops `prompt` and returns only the last 2,000 characters of `result`
+  (`result_chars` adjusts it, `result_length` carries the full size); `list_agent_jobs` pages 10
+  at a time and takes a `status` filter. Pass `fields: "*"` only when the complete record is
+  needed. Past the MCP output cap a response *fails* rather than truncating, so routine reads
+  should not drag a task's plan or a job's log through. MCP logs emit privacy-safe `tool_call`
+  metrics with duration and byte counts, never argument or result contents. Completed agent jobs
+  expose provider token totals as `usage` and an observed `mcp_tool_calls` count when the runtime's
+  event stream reports them.
 - `sort_order` controls priority view ordering — `ORDER BY sort_order ASC NULLS LAST` is the primary sort for active tasks
 - Events (`task_type = 'event'`) are permanent dated records — never go overdue, never get status transitions
 - `surface_after` is strictly for snoozing existing tasks — never set it when creating a new task
