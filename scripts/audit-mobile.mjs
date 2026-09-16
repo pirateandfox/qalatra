@@ -8,17 +8,6 @@ const allowed = new Map([
   // remote input. Remove when Expo/Metro moves to a patched image-size.
   ['GHSA-w3rx-r6r6-pgpr', { package: 'image-size', why: 'ICNS parser infinite loop in Metro build tooling' }],
   ['GHSA-5p2g-fcmc-qvqq', { package: 'image-size', why: 'JXL/HEIF parser infinite loop in Metro build tooling' }],
-  // Unlike the two above this one is RUNTIME code, not build tooling: @react-navigation/native ->
-  // core -> query-string@7 -> decode-uri-component, i.e. deep-link URL parsing. It is allowed only
-  // because there is no installable fix and nothing ships today:
-  //   - vulnerable range is <=0.4.2 and the only fixed release, 0.5.0, is ESM-only, while
-  //     query-string@7 is CommonJS — an override breaks the bundle rather than fixing it, which is
-  //     why npm reports fixAvailable:false;
-  //   - the release workflow installs mobile dependencies for this gate but publishes no mobile
-  //     artifact, so no user runs this code.
-  // Remove as soon as @react-navigation moves to query-string v8+, which drops this dependency.
-  // If mobile builds are ever published, this exception must be re-argued before that ships.
-  ['GHSA-vcc3-ghjq-m6fr', { package: 'decode-uri-component', why: 'DoS in deep-link URL parsing; no installable fix, and no mobile artifact is published' }],
 ])
 
 const audit = spawnSync('npm', ['audit', '--json', '--prefix', 'mobile'], {
