@@ -32,10 +32,11 @@ This skill is path-portable: it uses **relative paths only**. The qalatra repo a
 - End the commit message with the `Co-Authored-By:` trailer your harness specifies for the model
   you are running as (Claude Code and Codex each supply their own; don't hardcode one here).
 
-### 4. Bump version + commit the bump (MUST come before the tag)
+### 4. Bump version, write curated release notes, commit both (MUST come before the tag)
 - Edit `package.json` `version` to the new version.
-- `git add package.json && git commit -m "Bump version to X.Y.Z"`
-- **Verify before tagging:** `git show HEAD:package.json | grep '"version"'` must match the tag you're about to create.
+- Write `plan/releases/vX.Y.Z.md` — the curated notes CI publishes as the GitHub release body. Match the shape of the previous file there (`## Highlights` with bolded lead sentences and bullets, then `## Verification`). The workflow's `verify-release` job **fails the build** when this file is missing from the tagged commit, so it has to land before the tag.
+- `git add package.json plan/releases/vX.Y.Z.md && git commit -m "Bump version to X.Y.Z"`
+- **Verify before tagging:** `git show HEAD:package.json | grep '"version"'` must match the tag you're about to create, and `git show HEAD:plan/releases/vX.Y.Z.md` must succeed.
   - Why this ordering matters: electron-builder reads `package.json` for the release name. If the tag points at a commit with the *old* version, CI publishes a release with the wrong number and the workflow's `gh release edit <tag>` fails with "release not found". This is what broke the 1.3.1 publish.
 
 ### 5. Tag and push (this triggers the CI release build)
@@ -47,10 +48,9 @@ git push origin vX.Y.Z
 - The tag must equal the `package.json` version (with a `v` prefix).
 - Tagging triggers `.github/workflows/release.yml`: builds the macOS DMG + ZIP (arm64 + x64), code-signs, notarizes, and publishes to GitHub Releases. The in-app auto-updater picks it up from there.
 
-### 6. Write GitHub release notes
-- The CI workflow creates the release. Once it exists, set good notes:
-  `gh release edit vX.Y.Z --notes "<summary from step 1>"`
-- If the release doesn't exist yet (CI still building), either wait and retry, or create notes now with `gh release create` only if CI hasn't — prefer letting CI create it and editing the notes after.
+### 6. Confirm the GitHub release
+- CI creates the release and sets its body from `plan/releases/vX.Y.Z.md` — no manual `gh release edit` is needed. Watch the run: `gh run list --workflow=release.yml --limit 1`; a failure within seconds is the `verify-release` job (tag/version mismatch or missing notes file).
+- If the notes file was forgotten and no release exists yet, add it, commit, then move the tag: `git tag -f vX.Y.Z && git push --force origin vX.Y.Z`. Never move a tag that already has a published release.
 
 ### 7. Sync the website (../qalatra.com, also on develop)
 The website is a pnpm + Nx monorepo. Update these, then commit + push to `origin/develop` (no separate version/tag needed for the website):
