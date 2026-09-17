@@ -272,6 +272,35 @@ export async function deleteProject(name: string): Promise<void> {
   await v1(`/projects/${enc(name)}`, { method: 'DELETE' })
 }
 
+export interface IntegrationFolderStatus {
+  path: string
+  apiUrl: string | null
+  lastPollAt: string | null
+  lastOkAt: string | null
+  lastError: string | null
+  rejectedAt: string | null
+  open: number
+  queuedTotal: number
+  sessionOpsTotal: number
+  outbox: { sent: number; failed: number; pending: number }
+}
+
+export interface IntegrationStatus {
+  enabled: boolean
+  pollIntervalMs: number
+  folders: IntegrationFolderStatus[]
+}
+
+export async function fetchIntegrations(): Promise<Record<string, IntegrationStatus>> {
+  const data = await v1('/integrations', { method: 'GET' })
+  return data.integrations ?? {}
+}
+
+export async function pollIntegration(name: string): Promise<IntegrationStatus> {
+  const data = await v1(`/integrations/${encodeURIComponent(name)}/poll`, { method: 'POST' })
+  return data.integration
+}
+
 export async function fetchAgents(): Promise<Agent[]> {
   const data = await v1('/agents', { method: 'GET' })
   return data.agents ?? []

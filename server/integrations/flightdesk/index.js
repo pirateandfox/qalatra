@@ -6,6 +6,7 @@ import { onJobStarted, onJobFinished, orphanedAtBoot } from '../../workers.js'
 import { loadFolderRc } from './rc.js'
 import { createFlightDeskClient } from './client.js'
 import { createFlightDeskDispatcher } from './dispatch.js'
+import { createSessionOps } from '../../session-ops.js'
 
 export const POLL_INTERVAL_MS = 30_000
 // A folder whose credential was rejected keeps trying, slowly, so the attempt stays visible on
@@ -27,7 +28,7 @@ export function startFlightDeskIntegration(ctx, { setIntervalImpl = setInterval,
     return client
   }
 
-  const dispatcher = createFlightDeskDispatcher({ dbCall, clientFor, log })
+  const dispatcher = createFlightDeskDispatcher({ dbCall, clientFor, log, sessionOps: createSessionOps() })
   const enabled = () => loadSettings()?.flightdeskEnabled !== false
 
   let polling = false

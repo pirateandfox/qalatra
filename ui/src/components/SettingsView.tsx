@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchSettings, saveSettings } from '../api'
 import { AgentsSettings } from './settings/AgentsSettings'
+import { IntegrationsSettings } from './settings/IntegrationsSettings'
 import { ContextsSettings } from './settings/ContextsSettings'
 import { EncryptionBackupSettings } from './settings/EncryptionBackupSettings'
 import { GeneralSettings } from './settings/GeneralSettings'
@@ -11,7 +12,7 @@ import type { SidebarConfig } from '../lib/nav'
 import './Settings.css'
 import './SettingsView.css'
 
-type Tab = 'general' | 'sidebar' | 'instances' | 'storage' | 'encryption' | 'contexts' | 'agents'
+type Tab = 'general' | 'sidebar' | 'instances' | 'storage' | 'encryption' | 'contexts' | 'agents' | 'integrations'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'general', label: 'General' },
@@ -21,6 +22,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'encryption', label: 'Encryption & Backup' },
   { key: 'contexts', label: 'Contexts' },
   { key: 'agents', label: 'Agents' },
+  { key: 'integrations', label: 'Integrations' },
 ]
 
 interface SettingsViewProps {
@@ -89,6 +91,7 @@ export default function SettingsView({ sidebarConfig, onSidebarConfigChange }: S
         )}
         {tab === 'contexts' && <ContextsSettings />}
         {tab === 'agents' && <AgentsSettings />}
+        {tab === 'integrations' && <IntegrationsSettings />}
       </div>
     </div>
   )

@@ -299,6 +299,18 @@ function migrate() {
   tryAlter('ALTER TABLE tasks ADD COLUMN orchestrator_ref TEXT')
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_jobs_external_ref ON agent_jobs(external_ref) WHERE external_ref IS NOT NULL')
   db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_orchestrator ON tasks(orchestrator, orchestrator_ref)')
+  // Ledger of code-shaped operations executed on behalf of an orchestrator (session inject, state,
+  // archive…) that never become agent jobs. Keyed by the orchestrator's request id so a request
+  // re-delivered after a lost report is answered from the ledger instead of executed twice — an
+  // inject that lands twice double-posts into a live session.
+  db.exec(`CREATE TABLE IF NOT EXISTS external_ops (
+    external_ref TEXT PRIMARY KEY,
+    orchestrator TEXT NOT NULL,
+    op           TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    result       TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  )`)
   tryAlter('ALTER TABLE projects ADD COLUMN context TEXT')
   tryAlter('ALTER TABLE attachments ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0')
   db.prepare(`UPDATE tasks SET last_reviewed_at = COALESCE(last_touched_human, created_at, datetime('now')) WHERE last_reviewed_at IS NULL`).run()
@@ -1214,6 +1226,30 @@ function bindTaskOrchestrator(taskId, orchestrator, ref) {
   if (!info.changes) throw new Error('Task not found')
   return { ok: true }
 }
+function recordExternalOp({ external_ref, orchestrator, op, status, result }) {
+  db.prepare(`INSERT INTO external_ops (external_ref, orchestrator, op, status, result) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(external_ref) DO UPDATE SET status = excluded.status, result = excluded.result`)
+    .run(String(external_ref), orchestrator, op, status, result == null ? null : JSON.stringify(result))
+  return { ok: true }
+}
+function getExternalOp(externalRef) {
+  const row = db.prepare('SELECT * FROM external_ops WHERE external_ref = ?').get(String(externalRef))
+  if (!row) return null
+  let result = null
+  try { result = row.result ? JSON.parse(row.result) : null } catch { result = { text: row.result } }
+  return { ...row, result }
+}
+// Whether anything is running under this folder's concurrency key (see getQueuedJobs). A code-
+// shaped session operation must wait while an agent turn holds the folder, since that agent may
+// be mid-inject itself.
+function folderHasRunningJob(agentPath) {
+  const row = db.prepare(`
+    WITH me AS (SELECT COALESCE((SELECT concurrency_key FROM agents WHERE path = @path), @path) AS ckey)
+    SELECT 1 AS busy FROM agent_jobs j LEFT JOIN agents a ON a.path = j.agent_path, me
+    WHERE j.status = 'running' AND COALESCE(a.concurrency_key, j.agent_path) = me.ckey LIMIT 1
+  `).get({ path: agentPath })
+  return Boolean(row?.busy)
+}
 function startAgentJob(id) {
   // Atomic claim (bug C6): only transition a job that is still 'queued'. If another worker/
   // instance already claimed it, changes === 0 and the caller must not run it.
@@ -1431,6 +1467,7 @@ const METHODS = {
   getQueuedJobs, startAgentJob, setAgentJobRuntime, finishAgentJob, insertAgentNote,
   resetStuckJobs, getAutorunTasks, insertAutorunJob,
   queueExternalJob, getAgentJobByExternalRef, findTaskByOrchestratorRef, bindTaskOrchestrator,
+  recordExternalOp, getExternalOp, folderHasRunningJob,
   listHeartbeats, createHeartbeat, updateHeartbeat, deleteHeartbeat, toggleHeartbeat,
   getDueHeartbeats, markHeartbeatRun, createHeartbeatJob, listHeartbeatJobs,
 }

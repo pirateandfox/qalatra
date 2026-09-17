@@ -13,16 +13,20 @@
 // which makes a lost ack, a lost RUNNING, or a restart between steps harmless.
 
 import os from 'os'
+import fs from 'fs'
+import path from 'path'
 import { isTransitionRejection, FlightDeskAuthError } from './client.js'
+import { SESSION_OPS, BridgeUnavailableError, UnknownSessionError } from '../../session-ops.js'
 
 export const ORCHESTRATOR = 'flightdesk'
 export const RESULT_TAIL_CHARS = 8192
 export const DIAGNOSTICS_CHARS = 4096
 // D11: a human just spoke (RESUME/ANSWER) beats an older assignment on the same task.
 const KIND_PRIORITY = { RESUME: 0, ANSWER: 0 }
-// Not dispatched as agent jobs. SESSION_OP is A11 (code-shaped session operations), not built yet;
-// leaving it unacked keeps it visible on FlightDesk's side rather than silently swallowing it.
-const UNSUPPORTED_KINDS = new Set(['SESSION_OP'])
+// Kinds handled inline by Qalatra Server rather than as agent jobs (D28). Anything else unknown is
+// left unacked so it stays visible on FlightDesk's side rather than being silently swallowed.
+const INLINE_KINDS = new Set(['SESSION_OP'])
+export const OUTBOX_DIR = '.flightdesk-outbox'
 
 const TERMINAL_JOB = new Set(['done', 'failed', 'timed_out', 'orphaned'])
 const TERMINAL_DISPATCH = new Set(['DONE', 'FAILED', 'CANCELLED'])
@@ -102,14 +106,80 @@ export function dispatchStatusForJob(jobStatus) {
   return null
 }
 
-export function createFlightDeskDispatcher({ dbCall, clientFor, log = console, hostname = os.hostname() }) {
+/**
+ * A SESSION_OP's spec (D28: { op, sessionId, templateId, params }) may arrive as fields on the
+ * request, under `sessionOp`, or — until FlightDesk has columns for it — as JSON in `prompt`.
+ */
+export function sessionOpSpec(request) {
+  let spec = request.sessionOp ?? null
+  if (!spec && request.op) spec = request
+  if (!spec && typeof request.prompt === 'string' && request.prompt.trim().startsWith('{')) {
+    try { spec = JSON.parse(request.prompt) } catch { spec = null }
+  }
+  if (!spec || typeof spec !== 'object') return { error: 'SESSION_OP without an op spec' }
+  const op = String(spec.op ?? '').trim()
+  if (!SESSION_OPS.includes(op)) return { error: `unknown session op "${op}"` }
+  const sessionId = String(spec.sessionId ?? spec.session_id ?? request.sessionId ?? '').trim()
+  if (!sessionId) return { error: 'SESSION_OP without a sessionId' }
+  const templateId = spec.templateId ?? null
+  const prompt = typeof spec.prompt === 'string' ? spec.prompt : (spec.params?.prompt ?? null)
+  if (op === 'inject') {
+    // Term 1 of 5.16: Qalatra never composes an injected prompt and refuses one that isn't from a
+    // FlightDesk-owned template. It does not inspect the text; it enforces that a template id exists.
+    if (!templateId) return { error: 'inject requires templateId' }
+    if (!String(prompt ?? '').trim()) return { error: 'inject requires a rendered prompt' }
+  }
+  return { op, sessionId, templateId, prompt, params: spec.params ?? {} }
+}
+
+/**
+ * Outbox replay (F23/A9). When the FlightDesk CLI cannot reach FlightDesk from inside a job it
+ * writes the GraphQL it failed to send as `<folder>/.flightdesk-outbox/<ulid>.json`:
+ *   { "query": "...", "variables": {...}, "attemptedAt": "..." }
+ * The flush is a dumb replay in filename order — Qalatra never needs to know which operation a
+ * file holds. A transport failure leaves the file for next time; FlightDesk rejecting the payload
+ * is deterministic, so that file moves to `failed/` and is logged instead of retried forever.
+ */
+export async function flushOutbox(agentPath, client, { log = console } = {}) {
+  const dir = path.join(agentPath, OUTBOX_DIR)
+  let names
+  try { names = fs.readdirSync(dir).filter(n => n.endsWith('.json')).sort() } catch { return { sent: 0, failed: 0, pending: 0 } }
+  let sent = 0, failed = 0
+  for (const name of names) {
+    const file = path.join(dir, name)
+    let entry
+    try { entry = JSON.parse(fs.readFileSync(file, 'utf8')) } catch (err) { moveToFailed(dir, name, `unreadable: ${err.message}`); failed++; continue }
+    if (typeof entry?.query !== 'string' || !entry.query.trim()) { moveToFailed(dir, name, 'no query'); failed++; continue }
+    try {
+      await client.graphql(entry.query, entry.variables ?? undefined)
+      fs.unlinkSync(file)
+      sent++
+    } catch (err) {
+      if (err instanceof FlightDeskAuthError) throw err
+      if (err.graphql) { moveToFailed(dir, name, err.message); failed++; log.error(`[flightdesk] outbox ${name} rejected: ${err.message}`); continue }
+      // Transport: stop here, keep order, try again next tick.
+      return { sent, failed, pending: names.length - sent - failed }
+    }
+  }
+  return { sent, failed, pending: 0 }
+}
+function moveToFailed(dir, name, reason) {
+  try {
+    const failedDir = path.join(dir, 'failed')
+    fs.mkdirSync(failedDir, { recursive: true })
+    fs.renameSync(path.join(dir, name), path.join(failedDir, name))
+    fs.writeFileSync(path.join(failedDir, `${name}.reason.txt`), `${new Date().toISOString()} ${reason}\n`)
+  } catch {}
+}
+
+export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = null, log = console, hostname = os.hostname() }) {
   // externalRef -> last FlightDesk status we know we reached. Lets the ladder walk skip steps it
   // has already taken; a cold cache just means every step is tried and the rejections ignored.
   const known = new Map()
   const folders = new Map() // agentPath -> status record for the UI
 
   function folderStatus(agentPath) {
-    if (!folders.has(agentPath)) folders.set(agentPath, { path: agentPath, lastPollAt: null, lastOkAt: null, lastError: null, rejectedAt: null, open: 0, queuedTotal: 0 })
+    if (!folders.has(agentPath)) folders.set(agentPath, { path: agentPath, lastPollAt: null, lastOkAt: null, lastError: null, rejectedAt: null, open: 0, queuedTotal: 0, sessionOpsTotal: 0, outbox: { sent: 0, failed: 0, pending: 0 } })
     return folders.get(agentPath)
   }
 
@@ -198,7 +268,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, log = console, h
       await advance(client, request, 'FAILED', { diagnostics: { kind: 'orphaned', text: `no Qalatra job for dispatch ${request.id} on ${hostname}` } })
       return 'orphaned'
     }
-    if (UNSUPPORTED_KINDS.has(request.kind)) return 'unsupported'
+    if (INLINE_KINDS.has(request.kind)) return handleSessionOp(agent, client, request, status)
     if (request.task?.blocked) return 'blocked'
 
     let answersBlock = ''
@@ -228,12 +298,70 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, log = console, h
     return 'queued'
   }
 
+  /** D28 lifecycle exception: REQUESTED → DONE|FAILED directly; fall back to the ladder on older FlightDesk. */
+  async function reportInline(client, request, target, extra) {
+    try {
+      await client.updateDispatch({ id: request.id, status: target, ...extra })
+      known.delete(request.id)
+      return true
+    } catch (err) {
+      if (!isTransitionRejection(err)) throw err
+      return advance(client, request, target, extra)
+    }
+  }
+
+  async function handleSessionOp(agent, client, request, status) {
+    // Answered from the ledger when we already executed it (a lost report must not re-inject).
+    const done = await dbCall('getExternalOp', request.id)
+    if (done) {
+      await reportInline(client, request, done.status === 'done' ? 'DONE' : 'FAILED', done.result ?? {})
+      return 'reconciled'
+    }
+    const spec = sessionOpSpec(request)
+    if (spec.error) {
+      const result = { diagnostics: { kind: 'error', text: spec.error } }
+      await dbCall('recordExternalOp', { external_ref: request.id, orchestrator: ORCHESTRATOR, op: spec.op ?? 'invalid', status: 'failed', result })
+      await reportInline(client, request, 'FAILED', result)
+      return 'invalid'
+    }
+    if (!sessionOps) return 'unsupported'
+    // Term 2 of 6.20: never touch a session while an agent turn holds this folder — it may be
+    // mid-inject itself. Left unacked; it comes back next tick.
+    if (await dbCall('folderHasRunningJob', agent.path)) return 'deferred'
+
+    let outcome
+    try {
+      if (spec.op === 'inject') {
+        const r = await sessionOps.inject({ sessionId: spec.sessionId, prompt: spec.prompt })
+        outcome = r.verified
+          ? { status: 'done', result: { injected: true, verified: true, turnId: r.turnId } }
+          : { status: 'failed', result: { injected: r.injected, verified: false, diagnostics: { kind: 'error', text: 'inject unverified: delivery to the intended session could not be proven; read the transcript before retrying' } } }
+      } else if (spec.op === 'state') {
+        outcome = { status: 'done', result: await sessionOps.state({ sessionId: spec.sessionId }) }
+      } else if (spec.op === 'archive') {
+        outcome = { status: 'done', result: await sessionOps.archive({ sessionId: spec.sessionId }) }
+      } else if (spec.op === 'create_pr') {
+        outcome = { status: 'done', result: await sessionOps.createPr({ sessionId: spec.sessionId }) }
+      }
+    } catch (err) {
+      const kind = err instanceof BridgeUnavailableError ? 'dependency_down' : 'error'
+      const text = err instanceof UnknownSessionError ? `unknown session ${spec.sessionId}` : err.message
+      outcome = { status: 'failed', result: { diagnostics: { kind, text: tail(text, DIAGNOSTICS_CHARS) } } }
+    }
+    await dbCall('recordExternalOp', { external_ref: request.id, orchestrator: ORCHESTRATOR, op: spec.op, status: outcome.status, result: outcome.result })
+    status.sessionOpsTotal++
+    await reportInline(client, request, outcome.status === 'done' ? 'DONE' : 'FAILED', outcome.result)
+    return outcome.status === 'done' ? 'executed' : 'failed'
+  }
+
   async function pollFolder(agent) {
     const status = folderStatus(agent.path)
     const client = clientFor(agent.path)
     if (!client) return status
     status.lastPollAt = new Date().toISOString()
     try {
+      const flushed = await flushOutbox(agent.path, client, { log })
+      status.outbox = { sent: status.outbox.sent + flushed.sent, failed: status.outbox.failed + flushed.failed, pending: flushed.pending }
       const requests = orderRequests(await client.listDispatches())
       status.open = requests.filter(r => r.status === 'REQUESTED').length
       for (const request of requests) {
@@ -299,5 +427,5 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, log = console, h
     }
   }
 
-  return { pollFolder, onJobStarted, onJobFinished, reportOrphaned, folders, advance, handleRequest }
+  return { pollFolder, onJobStarted, onJobFinished, reportOrphaned, folders, advance, handleRequest, handleSessionOp }
 }

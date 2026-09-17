@@ -26,11 +26,24 @@
   next poll. Finish reports carry an 8 KB result tail, full length, diagnostics and `resumable`.
   A rejected credential retries every 5 min. `GET /api/v1/integrations`,
   `POST /api/v1/integrations/flightdesk/poll`. Off with `settings.flightdeskEnabled = false`.
-- `SESSION_OP` requests (code-shaped session operations, A11) are left unacked until built.
+- **Session operations without an agent (`SESSION_OP`, D28):** `server/session-ops.js` is a
+  generic claude-bridge client (MCP over HTTP on `localhost:7878`) for inject / state / archive /
+  create_pr. The FlightDesk dispatcher executes `SESSION_OP` requests inline on the tick — no job,
+  no tokens: `inject` needs a `templateId` and is `DONE` only when the bridge verified delivery to
+  the intended session; `state` adds `lastTurnEndsWithQuestion` from the transcript; every op is
+  recorded in the new `external_ops` ledger so a re-delivered request is answered, not re-run; ops
+  are deferred while a job holds the folder; an unreachable bridge or "Chrome not connected" is
+  `dependency_down`. Verified against the live daemon on this Mac.
+- **Outbox replay (A9):** each poll replays `<folder>/.flightdesk-outbox/*.json` (raw GraphQL the
+  CLI failed to send) in order — sent files deleted, FlightDesk rejections moved to `failed/`,
+  transport failures kept.
+- Settings → Integrations shows each bound folder's last poll, last success, errors, and counts,
+  with a Poll-now button.
 - `scripts/test-flightdesk-dispatch.mjs` drives `db-worker.js` as a worker thread with a fake
-  FlightDesk that enforces the real transition rules: 33 assertions across queue, re-delivery,
+  FlightDesk that enforces the real transition rules: 48 assertions across queue, re-delivery,
   lifecycle, lost ack, timeout, blocked, RESUME answers, ordering, `resume_session`, restart
-  orphans, ghost acks, unsupported kinds, 401.
+  orphans, ghost acks, 401, session ops (verified/unverified/no template/deferred/bridge down/
+  ledger replay), and outbox replay.
 
 ## One job at a time per agent folder (2026-09-17)
 

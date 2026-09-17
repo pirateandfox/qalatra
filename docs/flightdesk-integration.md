@@ -60,8 +60,43 @@ were running when the server restarted are reported `FAILED / orphaned` at boot.
 
 Rules the poller follows: dedupe by dispatch id (`agent_jobs.external_ref`, unique); skip requests
 whose task is blocked; consume answers server-side before queuing a `RESUME`; within one batch a
-`RESUME`/`ANSWER` runs before older kinds on the same task; a `SESSION_OP` is left unacked (not
-built yet). At most one job runs per agent folder at a time (`concurrency_key`).
+`RESUME`/`ANSWER` runs before older kinds on the same task. At most one job runs per agent folder
+at a time (`concurrency_key`).
+
+## Session operations (`SESSION_OP`, D28)
+
+Some of what a pipeline agent does to a cloud session needs no judgement — relay "CI failed on
+PR #12", nudge a rebase, click Create PR, archive after merge, read whether the session is idle.
+FlightDesk asks for these as `SESSION_OP` dispatches and **Qalatra Server executes them inline on
+the tick through claude-bridge** (`server/session-ops.js`, MCP over HTTP on `localhost:7878`;
+`CLAUDE_BRIDGE_URL` overrides). No agent job, no tokens. Only this box can do it: the bridge is a
+Chrome window logged into this box's account, so it is never reachable from FlightDesk.
+
+Spec: `{ op: inject | state | archive | create_pr, sessionId, templateId?, prompt?, params? }` —
+as fields on the request, under `sessionOp`, or as JSON in `prompt` until FlightDesk has columns.
+
+- `inject` requires a `templateId`: Qalatra never composes an injected prompt and refuses one that
+  is not from a FlightDesk-owned template. It does not inspect the text. `DONE` only when the
+  bridge verified the prompt landed as a new turn in *that* session; otherwise `FAILED` with
+  `inject unverified` and no retry (a retry of an inject that did land double-posts).
+- `state` returns `{ state, workerStatus, prUrl, branch, lastTurnAt, lastTurnRole,
+  lastTurnEndsWithQuestion }` so "ended asking a human" is visible without an agent.
+- Lifecycle is `REQUESTED → DONE | FAILED` directly; on a FlightDesk without that exception the
+  reporter falls back to walking the ladder.
+- Every executed op is recorded in `external_ops`; a re-delivered request is answered from the
+  ledger, never executed twice.
+- Deferred, unacked, while any job holds the folder — that agent may be mid-inject itself.
+- Bridge unreachable, or the daemon reporting "Chrome not connected", is `FAILED /
+  dependency_down`, which FlightDesk's per-box circuit breaker is meant to act on.
+
+## Outbox replay
+
+When the FlightDesk CLI cannot reach FlightDesk from inside a job (`questions ask`, `turn end`,
+`task comment`), it writes the GraphQL it failed to send as
+`<folder>/.flightdesk-outbox/<ulid>.json` — `{ "query", "variables", "attemptedAt" }`. Each poll
+replays that folder's files in name order: sent → deleted; rejected by FlightDesk (deterministic)
+→ moved to `failed/` with a reason file; transport failure → left for next time. Counts show in
+the status endpoint and the Integrations settings panel.
 
 ## Operating
 
@@ -70,12 +105,14 @@ built yet). At most one job runs per agent folder at a time (`concurrency_key`).
 - `POST /api/v1/integrations/flightdesk/poll` — poll now.
 - A rejected credential (401) is retried every 5 minutes so the attempt stays visible.
 - `settings.flightdeskEnabled = false` turns the integration off without removing any file.
+- Settings → Integrations shows each bound folder's last poll, errors, and counts.
 - Tests: `npm run test:flightdesk-dispatch`, `npm run test:job-concurrency`.
 
 ## Layers (the boundary rule)
 
-Generic core, in `db-worker.js` / `server/workers.js`: `queueExternalJob`, `external_ref` /
-`external_meta` / `resume_session` on jobs, `orchestrator` / `orchestrator_ref` on tasks,
-`onJobStarted` / `onJobFinished` / `orphanedAtBoot` hooks, `externalEnv`, `diagnosticsKindFor`.
+Generic core, in `db-worker.js` / `server/workers.js` / `server/session-ops.js`: `queueExternalJob`,
+`external_ref` / `external_meta` / `resume_session` on jobs, `orchestrator` / `orchestrator_ref` on
+tasks, the `external_ops` ledger, `onJobStarted` / `onJobFinished` / `orphanedAtBoot` hooks,
+`externalEnv`, `diagnosticsKindFor`, and the claude-bridge session-ops client.
 FlightDesk-specific, in `server/integrations/flightdesk/`: the rc loader, the GraphQL client, the
 dispatcher, and the tick. A second orchestrator would use the same core surface.

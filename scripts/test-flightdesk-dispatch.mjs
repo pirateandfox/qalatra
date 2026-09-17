@@ -29,7 +29,8 @@ const dbCall = (method, ...args) => new Promise((resolve, reject) => {
 })
 await new Promise(resolve => worker.once('message', m => m.ready && resolve()))
 
-const { createFlightDeskDispatcher, formatAnswersBlock, orderRequests, buildPrompt } = await import('../server/integrations/flightdesk/dispatch.js')
+const { createFlightDeskDispatcher, formatAnswersBlock, orderRequests, buildPrompt, sessionOpSpec, flushOutbox, OUTBOX_DIR } = await import('../server/integrations/flightdesk/dispatch.js')
+const { BridgeUnavailableError, turnEndsWithQuestion } = await import('../server/session-ops.js')
 const { isTransitionRejection, FlightDeskAuthError } = await import('../server/integrations/flightdesk/client.js')
 const { externalEnv, diagnosticsKindFor } = await import('../server/workers.js')
 
@@ -172,12 +173,98 @@ try {
   // ── 9. Unsupported kinds are left alone; auth failure marks the folder rejected ──
   fd.add({ id: 'd8', taskId: 'fd-task-3', kind: 'SESSION_OP', prompt: null })
   await dispatcher.pollFolder(agent)
-  check('SESSION_OP left unacked (A11 not built)', fd.requests.get('d8').status, 'REQUESTED')
+  check('SESSION_OP with no spec → FAILED with a reason (no bridge configured on this dispatcher)', [fd.requests.get('d8').status, fd.requests.get('d8').extras.diagnostics.text], ['FAILED', 'SESSION_OP without an op spec'])
   const rejecting = createFlightDeskDispatcher({ dbCall, clientFor: () => ({ async listDispatches() { throw new FlightDeskAuthError('nope') } }), log: { error() {} } })
   const st = await rejecting.pollFolder(agent)
   check('401 marks the folder rejected', [Boolean(st.rejectedAt), st.lastError], [true, 'nope'])
 
-  // ── 10. Pure helpers ──
+  // ── 10. SESSION_OP: executed inline by the server, never as a job ──
+  const bridgeCalls = []
+  let bridgeDown = false, verifyNext = true
+  const fakeBridge = {
+    async inject({ sessionId, prompt }) { bridgeCalls.push(['inject', sessionId, prompt]); if (bridgeDown) throw new BridgeUnavailableError('down'); return { injected: true, verified: verifyNext, turnId: 'turn-1' } },
+    async state({ sessionId }) { bridgeCalls.push(['state', sessionId]); return { state: 'ready', workerStatus: 'idle', prUrl: null, branch: 'feat/x', lastTurnAt: 't9', lastTurnRole: 'assistant', lastTurnEndsWithQuestion: true } },
+    async archive({ sessionId }) { bridgeCalls.push(['archive', sessionId]); return { archived: true } },
+    async createPr({ sessionId }) { bridgeCalls.push(['create_pr', sessionId]); return { clicked: true, prUrl: null } },
+  }
+  const fd2 = fakeFlightDesk()
+  // Today's FlightDesk has no REQUESTED → DONE shortcut, so the fake enforces the full ladder: the
+  // dispatcher must fall back to walking it when the direct report is rejected.
+  const opsLogs = []
+  const opsDispatcher = createFlightDeskDispatcher({ dbCall, clientFor: () => fd2.client, sessionOps: fakeBridge, log: { error: m => opsLogs.push(m) }, hostname: 'testbox' })
+  const agentB = { path: '/agents/ops', name: 'ops', context: 'internal', project: 'ops' }
+  await dbCall('upsertAgents', [agentB])
+
+  fd2.add({ id: 's1', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: JSON.stringify({ op: 'inject', sessionId: 'sess-cloud-1', templateId: 'ci_failed', prompt: 'CI failed on PR #1: lint' }) })
+  await opsDispatcher.pollFolder(agentB)
+  check('verified inject → DONE with result, no job created', [fd2.requests.get('s1').status, fd2.requests.get('s1').extras.verified, await dbCall('getAgentJobByExternalRef', 's1')], ['DONE', true, null])
+  check('inject went to the bridge with the rendered prompt', bridgeCalls[0], ['inject', 'sess-cloud-1', 'CI failed on PR #1: lint'])
+  const ledger = await dbCall('getExternalOp', 's1')
+  check('op recorded in the ledger', [ledger?.op, ledger?.status, ledger?.result?.turnId], ['inject', 'done', 'turn-1'])
+
+  // Re-delivery of an executed op answers from the ledger — never a second inject.
+  fd2.requests.get('s1').status = 'REQUESTED'
+  await opsDispatcher.pollFolder(agentB)
+  check('re-delivered SESSION_OP is answered from the ledger, not re-executed', [bridgeCalls.filter(c => c[0] === 'inject').length, fd2.requests.get('s1').status], [1, 'DONE'])
+
+  verifyNext = false
+  fd2.add({ id: 's2', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: JSON.stringify({ op: 'inject', sessionId: 'sess-cloud-1', templateId: 'rebase', prompt: 'rebase please' }) })
+  await opsDispatcher.pollFolder(agentB)
+  check('unverified inject → FAILED, never retried', [fd2.requests.get('s2').status, fd2.requests.get('s2').extras.diagnostics.text.startsWith('inject unverified')], ['FAILED', true])
+  verifyNext = true
+
+  fd2.add({ id: 's3', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: JSON.stringify({ op: 'inject', sessionId: 'sess-cloud-1', prompt: 'no template' }) })
+  await opsDispatcher.pollFolder(agentB)
+  check('inject without templateId is refused without touching the bridge', [fd2.requests.get('s3').status, fd2.requests.get('s3').extras.diagnostics.text, bridgeCalls.filter(c => c[0] === 'inject').length], ['FAILED', 'inject requires templateId', 2])
+
+  fd2.add({ id: 's4', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: JSON.stringify({ op: 'state', sessionId: 'sess-cloud-1' }) })
+  await opsDispatcher.pollFolder(agentB)
+  check('state op returns the session read including the last-turn question flag', [fd2.requests.get('s4').status, fd2.requests.get('s4').extras.state, fd2.requests.get('s4').extras.lastTurnEndsWithQuestion], ['DONE', 'ready', true])
+
+  // Deferral: a running job on the folder holds the op unacked.
+  const busyTask = await dbCall('createTask', { title: 'busy', agent_path: agentB.path, context: 'internal' })
+  const busyJob = await dbCall('createAgentJob', busyTask.id, 'work')
+  await dbCall('startAgentJob', busyJob.id)
+  fd2.add({ id: 's5', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: JSON.stringify({ op: 'archive', sessionId: 'sess-cloud-1' }) })
+  await opsDispatcher.pollFolder(agentB)
+  check('SESSION_OP deferred while a job holds the folder', [fd2.requests.get('s5').status, bridgeCalls.some(c => c[0] === 'archive')], ['REQUESTED', false])
+  await dbCall('finishAgentJob', busyJob.id, 'done', 'ok', null)
+  await opsDispatcher.pollFolder(agentB)
+  check('…and executed once the folder is free', [fd2.requests.get('s5').status, bridgeCalls.some(c => c[0] === 'archive')], ['DONE', true])
+
+  bridgeDown = true
+  fd2.add({ id: 's6', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: JSON.stringify({ op: 'inject', sessionId: 'sess-cloud-1', templateId: 'ci_failed', prompt: 'x' }) })
+  await opsDispatcher.pollFolder(agentB)
+  check('bridge unreachable → FAILED/dependency_down', [fd2.requests.get('s6').status, fd2.requests.get('s6').extras.diagnostics.kind], ['FAILED', 'dependency_down'])
+  bridgeDown = false
+  check('no dispatcher errors from the SESSION_OP run', opsLogs, [])
+  check('sessionOpSpec accepts a nested sessionOp object', sessionOpSpec({ sessionOp: { op: 'state', sessionId: 'a' } }).op, 'state')
+  check('turnEndsWithQuestion heuristic', [turnEndsWithQuestion('Done.\n\nShould I also update the docs?'), turnEndsWithQuestion('All green, merged.')], [true, false])
+
+  // ── 11. Outbox replay: GraphQL files sent in order; rejects moved to failed/; transport keeps ──
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'qalatra-outbox-'))
+  const outDir = path.join(folder, OUTBOX_DIR); fs.mkdirSync(outDir)
+  fs.writeFileSync(path.join(outDir, '01.json'), JSON.stringify({ query: 'mutation { a }', variables: { n: 1 }, attemptedAt: 't' }))
+  fs.writeFileSync(path.join(outDir, '02.json'), JSON.stringify({ query: 'mutation { rejected }', variables: {}, attemptedAt: 't' }))
+  fs.writeFileSync(path.join(outDir, '03.json'), JSON.stringify({ query: 'mutation { b }', variables: {}, attemptedAt: 't' }))
+  fs.writeFileSync(path.join(outDir, '04.json'), '{not json')
+  const sentQueries = []
+  let transportDown = false
+  const outboxClient = { async graphql(query, variables) {
+    if (transportDown) throw new Error('network down')
+    if (/rejected/.test(query)) { const e = new Error('Bad input'); e.graphql = true; throw e }
+    sentQueries.push([query, variables]); return {}
+  } }
+  const r1 = await flushOutbox(folder, outboxClient, { log: { error() {} } })
+  check('outbox: sends good entries in order, moves rejects and garbage to failed/', [r1, sentQueries.map(q => q[0]), fs.readdirSync(outDir).sort(), fs.readdirSync(path.join(outDir, 'failed')).filter(n => n.endsWith('.json')).sort()],
+    [{ sent: 2, failed: 2, pending: 0 }, ['mutation { a }', 'mutation { b }'], ['failed'], ['02.json', '04.json']])
+  fs.writeFileSync(path.join(outDir, '05.json'), JSON.stringify({ query: 'mutation { c }', variables: {} }))
+  transportDown = true
+  const r2 = await flushOutbox(folder, outboxClient, { log: { error() {} } })
+  check('outbox: transport failure keeps the file for next time', [r2.pending, fs.existsSync(path.join(outDir, '05.json'))], [1, true])
+  fs.rmSync(folder, { recursive: true, force: true })
+
+  // ── 12. Pure helpers ──
   check('empty prompt gets a task-naming fallback', buildPrompt({ taskId: 'X', kind: 'PLAN', prompt: '', task: { title: 'T', description: 'D' } }, null, ''), 'You are working FlightDesk task X (dispatch kind: PLAN).\nTask: T\n\nD')
   check('formatAnswersBlock is empty with no questions', formatAnswersBlock({ questions: [] }), '')
   check('transition rejection detection', [isTransitionRejection(Object.assign(new Error('Invalid dispatch transition'), { graphql: true })), isTransitionRejection(new Error('Invalid dispatch transition'))], [true, false])
