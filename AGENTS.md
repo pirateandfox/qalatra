@@ -13,10 +13,12 @@ Qalatra is Justin's personal task management system: a local SQLite database own
 ├── electron-main.js        ← Electron main process; starts Qalatra Server, terminal pty, updater, app menu
 ├── server/                 ← Authenticated headless HTTP API; owns /api/v1, DB access, MCP child, workers, backups, tokens, service management
 │   └── http.js             ← Shared HTTP response, CORS, body parsing, and file streaming helpers
+│   └── integrations/       ← Opt-in external orchestrators; flightdesk/ polls FlightDesk dispatches into jobs (see docs/flightdesk-integration.md)
 ├── db-worker.js            ← SQLite worker used by Qalatra Server; handles DB calls off the server event loop
 ├── s3.js                   ← S3/R2 attachment helpers
 ├── docs/
 │   ├── capabilities.md     ← Capability registry guide: agent.config metadata, permissions, delegation, MCP/API usage
+│   ├── flightdesk-integration.md ← FlightDesk as orchestrator: per-folder .flightdeskrc, dispatch poller, lifecycle reporting, core/integration boundary
 │   ├── executive-agent-rollout.md ← Handoff guide for enriching real agents and using Qalatra as an executive-assistant layer
 │   └── linux-remote-install.md ← Verified Linux headless install, Cloudflare tunnel, smoke tests, and MCP setup
 ├── scripts/
@@ -283,6 +285,16 @@ Either limit ends the job as status **`timed_out`** with `terminated_by = 'timeo
 terminal status alongside `orphaned`, so Qalatra's own resource limits don't inflate agent failure
 counts. Because the session id survives, `timed_out` jobs are included in the resume lookup
 (`db-worker.js` `getQueuedJobs`), so the next message on the task continues where it left off.
+
+### External orchestration
+
+An outside system can drive a task by queueing jobs through the generic surface — `queueExternalJob`
+(prompt stored verbatim, idempotent on `external_ref`, `resume_session` per job, env under
+`external_meta.env`), `tasks.orchestrator`/`orchestrator_ref`, and the `onJobStarted` /
+`onJobFinished` / `orphanedAtBoot` hooks in `server/workers.js`. FlightDesk is the first consumer
+(`server/integrations/flightdesk/`, opt-in per agent folder via `.flightdeskrc`; see
+`docs/flightdesk-integration.md`). The core never knows which orchestrator is attached, and
+standalone Qalatra runs with none.
 
 ### Concurrency
 

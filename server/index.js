@@ -15,6 +15,7 @@ import { fileExists, findInheritedStyle, listDirectory, listWorkspaceRoots, read
 import { applyCors, parseBody, parseRawBody, sendBinary, sendJson, streamFile } from './http.js'
 import { handleV1 } from './v1.js'
 import { startBackgroundWorkers, killRunningAgentProcesses } from './workers.js'
+import { startIntegrations } from './integrations/index.js'
 import { createTerminalManager } from './terminal-sessions.js'
 import { createBoxWebProxy } from './box-web.js'
 
@@ -543,6 +544,7 @@ async function main() {
     // resetStuckJobs / job processing / heartbeats against the live instance's jobs (bug C6).
     if (START_WORKERS) {
       startBackgroundWorkers(ctx)
+      ctx.integrations = startIntegrations(ctx)
       backupTimer = setInterval(() => {
         runBackup(ctx).catch(e => console.error('[backup] scheduled backup failed:', e.message))
       }, 60 * 60 * 1000)

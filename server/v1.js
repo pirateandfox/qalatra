@@ -264,6 +264,20 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     if (id === 'db' && method === 'GET') return data('agents', await ctx.dbCall('listAgentsDb'))
   }
 
+  if (resource === 'integrations') {
+    if (!id && method === 'GET') return data('integrations', ctx.integrations?.status() ?? {})
+    if (id && !action && method === 'GET') {
+      const integration = ctx.integrations?.get(id)
+      return integration ? data('integration', integration.status()) : json({ error: 'Not found' }, 404)
+    }
+    if (id && action === 'poll' && method === 'POST') {
+      const integration = ctx.integrations?.get(id)
+      if (!integration?.tick) return json({ error: 'Not found' }, 404)
+      await integration.tick()
+      return data('integration', integration.status())
+    }
+  }
+
   if (resource === 'capabilities') {
     const filterFromQuery = () => ({
       context: url.searchParams.get('context') ?? undefined,

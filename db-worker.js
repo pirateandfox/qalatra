@@ -285,6 +285,20 @@ function migrate() {
   // Jobs that share a concurrency key never run at the same time (see getQueuedJobs). NULL means
   // the agent folder itself is the key, so an agent with no config opt-in is serialized per folder.
   tryAlter('ALTER TABLE agents ADD COLUMN concurrency_key TEXT')
+  // External orchestration (generic — FlightDesk is the first consumer, see server/integrations/):
+  // a job queued by an outside system carries that system's request id in external_ref so a
+  // re-delivered request maps to the same job instead of a second one; external_meta is the
+  // orchestrator's JSON (name, kind, env to inject). resume_session = 0 starts the turn on a
+  // fresh session even when the task has a resumable one — the orchestrator owns stage
+  // boundaries. tasks.orchestrator/orchestrator_ref say who *drives* a task, distinct from
+  // source/source_url, which say where it was born.
+  tryAlter('ALTER TABLE agent_jobs ADD COLUMN external_ref TEXT')
+  tryAlter('ALTER TABLE agent_jobs ADD COLUMN external_meta TEXT')
+  tryAlter('ALTER TABLE agent_jobs ADD COLUMN resume_session INTEGER NOT NULL DEFAULT 1')
+  tryAlter('ALTER TABLE tasks ADD COLUMN orchestrator TEXT')
+  tryAlter('ALTER TABLE tasks ADD COLUMN orchestrator_ref TEXT')
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_jobs_external_ref ON agent_jobs(external_ref) WHERE external_ref IS NOT NULL')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_orchestrator ON tasks(orchestrator, orchestrator_ref)')
   tryAlter('ALTER TABLE projects ADD COLUMN context TEXT')
   tryAlter('ALTER TABLE attachments ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0')
   db.prepare(`UPDATE tasks SET last_reviewed_at = COALESCE(last_touched_human, created_at, datetime('now')) WHERE last_reviewed_at IS NULL`).run()
@@ -1158,12 +1172,47 @@ function getQueuedJobs(limit) {
   `).all(limit).map(({ rid, ckey, ...job }) => job)
   return jobs.map(job => {
     const task = job.task_id ? db.prepare('SELECT agent_resume FROM tasks WHERE id = ?').get(job.task_id) : null
-    const canResume = task?.agent_resume !== 0
+    const canResume = task?.agent_resume !== 0 && job.resume_session !== 0
     const prev = canResume && job.task_id
-      ? db.prepare(`SELECT session_id FROM agent_jobs WHERE task_id = ? AND session_id IS NOT NULL AND status IN ('done', 'timed_out') ORDER BY completed_at DESC LIMIT 1`).get(job.task_id)
+      ? db.prepare(`SELECT session_id FROM agent_jobs WHERE task_id = ? AND session_id IS NOT NULL AND status IN ('done', 'timed_out') ORDER BY completed_at DESC, rowid DESC LIMIT 1`).get(job.task_id)
       : null
     return { ...job, prevSessionId: prev?.session_id ?? null }
   })
+}
+// Queue a job whose prompt an outside orchestrator composed. The prompt is stored verbatim —
+// nothing from the task record is prepended — so what the agent saw is exactly the row the
+// orchestrator holds. user_message is set to the same text: on a resumed session only the new
+// turn is sent (resumeMessageForJob in server/workers.js), and the orchestrator's prompt *is* the
+// new turn. Idempotent on external_ref: a re-delivered request returns the job it already made.
+function queueExternalJob(body = {}) {
+  const prompt = typeof body.prompt === 'string' ? body.prompt : ''
+  if (!prompt.trim()) throw validationError('prompt required')
+  if (!body.agent_path) throw validationError('agent_path required')
+  const externalRef = body.external_ref ? String(body.external_ref) : null
+  if (externalRef) {
+    const existing = db.prepare('SELECT id, status FROM agent_jobs WHERE external_ref = ?').get(externalRef)
+    if (existing) return { id: existing.id, status: existing.status, existing: true }
+  }
+  if (body.task_id && !db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(body.task_id)) throw validationError('task not found')
+  const id = crypto.randomUUID()
+  db.prepare(`INSERT INTO agent_jobs (id, task_id, agent_path, prompt, user_message, external_ref, external_meta, resume_session) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, body.task_id ?? null, body.agent_path, prompt, prompt, externalRef,
+      body.external_meta == null ? null : JSON.stringify(body.external_meta),
+      body.resume_session === false || body.resume_session === 0 ? 0 : 1)
+  return { id, status: 'queued', existing: false }
+}
+function getAgentJobByExternalRef(externalRef) {
+  const job = db.prepare('SELECT * FROM agent_jobs WHERE external_ref = ?').get(String(externalRef))
+  return job ? withTimestampZones(job, 'agent_jobs') : null
+}
+function findTaskByOrchestratorRef(orchestrator, ref) {
+  const row = db.prepare('SELECT id FROM tasks WHERE orchestrator = ? AND orchestrator_ref = ? ORDER BY created_at ASC LIMIT 1').get(orchestrator, String(ref))
+  return row ? getTask(row.id) : null
+}
+function bindTaskOrchestrator(taskId, orchestrator, ref) {
+  const info = db.prepare('UPDATE tasks SET orchestrator = ?, orchestrator_ref = ? WHERE id = ?').run(orchestrator, String(ref), taskId)
+  if (!info.changes) throw new Error('Task not found')
+  return { ok: true }
 }
 function startAgentJob(id) {
   // Atomic claim (bug C6): only transition a job that is still 'queued'. If another worker/
@@ -1206,6 +1255,9 @@ function resetStuckJobs(bootBoundary = null) {
   // land after the job dies). Requeue is the consumer/orchestrator's decision — it can reconstruct
   // what actually completed and requeue safely; `terminated_boundary` gives it the restart instant
   // to reason about without diffing PR head SHAs.
+  // Reported back so an integration can tell its orchestrator which of *its* runs died with the
+  // instance, instead of leaving them ACKNOWLEDGED forever on the other side.
+  const orphaned = db.prepare(`SELECT id, task_id, agent_path, session_id, external_ref, external_meta FROM agent_jobs WHERE status = 'running'`).all()
   db.prepare(`
     UPDATE agent_jobs
     SET status = 'orphaned',
@@ -1215,7 +1267,7 @@ function resetStuckJobs(bootBoundary = null) {
         completed_at = datetime('now')
     WHERE status = 'running'
   `).run({ boundary: bootBoundary })
-  return { ok: true }
+  return { ok: true, orphaned }
 }
 function getAutorunTasks() {
   return db.prepare(`SELECT t.* FROM tasks t WHERE t.agent_path IS NOT NULL AND t.agent_autorun = 1 AND t.status = 'active' AND (t.due_date IS NULL OR t.due_date <= date('now', 'localtime')) AND time('now', 'localtime') >= COALESCE(t.agent_autorun_time, '09:00') AND NOT EXISTS (SELECT 1 FROM agent_jobs j WHERE j.task_id = t.id)`).all()
@@ -1378,6 +1430,7 @@ const METHODS = {
   listAgentJobs, getAgentJob, createAgentJob,
   getQueuedJobs, startAgentJob, setAgentJobRuntime, finishAgentJob, insertAgentNote,
   resetStuckJobs, getAutorunTasks, insertAutorunJob,
+  queueExternalJob, getAgentJobByExternalRef, findTaskByOrchestratorRef, bindTaskOrchestrator,
   listHeartbeats, createHeartbeat, updateHeartbeat, deleteHeartbeat, toggleHeartbeat,
   getDueHeartbeats, markHeartbeatRun, createHeartbeatJob, listHeartbeatJobs,
 }

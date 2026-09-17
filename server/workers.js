@@ -16,6 +16,43 @@ let runningJobs = 0
 /** Live agent runs, so a server shutdown can take their scopes/process groups down with it. */
 const runningAgentProcs = new Set()
 
+// Lifecycle hooks for integrations (server/integrations/). Deliberately generic: an outside
+// orchestrator learns that a job started, finished, or died with the instance without the job
+// pipeline knowing who is listening. Hooks are best-effort — one that throws is logged and never
+// affects the job or the other hooks.
+const jobHooks = { started: new Set(), finished: new Set() }
+export function onJobStarted(fn) { jobHooks.started.add(fn); return () => jobHooks.started.delete(fn) }
+export function onJobFinished(fn) { jobHooks.finished.add(fn); return () => jobHooks.finished.delete(fn) }
+async function runJobHooks(kind, payload) {
+  for (const fn of jobHooks[kind]) {
+    try { await fn(payload) }
+    catch (err) { console.error(`[workers] ${kind} hook failed for job ${payload?.job?.id}: ${err.message}`) }
+  }
+}
+// Jobs that were 'running' when the previous instance stopped, resolved once the boot-time sweep
+// (resetStuckJobs) has marked them orphaned. Integrations await this to report them.
+let resolveOrphanedAtBoot
+export const orphanedAtBoot = new Promise(resolve => { resolveOrphanedAtBoot = resolve })
+
+/**
+ * Environment an orchestrator asked to inject alongside the reserved QALATRA_* names, carried in
+ * agent_jobs.external_meta.env. Only conventional variable names and string values are accepted,
+ * and the reserved prefix is refused so an orchestrator cannot override a Qalatra-owned variable.
+ */
+export function externalEnv(job) {
+  let meta
+  try { meta = job?.external_meta ? JSON.parse(job.external_meta) : null } catch { return {} }
+  const env = meta?.env
+  if (!env || typeof env !== 'object') return {}
+  const out = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (!/^[A-Z][A-Z0-9_]*$/.test(key) || key.startsWith('QALATRA_')) continue
+    if (typeof value !== 'string' && typeof value !== 'number') continue
+    out[key] = String(value).slice(0, 4096)
+  }
+  return out
+}
+
 /**
  * Kill an agent run and everything it started.
  *
@@ -499,7 +536,9 @@ export function startBackgroundWorkers(ctx) {
   // Pass this instance's start time as the orphan "restart boundary": any job still 'running'
   // was killed when the previous instance stopped, and the consumer can compare a late cloud
   // reply's timestamp against this to tell whether the job's work landed before or after death.
-  dbCall('resetStuckJobs', startedAt).catch(() => {})
+  dbCall('resetStuckJobs', startedAt)
+    .then(r => resolveOrphanedAtBoot(Array.isArray(r?.orphaned) ? r.orphaned : []))
+    .catch(() => resolveOrphanedAtBoot([]))
   syncPendingAttachments(ctx).catch(() => {})
   runAgentScan({ dbCall, loadSettings }).catch(() => {})
   setInterval(() => syncPendingAttachments(ctx).catch(() => {}), 5 * 60 * 1000)
@@ -519,13 +558,27 @@ export async function runAgentScan({ dbCall, loadSettings }) {
   return agents
 }
 
-export async function finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, terminatedBy = null, usage = null, mcpToolCalls = null, outputRules = [] }) {
+// Why a job did not end 'done', in terms an orchestrator can act on. `error` is the agent's own
+// failure; the others are Qalatra's limits or infrastructure and should not count against the agent.
+export function diagnosticsKindFor({ status, failureKind = null }) {
+  if (status === 'done') return null
+  if (status === 'timed_out') return 'timed_out'
+  if (status === 'orphaned') return 'orphaned'
+  return failureKind || 'error'
+}
+
+export async function finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, terminatedBy = null, usage = null, mcpToolCalls = null, outputRules = [], failureKind = null }) {
   try {
     await dbCall('finishAgentJob', job.id, status, result, sessionId, terminatedBy, usage, mcpToolCalls)
   } catch (err) {
     console.error(`[workers] failed to persist agent job ${job.id}: ${err.message}`)
     return
   }
+
+  await runJobHooks('finished', {
+    job, status, result, sessionId, terminatedBy,
+    diagnostics: { kind: diagnosticsKindFor({ status, failureKind }), resumable: Boolean(sessionId) },
+  })
 
   if (status === 'done' && job.task_id) {
     try {
@@ -579,7 +632,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
 
     if (!fs.existsSync(job.agent_path)) {
       runningJobs--
-      await dbCall('finishAgentJob', job.id, 'failed', `Agent path does not exist: ${job.agent_path}`, null)
+      await finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result: `Agent path does not exist: ${job.agent_path}`, sessionId: null, failureKind: 'launch_failed' })
       continue
     }
 
@@ -600,7 +653,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     const argvError = argvCommandError(agentCommand)
     if (argvError) {
       runningJobs--
-      await dbCall('finishAgentJob', job.id, 'failed', `${argvError} (${job.agent_path})`, null)
+      await finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result: `${argvError} (${job.agent_path})`, sessionId: null, failureKind: 'launch_failed' })
       continue
     }
 
@@ -660,6 +713,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       }
       // Reserved names: set after buildAgentEnv so an agent.config `env` entry cannot shadow them.
       Object.assign(agentEnv, templateEnv({ job, values }))
+      Object.assign(agentEnv, externalEnv(job))
 
       if (isTemplateCommand && argvCommand) {
         // Argv form: every element is one argument, spawned without a shell. Placeholder values
@@ -731,12 +785,14 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         `Failed to start agent: ${spawnErr.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
         { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName },
       )
-      await dbCall('finishAgentJob', job.id, 'failed', result, null)
+      await finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null, failureKind: 'launch_failed' })
       continue
     }
 
     const runHandle = { proc, scopeUnit }
     runningAgentProcs.add(runHandle)
+    // The process is up: this is the moment an orchestrator should see RUNNING.
+    void runJobHooks('started', { job })
 
     // stderr stays whole-buffered (it is small and used verbatim in failure messages) but is
     // capped so a runaway agent logging to stderr for an hour can't exhaust the worker.
@@ -833,7 +889,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
         { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName },
       )
-      finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null })
+      finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null, failureKind: 'launch_failed' })
         .catch(err => console.error(`[workers] agent error handler failed for job ${job.id}: ${err.message}`))
     })
   }

@@ -1,5 +1,37 @@
 # Qalatra — Evolution Notes
 
+## FlightDesk dispatch poller and the external-orchestration surface (2026-09-17)
+
+- FlightDesk becomes the team-facing surface and the orchestrator for agent work: it decides
+  *when* an agent runs and records that as a dispatch request; Qalatra polls, runs, and reports.
+  Pull-only — nothing calls into a box — and the poller is code on the 30 s tick, so the
+  15-minute watcher agent that discovered work by reading everything is no longer needed. Design
+  record: `flightdesk/docs/2026-09-17-orchestration-plan-shared.md` (D1–D28).
+- **Generic core, FlightDesk-neutral:** `queueExternalJob` stores an orchestrator's prompt
+  verbatim and is idempotent on `agent_jobs.external_ref`; `external_meta` carries the
+  orchestrator's name, kind and env to inject (`externalEnv`, reserved `QALATRA_*` refused);
+  `resume_session = 0` starts a turn on a fresh session; `tasks.orchestrator`/`orchestrator_ref`
+  say who drives a task, distinct from `source`/`source_url`. `workers.js` gains `onJobStarted`,
+  `onJobFinished` (with `diagnostics.kind ∈ error | timed_out | orphaned | launch_failed |
+  dependency_down` and `resumable`) and `orphanedAtBoot`; every launch-failure path now goes
+  through `finishAgentJobSafely` so hooks fire. `resetStuckJobs` returns what it orphaned. The
+  previous-session lookup breaks same-second ties on rowid so the latest session always resumes.
+- **Integration, opt-in per folder:** `server/integrations/flightdesk/` — `.flightdeskrc` in an
+  agent folder (`apiKey`, optional `apiUrl`) binds it; no home-directory fallback, since one
+  credential per folder is the identity FlightDesk assigns to. The dispatcher dedupes by dispatch
+  id, creates and binds one Qalatra task per FlightDesk task, consumes answers server-side for a
+  `RESUME` and appends an `## Answers` block, orders `RESUME`/`ANSWER` before older kinds on one
+  task, skips blocked tasks, and walks FlightDesk's status ladder (`ACKNOWLEDGED → RUNNING → DONE
+  | FAILED`) treating "already past that" as success, so lost acks and restarts reconcile on the
+  next poll. Finish reports carry an 8 KB result tail, full length, diagnostics and `resumable`.
+  A rejected credential retries every 5 min. `GET /api/v1/integrations`,
+  `POST /api/v1/integrations/flightdesk/poll`. Off with `settings.flightdeskEnabled = false`.
+- `SESSION_OP` requests (code-shaped session operations, A11) are left unacked until built.
+- `scripts/test-flightdesk-dispatch.mjs` drives `db-worker.js` as a worker thread with a fake
+  FlightDesk that enforces the real transition rules: 33 assertions across queue, re-delivery,
+  lifecycle, lost ack, timeout, blocked, RESUME answers, ordering, `resume_session`, restart
+  orphans, ghost acks, unsupported kinds, 401.
+
 ## One job at a time per agent folder (2026-09-17)
 
 - `getQueuedJobs` returned queued jobs in `created_at` order with no regard for what was already
