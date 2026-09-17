@@ -282,6 +282,9 @@ function migrate() {
   tryAlter('ALTER TABLE heartbeats ADD COLUMN minute_offset INTEGER')
   tryAlter('ALTER TABLE tasks ADD COLUMN assigned_agent TEXT')
   tryAlter('ALTER TABLE projects ADD COLUMN is_repo INTEGER NOT NULL DEFAULT 0')
+  // Jobs that share a concurrency key never run at the same time (see getQueuedJobs). NULL means
+  // the agent folder itself is the key, so an agent with no config opt-in is serialized per folder.
+  tryAlter('ALTER TABLE agents ADD COLUMN concurrency_key TEXT')
   tryAlter('ALTER TABLE projects ADD COLUMN context TEXT')
   tryAlter('ALTER TABLE attachments ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0')
   db.prepare(`UPDATE tasks SET last_reviewed_at = COALESCE(last_touched_human, created_at, datetime('now')) WHERE last_reviewed_at IS NULL`).run()
@@ -983,18 +986,20 @@ function updateProject(name, fields) {
 }
 function upsertAgents(agents) {
   const upsert = db.prepare(`
-    INSERT INTO agents (path, name, context, project, description, command, coding, relative_path, folder, last_seen)
-    VALUES (@path, @name, @context, @project, @description, @command, @coding, @relative_path, @folder, datetime('now'))
+    INSERT INTO agents (path, name, context, project, description, command, coding, relative_path, folder, concurrency_key, last_seen)
+    VALUES (@path, @name, @context, @project, @description, @command, @coding, @relative_path, @folder, @concurrency_key, datetime('now'))
     ON CONFLICT(path) DO UPDATE SET
       name = excluded.name, context = excluded.context, project = excluded.project,
       description = excluded.description, command = excluded.command, coding = excluded.coding,
-      relative_path = excluded.relative_path, folder = excluded.folder, last_seen = excluded.last_seen
+      relative_path = excluded.relative_path, folder = excluded.folder,
+      concurrency_key = excluded.concurrency_key, last_seen = excluded.last_seen
   `)
   const run = db.transaction(list => { for (const a of list) upsert.run(a) })
   run(agents.map(a => ({
     path: a.path, name: a.name, context: a.context ?? null, project: a.project ?? null,
     description: a.description ?? null, command: a.command ?? null,
     coding: a.coding ? 1 : 0, relative_path: a.relativePath ?? null, folder: a.folder ?? null,
+    concurrency_key: a.concurrencyKey ?? null,
   })))
   upsertScannedCapabilities(db, agents)
   return { ok: true, count: agents.length }
@@ -1129,8 +1134,28 @@ function createAgentJob(taskId, userMessage) {
   db.prepare(`INSERT INTO agent_jobs (id, task_id, agent_path, prompt, user_message) VALUES (?, ?, ?, ?, ?)`).run(id, taskId, task.agent_path, parts.join('\n'), userMessage ?? null)
   return { id, status: 'queued' }
 }
+// One job at a time per concurrency key. Every job in an agent folder shares that folder's
+// working tree — a pipeline's migration path checks out the branch, runs installs and reads the
+// tree back — so two jobs there at once fight over one checkout, and after a restart or an outage
+// the whole backlog arrives together, which makes this the normal case rather than an edge. The
+// key comes from agent.config (`concurrency_key`) and defaults to the agent folder; a repo that
+// spreads plan/execute/pipeline folders over one checkout sets the same key in each. Within a
+// batch only the oldest queued job per key is returned, and none while a running job holds it.
+// Ties on created_at (second resolution) break on rowid so two jobs queued in the same second
+// still serialize.
 function getQueuedJobs(limit) {
-  const jobs = db.prepare(`SELECT * FROM agent_jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT ?`).all(limit)
+  const jobs = db.prepare(`
+    WITH keyed AS (
+      SELECT j.rowid AS rid, j.*, COALESCE(a.concurrency_key, j.agent_path) AS ckey
+      FROM agent_jobs j LEFT JOIN agents a ON a.path = j.agent_path
+      WHERE j.status IN ('queued', 'running')
+    )
+    SELECT * FROM keyed q
+    WHERE q.status = 'queued'
+      AND NOT EXISTS (SELECT 1 FROM keyed r WHERE r.status = 'running' AND r.ckey = q.ckey)
+      AND q.rid = (SELECT rid FROM keyed f WHERE f.status = 'queued' AND f.ckey = q.ckey ORDER BY f.created_at ASC, f.rid ASC LIMIT 1)
+    ORDER BY q.created_at ASC, q.rid ASC LIMIT ?
+  `).all(limit).map(({ rid, ckey, ...job }) => job)
   return jobs.map(job => {
     const task = job.task_id ? db.prepare('SELECT agent_resume FROM tasks WHERE id = ?').get(job.task_id) : null
     const canResume = task?.agent_resume !== 0

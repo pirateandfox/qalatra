@@ -1,5 +1,20 @@
 # Qalatra — Evolution Notes
 
+## One job at a time per agent folder (2026-09-17)
+
+- `getQueuedJobs` returned queued jobs in `created_at` order with no regard for what was already
+  running or for what else was in the batch. Two follow-ups queued on one task, or a backlog
+  arriving together after a restart or outage, ran concurrently — and every job in a folder shares
+  that folder's working tree, so a pipeline's migration path (`git checkout`, installs, reading the
+  tree back) collided with itself.
+- Jobs now serialize per **concurrency key**: `agent.config` `concurrency_key`, defaulting to the
+  agent folder. A key with a running job is not offered; within a batch only the oldest queued job
+  per key is returned; ties on `created_at` (second resolution) break on rowid. A folder missing
+  from the `agents` table still serializes on its own path. Resume lookup is unchanged.
+- Surfaced by the FlightDesk-orchestration design review (`flightdesk/docs/2026-09-17-orchestration-plan-shared.md`,
+  8.10/D20), where a backlog landing in one poll is the normal restart case, but it is a standalone
+  fix. `scripts/test-job-concurrency.mjs` drives `db-worker.js` as a real worker thread.
+
 ## Detail reads no longer carry the plan or the log by default (2026-09-15)
 
 - A per-box usage report attributed roughly half of agent spend to Qalatra tool results: a pipeline

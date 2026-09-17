@@ -284,6 +284,16 @@ terminal status alongside `orphaned`, so Qalatra's own resource limits don't inf
 counts. Because the session id survives, `timed_out` jobs are included in the resume lookup
 (`db-worker.js` `getQueuedJobs`), so the next message on the task continues where it left off.
 
+### Concurrency
+
+`MAX_CONCURRENT_JOBS` (3) is the box-wide ceiling. Within it, **at most one job runs per
+concurrency key** — `agent.config` `concurrency_key`, defaulting to the agent folder. Every job
+in a folder shares that folder's working tree, so two at once fight over one checkout; a repo
+that splits `plan/`, `execute/`, `pipeline/` over one checkout gives them the same key.
+`getQueuedJobs` in `db-worker.js` enforces it: nothing is offered for a key with a running job,
+and only the oldest queued job per key appears in a batch. A backlog landing after a restart
+therefore drains one per key at a time. Covered by `npm run test:job-concurrency`.
+
 **Adding a runtime:** implement `buildArgs({ baseArgs, prompt, resumeMessage, resumeId, stream,
 onWarn })` and `createConsumer({ stream }) -> { push(chunk), finish() -> { result, sessionId } }`,
 then register it in `RUNTIMES`. Use the shared `createNdjsonConsumer` helper for a JSONL CLI — it

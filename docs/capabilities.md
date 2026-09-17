@@ -325,6 +325,9 @@ Put execution details in the normal agent fields:
 
 - `command`
 - `coding`
+- `concurrency_key` — jobs sharing a key never run at the same time; defaults to the agent
+  folder. Set the same key in every folder that works on one checkout (`plan/`, `execute/`,
+  `pipeline/` under a repo).
 - runtime-specific behavior
 - output rules
 
