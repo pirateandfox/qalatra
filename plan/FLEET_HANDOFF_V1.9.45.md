@@ -1,5 +1,12 @@
 # Fleet handoff — Qalatra v1.9.45 (FlightDesk integration)
 
+> **Corrected 2026-09-18.** The fleet built this as `roles/flightdesk_binding` before this
+> handoff was read, and two things below were wrong: (1) there is **no vault** — keys are seeded
+> once on each box with `secret set flightdesk <NAME>` into `~/.config/qalatra/secrets.d/`, and
+> `host_vars` names the key, never holds it; (2) the minimum server version is **1.9.46**, which
+> fixes two `SESSION_OP` shape mismatches against the FlightDesk that actually shipped. The
+> role's README and `docs/flightdesk-binding-rollout.md` in `qalatra-fleet` are authoritative.
+
 For the `qalatra-fleet` manager. The question to answer: **does the fleet need an Ansible role for
 `.flightdeskrc`, and what else changes on a box?** Short version: yes, a small one — but not yet
 fleet-wide, and nothing needs to happen for the upgrade itself to be safe.
