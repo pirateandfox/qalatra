@@ -39,12 +39,25 @@ function parseToolResult(res, name) {
   return parsed
 }
 
-/** True when the last assistant turn reads as a question left for a human. Heuristic by design. */
+/**
+ * True when the last assistant turn reads as something left for a human to do or answer.
+ * Heuristic by design. A bare `?` is not enough: the most common ask from a cloud session is an
+ * imperative — "I need the migration run and pushed before I can continue." — and treating only
+ * question marks as asks would leave exactly that case to the age ceiling, which surfaces but
+ * never re-dispatches. So the closing paragraph is checked for request phrasing as well.
+ */
+const REQUEST_PHRASES = /\b(please|i need|i'?ll need|can you|could you|would you|let me know|waiting (for|on)|blocked (on|by|until)|once you('ve| have)|when you('ve| have)|before i can (continue|proceed)|run (the|a) migration|needs? (to be )?(run|applied|pushed|merged)|requires? (a |the )?(human|manual))\b/i
 export function turnEndsWithQuestion(text) {
-  const lines = String(text ?? '').trim().split('\n').map(l => l.trim()).filter(Boolean)
-  if (!lines.length) return false
+  const body = String(text ?? '').trim()
+  if (!body) return false
+  const lines = body.split('\n').map(l => l.trim()).filter(Boolean)
   const last = lines[lines.length - 1]
-  return /\?\s*$/.test(last) || /\?\s*(\*|_|`)*\s*$/.test(last)
+  if (/\?\s*(\*|_|`)*\s*$/.test(last)) return true
+  // The closing paragraph: everything after the last blank line, capped so a long final
+  // summary does not match on an incidental "please" three screens up.
+  const paragraphs = body.split(/\n\s*\n/)
+  const closing = paragraphs[paragraphs.length - 1].slice(-600)
+  return REQUEST_PHRASES.test(closing)
 }
 
 function turnsOf(transcript) {
@@ -97,7 +110,7 @@ export function createSessionOps({ bridgeUrl = process.env.CLAUDE_BRIDGE_URL || 
       if (!sessionId) throw new Error('sessionId required')
       return withClient(async c => {
         const s = await call(c, 'claude_session_get_state', { session_id: sessionId })
-        let lastTurnAt = null, lastTurnEndsWithQuestion = false, lastTurnRole = null
+        let lastTurnAt = null, lastTurnEndsWithQuestion = false, lastTurnRole = null, lastTurnAsk = false
         try {
           const t = await call(c, 'claude_session_get_transcript', { session_id: sessionId, last_n: 2 })
           const turns = turnsOf(t)
@@ -105,16 +118,25 @@ export function createSessionOps({ bridgeUrl = process.env.CLAUDE_BRIDGE_URL || 
           if (last) {
             lastTurnAt = turnTime(last)
             lastTurnRole = last.role ?? null
-            lastTurnEndsWithQuestion = (last.role ?? 'assistant') !== 'user' && turnEndsWithQuestion(turnText(last))
+            lastTurnAsk = turnEndsWithQuestion(turnText(last))
+            lastTurnEndsWithQuestion = (last.role ?? 'assistant') !== 'user' && lastTurnAsk
           }
         } catch { /* transcript is a bonus; state alone is still an answer */ }
+        const state = s?.state ?? 'unknown'
+        // "unknown" must be treated as busy, never idle (bridge contract). Idle = the session is
+        // not running, the worker reports idle, and the last word was the assistant's — i.e. it
+        // stopped and is waiting on someone, whatever it said.
+        const sessionIdle = state === 'ready' && (s?.workerStatus == null || /idle/i.test(String(s.workerStatus))) && lastTurnRole !== 'user'
         return {
-          state: s?.state ?? 'unknown',
+          state,
           workerStatus: s?.workerStatus ?? null,
           statusBucket: s?.statusBucket ?? null,
           prUrl: s?.prUrl ?? null,
           branch: s?.branchBar ?? s?.branch ?? null,
-          lastTurnAt, lastTurnRole, lastTurnEndsWithQuestion,
+          sessionIdle,
+          lastTurnAt, lastTurnRole,
+          // A stopped session whose last turn asks for something — question mark or not.
+          lastTurnEndsWithQuestion: lastTurnEndsWithQuestion || (sessionIdle && lastTurnRole === 'assistant' && lastTurnAsk),
         }
       })
     },

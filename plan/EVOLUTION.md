@@ -1,5 +1,20 @@
 # Qalatra — Evolution Notes
 
+## A stopped cloud session asking for a migration is detected (2026-09-18)
+
+- Justin poked a hole: today the per-repo monitor reads the cloud session's transcript with
+  judgement, so "I need the migration run and pushed before I can continue" gets the local
+  agent to pull, migrate, regenerate, push and inject "continue". In the new model that turn is a
+  `CUSTOM` FlightDesk dispatches when a `SESSION_OP state` reports `lastTurnEndsWithQuestion`,
+  and Qalatra implemented that as "last line ends with `?`" — so the most common ask, an
+  imperative with no question mark, would have fallen through to the 4 h ceiling, which
+  surfaces but never re-dispatches.
+- `turnEndsWithQuestion` now also matches request phrasing in the closing paragraph (please /
+  I need / let me know / waiting for / blocked on / run the migration / before I can continue…),
+  and `state` reports a `sessionIdle` boolean (ready + worker idle + last word the assistant's;
+  `unknown` is never idle) for FlightDesk to key on directly. The migration turn itself is
+  unchanged: same folder, same command, same permissions — only the trigger differs.
+
 ## SESSION_OP matches FlightDesk's shipped shape (2026-09-18)
 
 - FlightDesk merged its orchestration streams (#115–#118, CLI 0.5.0). Checked Qalatra's poller

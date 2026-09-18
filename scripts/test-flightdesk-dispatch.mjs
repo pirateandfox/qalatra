@@ -241,7 +241,13 @@ try {
   bridgeDown = false
   check('no dispatcher errors from the SESSION_OP run', opsLogs, [])
   check('sessionOpSpec accepts a nested sessionOp object', sessionOpSpec({ sessionOp: { op: 'state', sessionId: 'a' } }).op, 'state')
-  check('turnEndsWithQuestion heuristic', [turnEndsWithQuestion('Done.\n\nShould I also update the docs?'), turnEndsWithQuestion('All green, merged.')], [true, false])
+  check('turnEndsWithQuestion heuristic', [
+    turnEndsWithQuestion('Done.\n\nShould I also update the docs?'),
+    turnEndsWithQuestion('All green, merged.'),
+    turnEndsWithQuestion('I added the Prisma model.\n\nI need the migration run and pushed before I can continue.'),
+    turnEndsWithQuestion('Blocked on the DATABASE_URL secret — let me know when it is set.'),
+    turnEndsWithQuestion('Please note this was refactored earlier.\n\nOpened PR #12 with all tests green.'),
+  ], [true, false, true, true, false])
 
   // ── 11. Outbox replay: GraphQL files sent in order; rejects moved to failed/; transport keeps ──
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'qalatra-outbox-'))
