@@ -1,5 +1,20 @@
 # Qalatra — Evolution Notes
 
+## SESSION_OP matches FlightDesk's shipped shape (2026-09-18)
+
+- FlightDesk merged its orchestration streams (#115–#118, CLI 0.5.0). Checked Qalatra's poller
+  against the real code rather than the plan: two mismatches would have broken `SESSION_OP` on
+  first use. FlightDesk stores the op spec in `sessionOp` and the *rendered* inject text in the
+  request's own `prompt`; the parser only looked inside the spec, so every inject would have
+  failed with "requires a rendered prompt". And FlightDesk's report schema is `optional()`
+  strings — `null` is rejected — so a `state` read with no transcript (`lastTurnAt: null`) would
+  have been refused. Both fixed; reports are compacted before sending. Test now uses
+  FlightDesk's real request shape.
+- Confirmed unchanged: `userDispatchRequests` (the `since` arg is nullable), `qalatraJobId`
+  accepted as a legacy alias for `agentJobId`, `REQUESTED → DONE|FAILED` for `SESSION_OP`,
+  `resumeSession`/`taskUrl`/`preambleVersion` on each request, the CLI's outbox file format,
+  and that FlightDesk's prompt *expects* Qalatra to append `## Answers` (D16).
+
 ## FlightDesk dispatch poller and the external-orchestration surface (2026-09-17)
 
 - FlightDesk becomes the team-facing surface and the orchestrator for agent work: it decides

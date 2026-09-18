@@ -122,7 +122,12 @@ export function sessionOpSpec(request) {
   const sessionId = String(spec.sessionId ?? spec.session_id ?? request.sessionId ?? '').trim()
   if (!sessionId) return { error: 'SESSION_OP without a sessionId' }
   const templateId = spec.templateId ?? null
-  const prompt = typeof spec.prompt === 'string' ? spec.prompt : (spec.params?.prompt ?? null)
+  // FlightDesk stores the spec in `sessionOp` and the *rendered* template text in the request's
+  // own `prompt` (renderSessionOp), so the prompt lives beside the spec, not inside it.
+  const prompt = typeof spec.prompt === 'string' ? spec.prompt
+    : typeof spec.params?.prompt === 'string' ? spec.params.prompt
+    : spec !== request && typeof request.prompt === 'string' && !request.prompt.trim().startsWith('{') ? request.prompt
+    : null
   if (op === 'inject') {
     // Term 1 of 5.16: Qalatra never composes an injected prompt and refuses one that isn't from a
     // FlightDesk-owned template. It does not inspect the text; it enforces that a template id exists.
@@ -172,6 +177,19 @@ function moveToFailed(dir, name, reason) {
   } catch {}
 }
 
+/**
+ * FlightDesk's update schema is `optional()` strings/booleans — `null` is rejected, and unknown
+ * keys are stripped. Drop nulls so a `state` read with no transcript still reports.
+ */
+export function compactReport(extra) {
+  const out = {}
+  for (const [k, v] of Object.entries(extra ?? {})) {
+    if (v === null || v === undefined) continue
+    out[k] = v
+  }
+  return out
+}
+
 export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = null, log = console, hostname = os.hostname() }) {
   // externalRef -> last FlightDesk status we know we reached. Lets the ladder walk skip steps it
   // has already taken; a cold cache just means every step is tried and the rejections ignored.
@@ -196,7 +214,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
       const have = ['REQUESTED', 'ACKNOWLEDGED', 'RUNNING'].indexOf(current)
       if (rung !== -1 && have !== -1 && rung <= have) continue
       const payload = { id: ref, status: step, ...(extra.qalatraJobId ? { qalatraJobId: extra.qalatraJobId } : {}) }
-      if (step === target) Object.assign(payload, extra)
+      if (step === target) Object.assign(payload, compactReport(extra))
       try {
         await client.updateDispatch(payload)
         current = step
@@ -301,7 +319,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
   /** D28 lifecycle exception: REQUESTED → DONE|FAILED directly; fall back to the ladder on older FlightDesk. */
   async function reportInline(client, request, target, extra) {
     try {
-      await client.updateDispatch({ id: request.id, status: target, ...extra })
+      await client.updateDispatch({ id: request.id, status: target, ...compactReport(extra) })
       known.delete(request.id)
       return true
     } catch (err) {

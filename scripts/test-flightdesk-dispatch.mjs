@@ -195,7 +195,8 @@ try {
   const agentB = { path: '/agents/ops', name: 'ops', context: 'internal', project: 'ops' }
   await dbCall('upsertAgents', [agentB])
 
-  fd2.add({ id: 's1', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: JSON.stringify({ op: 'inject', sessionId: 'sess-cloud-1', templateId: 'ci_failed', prompt: 'CI failed on PR #1: lint' }) })
+  // FlightDesk's real shape: spec in `sessionOp`, the rendered template text in the request's own `prompt`.
+  fd2.add({ id: 's1', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: 'CI failed on PR #1: lint', sessionOp: { op: 'inject', sessionId: 'sess-cloud-1', templateId: 'ci_failed', params: { checks: ['lint'] } } })
   await opsDispatcher.pollFolder(agentB)
   check('verified inject → DONE with result, no job created', [fd2.requests.get('s1').status, fd2.requests.get('s1').extras.verified, await dbCall('getAgentJobByExternalRef', 's1')], ['DONE', true, null])
   check('inject went to the bridge with the rendered prompt', bridgeCalls[0], ['inject', 'sess-cloud-1', 'CI failed on PR #1: lint'])
@@ -217,9 +218,10 @@ try {
   await opsDispatcher.pollFolder(agentB)
   check('inject without templateId is refused without touching the bridge', [fd2.requests.get('s3').status, fd2.requests.get('s3').extras.diagnostics.text, bridgeCalls.filter(c => c[0] === 'inject').length], ['FAILED', 'inject requires templateId', 2])
 
-  fd2.add({ id: 's4', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: JSON.stringify({ op: 'state', sessionId: 'sess-cloud-1' }) })
+  fd2.add({ id: 's4', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: null, sessionOp: { op: 'state', sessionId: 'sess-cloud-1' } })
   await opsDispatcher.pollFolder(agentB)
   check('state op returns the session read including the last-turn question flag', [fd2.requests.get('s4').status, fd2.requests.get('s4').extras.state, fd2.requests.get('s4').extras.lastTurnEndsWithQuestion], ['DONE', 'ready', true])
+  check('null fields are dropped from reports (FlightDesk rejects null for optional strings)', 'prUrl' in fd2.requests.get('s4').extras, false)
 
   // Deferral: a running job on the folder holds the op unacked.
   const busyTask = await dbCall('createTask', { title: 'busy', agent_path: agentB.path, context: 'internal' })
