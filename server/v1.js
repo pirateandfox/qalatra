@@ -273,7 +273,7 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     if (id && action === 'poll' && method === 'POST') {
       const integration = ctx.integrations?.get(id)
       if (!integration?.tick) return json({ error: 'Not found' }, 404)
-      await integration.tick()
+      await (integration.pollNow ?? integration.tick)()
       return data('integration', integration.status())
     }
   }

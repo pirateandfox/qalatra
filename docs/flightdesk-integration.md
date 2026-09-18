@@ -102,8 +102,10 @@ the status endpoint and the Integrations settings panel.
 
 - `GET /api/v1/integrations` — per-folder status: last poll, last success, last error, whether
   the credential was rejected, open request count.
-- `POST /api/v1/integrations/flightdesk/poll` — poll now.
-- A rejected credential (401) is retried every 5 minutes so the attempt stays visible.
+- `POST /api/v1/integrations/flightdesk/poll` — poll now. Bypasses the rejected-credential backoff, so
+  a fixed key can be confirmed immediately.
+- A rejected credential (401) is retried every 5 minutes on the automatic tick so the attempt stays
+  visible; verified on Shi 2026-09-18 (rejected within one tick, recovered at the 5-minute retry).
 - `settings.flightdeskEnabled = false` turns the integration off without removing any file.
 - Settings → Integrations shows each bound folder's last poll, errors, and counts.
 - Tests: `npm run test:flightdesk-dispatch`, `npm run test:job-concurrency`.

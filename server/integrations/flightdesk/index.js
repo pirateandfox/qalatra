@@ -32,7 +32,9 @@ export function startFlightDeskIntegration(ctx, { setIntervalImpl = setInterval,
   const enabled = () => loadSettings()?.flightdeskEnabled !== false
 
   let polling = false
-  async function tick() {
+  // `force` is the operator's "Poll now": someone who has just fixed a rejected credential wants
+  // confirmation immediately, not after the 5-minute backoff the automatic tick applies.
+  async function tick({ force = false } = {}) {
     if (polling || !enabled()) return
     polling = true
     try {
@@ -40,7 +42,7 @@ export function startFlightDeskIntegration(ctx, { setIntervalImpl = setInterval,
       for (const agent of agents) {
         if (!loadFolderRc(agent.path)) continue
         const status = dispatcher.folders.get(agent.path)
-        if (status?.rejectedAt && Date.now() - Date.parse(status.lastPollAt) < REJECTED_RETRY_MS) continue
+        if (!force && status?.rejectedAt && Date.now() - Date.parse(status.lastPollAt) < REJECTED_RETRY_MS) continue
         await dispatcher.pollFolder(agent)
       }
     } catch (err) {
@@ -61,6 +63,7 @@ export function startFlightDeskIntegration(ctx, { setIntervalImpl = setInterval,
   return {
     name: 'flightdesk',
     tick,
+    pollNow: () => tick({ force: true }),
     status() {
       return {
         enabled: enabled(),

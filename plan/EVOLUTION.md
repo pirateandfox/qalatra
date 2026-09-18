@@ -1,5 +1,21 @@
 # Qalatra — Evolution Notes
 
+## Shi canary: first FlightDesk dispatch end to end (2026-09-18)
+
+- First real dispatch on the bound `pirateandfox.com/agents/pipeline` folder: requested 19:16:18Z,
+  acknowledged on the next 30 s tick (19:16:33), running 19:17:04, `turn end done` from the agent
+  itself through the folder's `.flightdeskrc` at 19:17:13 (task → REVIEW), Qalatra's `DONE`
+  report 19:17:16. No cloud session opened. Qalatra's side matched: job bound by `external_ref`,
+  task bound by `orchestrator_ref`, `FLIGHTDESK_*` env present, `preamble_version` 1.
+- Broken-key path verified on the box: `rejectedAt` within one tick, `Unauthorized` surfaced,
+  self-recovered at the 5-minute retry with no restart.
+- One operator nit from that test: "Poll now" ran the same tick and so honoured the 5-minute
+  backoff; it now bypasses it (`pollNow`), because the person pressing it has just fixed the key.
+- Also learned: the fleet role binds the folder on Qalatra's side but FlightDesk's own
+  `AgentBinding` still has to be created *as the agent* — `flightdesk agent-bind --path <folder>
+  --box <id>` run from inside the folder, where the cwd-first rc supplies that agent's key.
+  Without it FlightDesk refuses dispatches with "Choose a connected agent". Added to the runbook.
+
 ## A stopped cloud session asking for a migration is detected (2026-09-18)
 
 - Justin poked a hole: today the per-repo monitor reads the cloud session's transcript with

@@ -79,6 +79,18 @@ Optional, same role or `mcp_hygiene`:
 - `settings.flightdeskEnabled: false` in the Qalatra settings file as a kill switch that leaves
   the files in place.
 
+## After the role: register the binding with FlightDesk (learned on the Shi canary)
+
+The role binds the folder on Qalatra's side only. FlightDesk's own `AgentBinding` must be created
+*as the agent*, from inside the folder so the cwd-first rc supplies that agent's key:
+
+```bash
+cd <folder> && flightdesk agent-bind --path <folder> --box <hostname>
+```
+
+Until this runs, `dispatch request` fails with "Choose a connected agent in this organization".
+Worth adding to the role as a post-task (idempotent — the agent owns its binding).
+
 ## Rollout order (8.17/D19)
 
 Per box, not fleet-wide: **Shi (P&F/Linear) first**, watcher left running as a cross-check until
