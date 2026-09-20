@@ -7,6 +7,7 @@ import { scanAgents } from './agents.js'
 import { syncPendingAttachments } from './attachments.js'
 import { getRuntime, isKnownRuntime, DEFAULT_RUNTIME, runtimeNames } from './agent-runtimes.js'
 import { createAgentWatchdog } from './agent-watchdog.js'
+import { loadFolderRc } from './integrations/flightdesk/rc.js'
 
 const MAX_CONCURRENT_JOBS = 3
 /** stderr is stored verbatim in job results, so keep it bounded on a long or noisy run. */
@@ -35,9 +36,17 @@ let resolveOrphanedAtBoot
 export const orphanedAtBoot = new Promise(resolve => { resolveOrphanedAtBoot = resolve })
 
 /**
+ * Names an orchestrator may not set through external_meta.env. The FlightDesk pair is the folder's
+ * identity (flightdeskRcEnv); letting a dispatch payload carry them would re-identify the job from
+ * outside the box.
+ */
+const RESERVED_EXTERNAL_ENV = new Set(['FLIGHTDESK_API_KEY', 'FLIGHTDESK_API_URL'])
+
+/**
  * Environment an orchestrator asked to inject alongside the reserved QALATRA_* names, carried in
  * agent_jobs.external_meta.env. Only conventional variable names and string values are accepted,
- * and the reserved prefix is refused so an orchestrator cannot override a Qalatra-owned variable.
+ * and the reserved names are refused so an orchestrator cannot override a Qalatra-owned variable
+ * or the folder's own credential.
  */
 export function externalEnv(job) {
   let meta
@@ -46,7 +55,7 @@ export function externalEnv(job) {
   if (!env || typeof env !== 'object') return {}
   const out = {}
   for (const [key, value] of Object.entries(env)) {
-    if (!/^[A-Z][A-Z0-9_]*$/.test(key) || key.startsWith('QALATRA_')) continue
+    if (!/^[A-Z][A-Z0-9_]*$/.test(key) || key.startsWith('QALATRA_') || RESERVED_EXTERNAL_ENV.has(key)) continue
     if (typeof value !== 'string' && typeof value !== 'number') continue
     out[key] = String(value).slice(0, 4096)
   }
@@ -348,7 +357,26 @@ function envMap(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
 
-function buildAgentEnv(settings, cfg, shellBin) {
+/**
+ * The folder's FlightDesk credential is its identity (integrations/flightdesk/rc.js). The CLI
+ * inside the job resolves a key by walking up from its cwd, which an agent that cds into its repo
+ * root leaves behind — it then lands on ~/.flightdeskrc and runs as whoever that belongs to. So the
+ * credential goes in as the CLI's own override variables, which it honours over every file lookup.
+ * Folders without an rc get nothing: no fallback, same rule as the poller.
+ */
+export function flightdeskRcEnv(agentPath) {
+  if (!agentPath) return {}
+  const rc = loadFolderRc(agentPath)
+  return rc ? { FLIGHTDESK_API_KEY: rc.apiKey, FLIGHTDESK_API_URL: rc.apiUrl } : {}
+}
+
+/**
+ * Job environment, lowest to highest precedence: server process.env, settings.agentEnv,
+ * agent.config.env, then the folder's .flightdeskrc. The rc wins over the configured layers on
+ * purpose — the file is the binding, and a stale agent.config on a client repo must not be able to
+ * re-identify a folder. The launch loop layers the reserved QALATRA_* names and externalEnv on top.
+ */
+export function buildAgentEnv(settings, cfg, shellBin, agentPath = null) {
   const env = { ...process.env }
   if (!env.HOME) env.HOME = os.homedir()
   try {
@@ -367,6 +395,7 @@ function buildAgentEnv(settings, cfg, shellBin) {
       env[key] = expandEnvValue(value, env)
     }
   }
+  Object.assign(env, flightdeskRcEnv(agentPath))
   return env
 }
 
@@ -658,7 +687,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     }
 
     const shellBin = defaultShell()
-    const agentEnv = buildAgentEnv(settings, cfg, shellBin)
+    const agentEnv = buildAgentEnv(settings, cfg, shellBin, job.agent_path)
     const argvCommand = isArgvCommand(agentCommand)
     const isTemplateCommand = commandHasPlaceholder(agentCommand)
     const commandMode = isTemplateCommand ? (argvCommand ? 'template (argv)' : 'template (shell)') : 'prompt'

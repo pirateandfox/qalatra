@@ -37,6 +37,12 @@ polled first. Add `.flightdeskrc` to the folder's `.gitignore`.
 - Environment: `FLIGHTDESK_TASK_ID`, `FLIGHTDESK_DISPATCH_ID`, `FLIGHTDESK_DISPATCH_KIND`, and
   when FlightDesk supplies them `FLIGHTDESK_TASK_URL`, `FLIGHTDESK_PREAMBLE_VERSION` — next to the
   usual `QALATRA_*` names.
+- `FLIGHTDESK_API_KEY` and `FLIGHTDESK_API_URL` from the folder's `.flightdeskrc`, on every job
+  that runs in a bound folder (heartbeats and manual runs included, not only dispatches). The CLI
+  honours these over any `.flightdeskrc` it would otherwise find by walking up from its cwd, so an
+  agent that works from its repo root is still its own folder's agent user. They override
+  `agent.config.env` / `settings.agentEnv` entries of the same name, and a dispatch's
+  `external_meta.env` may not set them.
 - One Qalatra task per FlightDesk task, created on first dispatch and bound through
   `tasks.orchestrator = 'flightdesk'` / `orchestrator_ref = <FlightDesk task id>`. `source` and
   `source_url` keep saying where the task was born.

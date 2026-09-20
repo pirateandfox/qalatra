@@ -1,5 +1,26 @@
 # Qalatra — Evolution Notes
 
+## The folder's FlightDesk credential reaches the job (2026-09-20)
+
+- Shi canary follow-up: `.flightdeskrc` was used by the *poller* only. The job launched in the
+  bound folder never saw it, and the `flightdesk` CLI inside the job finds a key by walking up
+  from its cwd. The pipeline agent's first act is `cd` to the repo root — *above* the agent
+  folder — so the walk landed on `~/.flightdeskrc` and every `turn end` / `plan submit` from
+  inside the repo ran as Justin, not the Shi agent user. Polling kept the promise "the credential
+  is the folder's identity"; the job silently broke it. Recurs on every box we bind.
+- `buildAgentEnv` (now exported, `server/workers.js`) layers `FLIGHTDESK_API_KEY` /
+  `FLIGHTDESK_API_URL` from the folder's rc (`flightdeskRcEnv`) on every job in a bound folder —
+  heartbeats and manual runs included, since the pipeline heartbeat is exactly the job with no
+  `external_meta`. The CLI honours those over every file lookup, so cwd no longer matters. Not
+  gated on the kill switch: a bound-but-unpolled folder still has one identity.
+- Precedence, decided: rc beats `agent.config.env` and `settings.agentEnv` (the file is the
+  binding; a stale client-repo config must not re-identify a folder). `externalEnv` now refuses
+  those two names too — a dispatch payload could otherwise swap the job's identity from outside.
+- 9 cases in `npm run test:flightdesk-dispatch`. Plan:
+  `plan/FLIGHTDESK_FOLDER_IDENTITY_IN_JOB_ENV.md`. Verify on shi from inside the repo checkout
+  *as a job* (`flightdesk whoami` must be the Shi agent user); a hand-run shell proves nothing.
+  Fleet follow-up: map `CLAUDE_MCP_FLIGHTDESK_AUTHORIZATION` from the same key.
+
 ## Shi canary: first FlightDesk dispatch end to end (2026-09-18)
 
 - First real dispatch on the bound `pirateandfox.com/agents/pipeline` folder: requested 19:16:18Z,

@@ -32,7 +32,7 @@ await new Promise(resolve => worker.once('message', m => m.ready && resolve()))
 const { createFlightDeskDispatcher, formatAnswersBlock, orderRequests, buildPrompt, sessionOpSpec, flushOutbox, OUTBOX_DIR } = await import('../server/integrations/flightdesk/dispatch.js')
 const { BridgeUnavailableError, turnEndsWithQuestion } = await import('../server/session-ops.js')
 const { isTransitionRejection, FlightDeskAuthError } = await import('../server/integrations/flightdesk/client.js')
-const { externalEnv, diagnosticsKindFor } = await import('../server/workers.js')
+const { externalEnv, diagnosticsKindFor, flightdeskRcEnv, buildAgentEnv } = await import('../server/workers.js')
 
 let failures = 0
 function check(name, got, want) {
@@ -277,7 +277,35 @@ try {
   check('formatAnswersBlock is empty with no questions', formatAnswersBlock({ questions: [] }), '')
   check('transition rejection detection', [isTransitionRejection(Object.assign(new Error('Invalid dispatch transition'), { graphql: true })), isTransitionRejection(new Error('Invalid dispatch transition'))], [true, false])
   check('diagnostics kinds', ['done', 'timed_out', 'orphaned', 'failed'].map(s => diagnosticsKindFor({ status: s })).concat(diagnosticsKindFor({ status: 'failed', failureKind: 'launch_failed' })), [null, 'timed_out', 'orphaned', 'error', 'launch_failed'])
-  check('externalEnv refuses reserved and malformed names', externalEnv({ external_meta: JSON.stringify({ env: { QALATRA_TASK_ID: 'x', 'bad-name': 'y', OK_ONE: 'z', NUM: 3, OBJ: {} } }) }), { OK_ONE: 'z', NUM: '3' })
+  check('externalEnv refuses reserved and malformed names', externalEnv({ external_meta: JSON.stringify({ env: { QALATRA_TASK_ID: 'x', 'bad-name': 'y', OK_ONE: 'z', NUM: 3, OBJ: {}, FLIGHTDESK_API_KEY: 'wrong', FLIGHTDESK_API_URL: 'https://evil.test' } }) }), { OK_ONE: 'z', NUM: '3' })
+
+  // ── 13. Folder identity reaches the job env ──
+  // The CLI inside a job walks up from its cwd for a .flightdeskrc; an agent that cds to its repo
+  // root walks past the folder's rc and runs as ~/.flightdeskrc's user. The rc's credential goes
+  // in as the CLI's own override variables, on every job in the folder, regardless of external_meta.
+  delete process.env.FLIGHTDESK_API_KEY
+  delete process.env.FLIGHTDESK_API_URL
+  const bound = fs.mkdtempSync(path.join(os.tmpdir(), 'qalatra-rc-'))
+  const unbound = fs.mkdtempSync(path.join(os.tmpdir(), 'qalatra-norc-'))
+  const rcFile = path.join(bound, '.flightdeskrc')
+  fs.writeFileSync(rcFile, JSON.stringify({ apiKey: 'k1', apiUrl: 'https://x.test' }))
+  check('rc env: key and url from the folder rc', flightdeskRcEnv(bound), { FLIGHTDESK_API_KEY: 'k1', FLIGHTDESK_API_URL: 'https://x.test' })
+  fs.writeFileSync(rcFile, JSON.stringify({ apiKey: 'k1' }))
+  fs.utimesSync(rcFile, new Date(Date.now() + 2000), new Date(Date.now() + 2000)) // defeat the mtime cache within one tick
+  check('rc env: url defaults when the rc omits it', flightdeskRcEnv(bound), { FLIGHTDESK_API_KEY: 'k1', FLIGHTDESK_API_URL: 'https://api.flightdesk.dev' })
+  const unboundEnv = buildAgentEnv({ agentEnv: { FLIGHTDESK_OTHER: 'kept' } }, null, '/bin/sh', unbound)
+  check('no rc: nothing added, unrelated FLIGHTDESK_* untouched', [unboundEnv.FLIGHTDESK_API_KEY, unboundEnv.FLIGHTDESK_API_URL, unboundEnv.FLIGHTDESK_OTHER], [undefined, undefined, 'kept'])
+  check('no agent_path: nothing added', flightdeskRcEnv(null), {})
+  const shadowed = buildAgentEnv({ agentEnv: { FLIGHTDESK_API_KEY: 'settings-wrong' } }, { env: { FLIGHTDESK_API_KEY: 'config-wrong', FLIGHTDESK_API_URL: 'https://config-wrong.test' } }, '/bin/sh', bound)
+  check('rc wins over agent.config.env and settings.agentEnv', [shadowed.FLIGHTDESK_API_KEY, shadowed.FLIGHTDESK_API_URL], ['k1', 'https://api.flightdesk.dev'])
+  const heartbeatJob = { agent_path: bound, external_meta: null }
+  check('heartbeat job (no external_meta) still gets the folder identity', { ...buildAgentEnv({}, null, '/bin/sh', heartbeatJob.agent_path), ...externalEnv(heartbeatJob) }.FLIGHTDESK_API_KEY, 'k1')
+  const spoofed = { agent_path: bound, external_meta: JSON.stringify({ env: { FLIGHTDESK_API_KEY: 'wrong' } }) }
+  check('external_meta.env cannot re-identify a bound folder', { ...buildAgentEnv({}, null, '/bin/sh', spoofed.agent_path), ...externalEnv(spoofed) }.FLIGHTDESK_API_KEY, 'k1')
+  fs.rmSync(rcFile)
+  check('rc deleted between launches → next launch has no identity', flightdeskRcEnv(bound), {})
+  fs.rmSync(bound, { recursive: true, force: true })
+  fs.rmSync(unbound, { recursive: true, force: true })
   check('only the injected network failure was logged', logs, ['[flightdesk] /agents/repo: dispatch d2 (EXECUTE): network down'])
 } catch (err) {
   failures++
