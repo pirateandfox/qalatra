@@ -40,7 +40,7 @@ export const orphanedAtBoot = new Promise(resolve => { resolveOrphanedAtBoot = r
  * identity (flightdeskRcEnv); letting a dispatch payload carry them would re-identify the job from
  * outside the box.
  */
-const RESERVED_EXTERNAL_ENV = new Set(['FLIGHTDESK_API_KEY', 'FLIGHTDESK_API_URL'])
+const RESERVED_EXTERNAL_ENV = new Set(['FLIGHTDESK_API_KEY', 'FLIGHTDESK_API_URL', 'FLIGHTDESK_ORGANIZATION_ID'])
 
 /**
  * Environment an orchestrator asked to inject alongside the reserved QALATRA_* names, carried in
@@ -367,14 +367,21 @@ function envMap(value) {
 export function flightdeskRcEnv(agentPath) {
   if (!agentPath) return {}
   const rc = loadFolderRc(agentPath)
-  return rc ? { FLIGHTDESK_API_KEY: rc.apiKey, FLIGHTDESK_API_URL: rc.apiUrl } : {}
+  if (!rc) return {}
+  const env = { FLIGHTDESK_API_KEY: rc.apiKey, FLIGHTDESK_API_URL: rc.apiUrl }
+  // Once the key comes from the environment the CLI never opens the folder file, so the org
+  // scope has to travel the same way or it is lost.
+  if (rc.organizationId) env.FLIGHTDESK_ORGANIZATION_ID = rc.organizationId
+  return env
 }
 
 /**
  * Job environment, lowest to highest precedence: server process.env, settings.agentEnv,
  * agent.config.env, then the folder's .flightdeskrc. The rc wins over the configured layers on
  * purpose — the file is the binding, and a stale agent.config on a client repo must not be able to
- * re-identify a folder. The launch loop layers the reserved QALATRA_* names and externalEnv on top.
+ * re-identify a folder. It is also applied *before* the configured layers expand, so an
+ * agent.config entry can reference it ("Bearer ${FLIGHTDESK_API_KEY}" for an MCP header) without
+ * being able to replace it. The launch loop layers the reserved QALATRA_* names and externalEnv on top.
  */
 export function buildAgentEnv(settings, cfg, shellBin, agentPath = null) {
   const env = { ...process.env }
@@ -386,6 +393,8 @@ export function buildAgentEnv(settings, cfg, shellBin, agentPath = null) {
   } catch {}
   if (!env.SHELL && shellBin) env.SHELL = shellBin
 
+  const rcEnv = flightdeskRcEnv(agentPath)
+  Object.assign(env, rcEnv) // referenceable by the configured layers
   const configured = { ...envMap(settings.agentEnv), ...envMap(cfg?.env) }
   for (const [key, value] of Object.entries(configured)) {
     if (!validEnvName(key)) continue
@@ -395,7 +404,7 @@ export function buildAgentEnv(settings, cfg, shellBin, agentPath = null) {
       env[key] = expandEnvValue(value, env)
     }
   }
-  Object.assign(env, flightdeskRcEnv(agentPath))
+  Object.assign(env, rcEnv) // and still authoritative after them
   return env
 }
 

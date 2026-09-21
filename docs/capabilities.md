@@ -68,7 +68,7 @@ Agents can also define process environment overrides for Qalatra-launched jobs:
 }
 ```
 
-Values support `~`, `$VAR`, and `${VAR}` expansion against the worker process environment. Set a value to `null` to unset it. The server settings file may also contain a top-level `agentEnv` object for defaults shared by every agent; `agent.config.env` wins for a specific agent. One exception: a folder bound to FlightDesk (holding a `.flightdeskrc`) gets `FLIGHTDESK_API_KEY` / `FLIGHTDESK_API_URL` from that file, overriding `env` entries of the same name — the rc is the folder's identity.
+Values support `~`, `$VAR`, and `${VAR}` expansion against the worker process environment. Set a value to `null` to unset it. The server settings file may also contain a top-level `agentEnv` object for defaults shared by every agent; `agent.config.env` wins for a specific agent. One exception: a folder bound to FlightDesk (holding a `.flightdeskrc`) gets `FLIGHTDESK_API_KEY` / `FLIGHTDESK_API_URL` / `FLIGHTDESK_ORGANIZATION_ID` from that file, overriding `env` entries of the same name — the rc is the folder's identity. Those names are available for expansion in your own entries (`"Bearer ${FLIGHTDESK_API_KEY}"`).
 
 ### Command forms
 

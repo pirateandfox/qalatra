@@ -277,7 +277,7 @@ try {
   check('formatAnswersBlock is empty with no questions', formatAnswersBlock({ questions: [] }), '')
   check('transition rejection detection', [isTransitionRejection(Object.assign(new Error('Invalid dispatch transition'), { graphql: true })), isTransitionRejection(new Error('Invalid dispatch transition'))], [true, false])
   check('diagnostics kinds', ['done', 'timed_out', 'orphaned', 'failed'].map(s => diagnosticsKindFor({ status: s })).concat(diagnosticsKindFor({ status: 'failed', failureKind: 'launch_failed' })), [null, 'timed_out', 'orphaned', 'error', 'launch_failed'])
-  check('externalEnv refuses reserved and malformed names', externalEnv({ external_meta: JSON.stringify({ env: { QALATRA_TASK_ID: 'x', 'bad-name': 'y', OK_ONE: 'z', NUM: 3, OBJ: {}, FLIGHTDESK_API_KEY: 'wrong', FLIGHTDESK_API_URL: 'https://evil.test' } }) }), { OK_ONE: 'z', NUM: '3' })
+  check('externalEnv refuses reserved and malformed names', externalEnv({ external_meta: JSON.stringify({ env: { QALATRA_TASK_ID: 'x', 'bad-name': 'y', OK_ONE: 'z', NUM: 3, OBJ: {}, FLIGHTDESK_API_KEY: 'wrong', FLIGHTDESK_API_URL: 'https://evil.test', FLIGHTDESK_ORGANIZATION_ID: 'evil' } }) }), { OK_ONE: 'z', NUM: '3' })
 
   // ── 13. Folder identity reaches the job env ──
   // The CLI inside a job walks up from its cwd for a .flightdeskrc; an agent that cds to its repo
@@ -285,6 +285,7 @@ try {
   // in as the CLI's own override variables, on every job in the folder, regardless of external_meta.
   delete process.env.FLIGHTDESK_API_KEY
   delete process.env.FLIGHTDESK_API_URL
+  delete process.env.FLIGHTDESK_ORGANIZATION_ID
   const bound = fs.mkdtempSync(path.join(os.tmpdir(), 'qalatra-rc-'))
   const unbound = fs.mkdtempSync(path.join(os.tmpdir(), 'qalatra-norc-'))
   const rcFile = path.join(bound, '.flightdeskrc')
@@ -298,6 +299,12 @@ try {
   check('no agent_path: nothing added', flightdeskRcEnv(null), {})
   const shadowed = buildAgentEnv({ agentEnv: { FLIGHTDESK_API_KEY: 'settings-wrong' } }, { env: { FLIGHTDESK_API_KEY: 'config-wrong', FLIGHTDESK_API_URL: 'https://config-wrong.test' } }, '/bin/sh', bound)
   check('rc wins over agent.config.env and settings.agentEnv', [shadowed.FLIGHTDESK_API_KEY, shadowed.FLIGHTDESK_API_URL], ['k1', 'https://api.flightdesk.dev'])
+  const referencing = buildAgentEnv({}, { env: { MCP_AUTH: 'Bearer ${FLIGHTDESK_API_KEY}', ORG_COPY: '$FLIGHTDESK_ORGANIZATION_ID' } }, '/bin/sh', bound)
+  check('agent.config.env can reference the rc variables (rc applied before expansion)', [referencing.MCP_AUTH, referencing.ORG_COPY], ['Bearer k1', ''])
+  fs.writeFileSync(rcFile, JSON.stringify({ apiKey: 'k1', organizationId: 'org-9' }))
+  fs.utimesSync(rcFile, new Date(Date.now() + 4000), new Date(Date.now() + 4000))
+  const withOrg = buildAgentEnv({}, { env: { MCP_AUTH: 'Bearer ${FLIGHTDESK_API_KEY}', ORG_COPY: '$FLIGHTDESK_ORGANIZATION_ID', FLIGHTDESK_ORGANIZATION_ID: 'wrong' } }, '/bin/sh', bound)
+  check('organizationId travels as FLIGHTDESK_ORGANIZATION_ID, referenceable and authoritative', [withOrg.FLIGHTDESK_ORGANIZATION_ID, withOrg.ORG_COPY, withOrg.MCP_AUTH], ['org-9', 'org-9', 'Bearer k1'])
   const heartbeatJob = { agent_path: bound, external_meta: null }
   check('heartbeat job (no external_meta) still gets the folder identity', { ...buildAgentEnv({}, null, '/bin/sh', heartbeatJob.agent_path), ...externalEnv(heartbeatJob) }.FLIGHTDESK_API_KEY, 'k1')
   const spoofed = { agent_path: bound, external_meta: JSON.stringify({ env: { FLIGHTDESK_API_KEY: 'wrong' } }) }

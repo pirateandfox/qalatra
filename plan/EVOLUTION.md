@@ -16,7 +16,15 @@
 - Precedence, decided: rc beats `agent.config.env` and `settings.agentEnv` (the file is the
   binding; a stale client-repo config must not re-identify a folder). `externalEnv` now refuses
   those two names too — a dispatch payload could otherwise swap the job's identity from outside.
-- 9 cases in `npm run test:flightdesk-dispatch`. Plan:
+- **1.9.50 amendments from the fleet review of 1.9.49.** The rc was assigned *after* the
+  `agent.config.env` expansion loop, so the fleet's planned
+  `"CLAUDE_MCP_FLIGHTDESK_AUTHORIZATION": "Bearer ${FLIGHTDESK_API_KEY}"` expanded to `Bearer `
+  (the fleet reverted that line minutes before the updater rolled). It is now applied before the
+  loop and again after: referenceable, still authoritative. And `organizationId` from the rc was
+  dropped — the CLI never opens the folder file once the key comes from env, so the org scope was
+  silently lost; it now travels as `FLIGHTDESK_ORGANIZATION_ID` (also refused from
+  `external_meta.env`).
+- 11 cases in `npm run test:flightdesk-dispatch`. Plan:
   `plan/FLIGHTDESK_FOLDER_IDENTITY_IN_JOB_ENV.md`. Verify on shi from inside the repo checkout
   *as a job* (`flightdesk whoami` must be the Shi agent user); a hand-run shell proves nothing.
   Fleet follow-up: map `CLAUDE_MCP_FLIGHTDESK_AUTHORIZATION` from the same key.

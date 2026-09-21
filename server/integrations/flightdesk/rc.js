@@ -25,6 +25,9 @@ export function loadFolderRc(agentPath, { env = process.env } = {}) {
       rc = {
         apiKey,
         apiUrl: (typeof parsed.apiUrl === 'string' && parsed.apiUrl.trim()) || env.FLIGHTDESK_API_URL || DEFAULT_API_URL,
+        // Optional in the CLI's own schema ({ apiKey, apiUrl?, organizationId? }); scopes the
+        // agent user to one org when the token spans several.
+        organizationId: (typeof parsed.organizationId === 'string' && parsed.organizationId.trim()) || null,
         file,
       }
     }

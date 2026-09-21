@@ -1,8 +1,13 @@
 # FlightDesk: the folder's credential must reach the job environment
 
-Status: **implemented 2026-09-20** (`buildAgentEnv` / `flightdeskRcEnv` in `server/workers.js`,
-9 cases in `npm run test:flightdesk-dispatch`); awaiting on-box verification on shi after the
-next release. Origin: shi canary, 2026-09-20. Fleet-side analysis lives in
+Status: **shipped 1.9.49, amended in 1.9.50** (`buildAgentEnv` / `flightdeskRcEnv` in
+`server/workers.js`, 11 cases in `npm run test:flightdesk-dispatch`). Fleet review of 1.9.49 found
+two gaps, fixed in 1.9.50: (1) the rc landed *after* `agent.config.env` expanded, so
+`"Bearer ${FLIGHTDESK_API_KEY}"` expanded to `Bearer ` — the rc is now applied before the
+expansion loop (referenceable) and again after (authoritative); (2) `organizationId` was dropped
+by `loadFolderRc`, and since the CLI never opens the folder file once the key comes from env, the
+org scope was lost — it now travels as `FLIGHTDESK_ORGANIZATION_ID`. Awaiting on-box verification
+on shi. Origin: shi canary, 2026-09-20. Fleet-side analysis lives in
 qalatra-fleet (conversation of the same date); this file is the Qalatra-side change.
 
 ## The bug
