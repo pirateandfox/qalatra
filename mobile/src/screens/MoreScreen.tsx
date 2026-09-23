@@ -1,7 +1,7 @@
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { getActiveInstance, removeInstance } from '@qalatra/shared'
+import { getActiveInstance, removeInstance, clearAccountToken } from '@qalatra/shared'
 import type { TaskStackParamList } from '../navigation/types'
 import { Screen } from '../components/ui'
 import { isHidden, useNavConfig, type MoreSection } from '../lib/navConfig'
@@ -50,6 +50,9 @@ export function MoreScreen() {
         </View>
         <Row label="Backends (switch / add)" onPress={() => navigation.navigate('Instances')} />
         <Row label="Disconnect" destructive onPress={disconnect} />
+
+        <Text style={styles.section}>Account</Text>
+        <Row label="Sign out of Qalatra" onPress={clearAccountToken} />
 
         <Text style={styles.section}>App</Text>
         <Row label="Navigation" onPress={() => navigation.navigate('NavigationSettings')} />

@@ -1,16 +1,15 @@
 // Configure the shared platform adapter before anything touches @qalatra/shared.
 import './src/platform.native'
 
-import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { ActivityIndicator, AppState, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { DarkTheme, NavigationContainer, type Theme } from '@react-navigation/native'
 import {
-  getAccountEntitlement,
-  getAccountToken,
+  createAccountAccessController,
+  clearAccountToken,
   getActiveInstance,
-  hydrateAccount,
   hydrateInstances,
   onInstanceConfigChange,
 } from '@qalatra/shared'
@@ -33,68 +32,55 @@ const navTheme: Theme = {
   },
 }
 
-type Boot = 'loading' | 'account' | 'unlicensed' | 'account_error' | 'onboarding' | 'main'
-
 export default function App() {
-  const [boot, setBoot] = useState<Boot>('loading')
-  const [accountError, setAccountError] = useState('')
-
-  // Mobile is remote-only: with no active/default backend, go to onboarding.
-  const evaluate = useCallback(() => {
-    setBoot(getActiveInstance() ? 'main' : 'onboarding')
+  const [access] = useState(() => createAccountAccessController())
+  const account = useSyncExternalStore(access.subscribe, access.getSnapshot)
+  const connected = useSyncExternalStore(onInstanceConfigChange, () => !!getActiveInstance())
+  const [ready, setReady] = useState(false)
+  const [backendError, setBackendError] = useState('')
+  const loadBackendState = useCallback(async () => {
+    setBackendError('')
+    try {
+      await Promise.all([hydrateInstances(), hydrateNavConfig()])
+      setReady(true)
+    } catch {
+      setBackendError('Could not load your connections. Please try again.')
+    }
   }, [])
 
-  const evaluateAccount = useCallback(async () => {
-    if (!getAccountToken()) {
-      setBoot('account')
-      return
-    }
-    setBoot('loading')
-    try {
-      const entitlement = await getAccountEntitlement()
-      if (!entitlement?.active || !entitlement.hasSeat) {
-        setBoot('unlicensed')
-        return
-      }
-      setAccountError('')
-      evaluate()
-    } catch (error) {
-      setAccountError(error instanceof Error ? error.message : 'Could not verify your license.')
-      setBoot('account_error')
-    }
-  }, [evaluate])
-
   useEffect(() => {
-    let active = true
-    // Warm both caches before rendering: instances decide onboarding vs main,
-    // and the nav config decides the initial tab + which sections render.
-    Promise.all([hydrateAccount(), hydrateInstances(), hydrateNavConfig()]).then(() => {
-      if (active) void evaluateAccount()
+    const stop = access.start()
+    const listener = AppState.addEventListener('change', state => {
+      if (state === 'active') void access.check()
     })
-    const unsubscribe = onInstanceConfigChange(evaluate)
-    return () => {
-      active = false
-      unsubscribe()
-    }
-  }, [evaluateAccount])
+    void loadBackendState()
+    return () => { stop(); listener.remove() }
+  }, [access, loadBackendState])
 
   return (
     <GestureHandlerRootView style={styles.flex}>
     <SafeAreaProvider>
       <ErrorBoundary>
       <StatusBar barStyle="light-content" />
-      {boot === 'loading' ? (
+      {account.status === 'checking' ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.muted} />
         </View>
-      ) : boot === 'account' ? (
-        <AccountScreen onAuthenticated={evaluateAccount} />
-      ) : boot === 'unlicensed' ? (
-        <AccountScreen mode="unlicensed" onAuthenticated={evaluateAccount} />
-      ) : boot === 'account_error' ? (
-        <AccountScreen mode="error" message={accountError} onAuthenticated={evaluateAccount} />
-      ) : boot === 'onboarding' ? (
-        <OnboardingScreen />
+      ) : account.status === 'login' ? (
+        <AccountScreen onAuthenticated={access.check} />
+      ) : account.status === 'unlicensed' ? (
+        <AccountScreen mode="unlicensed" onAuthenticated={access.check} />
+      ) : account.status === 'error' ? (
+        <AccountScreen mode="error" message={account.message} onAuthenticated={access.check} />
+      ) : !ready ? (
+        <View style={styles.center}>
+          {backendError ? <><Text style={{ color: colors.text }}>{backendError}</Text><Pressable onPress={() => void loadBackendState()}><Text style={{ color: colors.accent }}>Try again</Text></Pressable></> : <ActivityIndicator color={colors.muted} />}
+        </View>
+      ) : !connected ? (
+        <View style={styles.flex}>
+          <OnboardingScreen />
+          <Pressable onPress={clearAccountToken} style={{ padding: 16, backgroundColor: colors.bg }}><Text style={{ color: colors.accent, textAlign: 'center' }}>Sign out of Qalatra</Text></Pressable>
+        </View>
       ) : (
         <NavigationContainer theme={navTheme}>
           <RootNavigator />

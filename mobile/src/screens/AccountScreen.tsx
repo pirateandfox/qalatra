@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import {
   ActivityIndicator,
-  Linking,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -10,7 +9,6 @@ import {
   View,
 } from 'react-native'
 import {
-  accountPortalUrl,
   clearAccountToken,
   completeAccount2FA,
   loginAccount,
@@ -93,13 +91,10 @@ export function AccountScreen({
           <Text style={styles.copy}>
             Your account is valid, but it does not have an active Connect seat
             or the admin seat included with a Cloud node. Ask your organization
-            owner to assign access in the portal.
+            owner to assign access.
           </Text>
-          <Pressable
-            style={styles.primary}
-            onPress={() => void Linking.openURL(accountPortalUrl('/team'))}
-          >
-            <Text style={styles.primaryText}>Open portal</Text>
+          <Pressable style={styles.primary} onPress={() => void onAuthenticated()}>
+            <Text style={styles.primaryText}>Check access again</Text>
           </Pressable>
           <Pressable
             style={styles.secondary}
@@ -173,11 +168,9 @@ export function AccountScreen({
             </Text>
           )}
         </Pressable>
-        {!tempToken && (
-          <Pressable
-            onPress={() => void Linking.openURL(accountPortalUrl('/register'))}
-          >
-            <Text style={styles.link}>Create an account</Text>
+        {!!tempToken && (
+          <Pressable onPress={() => { setTempToken(''); setCode(''); setError('') }}>
+            <Text style={styles.link}>Back to sign in</Text>
           </Pressable>
         )}
       </View>

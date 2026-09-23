@@ -20,3 +20,5 @@ assets/ElectronIcon.icon/
 # ...except shared, checked-in skills (portable across machines)
 !.claude/skills/
 !.claude/skills/**
+
+ui/dist-hosted/

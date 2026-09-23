@@ -2,9 +2,12 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
-  base: process.env.NODE_ENV === 'production' ? './' : '/',
+  base: mode === 'hosted' ? '/' : process.env.NODE_ENV === 'production' ? './' : '/',
+  // Hosted publishing cannot accidentally inherit the free desktop gate setting.
+  define: mode === 'hosted' ? { 'import.meta.env.VITE_QALATRA_ACCOUNT_AUTH': JSON.stringify('true') } : {},
+  build: mode === 'hosted' ? { outDir: 'dist-hosted' } : {},
   resolve: {
     alias: {
       // Consume the shared core as source (bundled at build time). No npm link /
@@ -35,4 +38,4 @@ export default defineConfig({
       '/create-subtask': 'http://localhost:3456',
     }
   }
-})
+}))

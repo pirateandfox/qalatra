@@ -1,3 +1,4 @@
+import { getPlatform, clearAccountToken, accountPortalUrl } from '@qalatra/shared'
 import { useEffect, useState } from 'react'
 import { applyMcpPort, getMcpStatus } from '../../api'
 import { DARK_TOKENS, LIGHT_TOKENS, TOKEN_KEYS, TOKEN_LABELS, type ThemeMode, type TokenKey } from '../../lib/theme'
@@ -39,6 +40,13 @@ export function GeneralSettings({ settings, setSetting, saved, onSave }: General
 
   return (
     <>
+      {getPlatform().capabilities.requiresAccountAuth && <>
+        <div className="settings-section-header">Qalatra account</div>
+        <div className="settings-row">
+          <a href={accountPortalUrl('/team')} target="_blank" rel="noreferrer">Manage account and access</a>
+          <button className="settings-save" onClick={clearAccountToken}>Sign out</button>
+        </div>
+      </>}
       <div className="settings-section-header" style={{ borderTop: 'none', paddingTop: 0, marginTop: 0 }}>Appearance</div>
 
       <div className="settings-row">

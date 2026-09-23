@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/dist-hosted
+.git
+.env
+**/.env*
+db
+mobile
+.claude

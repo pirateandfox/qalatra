@@ -1,5 +1,38 @@
 # Qalatra — Evolution Notes
 
+## Complete Connect account access in hosted and mobile clients (2026-09-22)
+
+- Added a shared access controller: rechecks every minute and on foreground/focus, denies revoked
+  seats immediately, bounds temporary service outages to five minutes after the last successful
+  verification, and prevents stale requests from restoring a signed-out session. Cold starts
+  require online verification. Backend changes no longer bypass the native gate.
+- Clients use qalatra.com's new `accountEntitlements` query for assigned Connect/Cloud seats
+  across memberships. The portal's org-scoped billing query is unchanged; the account query
+  exposes no other members or billing details. Multiple plans cannot hide an eligible seat.
+- Mobile is login-only: removed registration/portal links, added access refresh and sign-out,
+  and corrected an invalid Expo SecureStore key prefix that prevented credential hydration.
+- Added an explicit `ui` hosted build mode that always enables the gate, plus a tested nginx
+  Docker image with health endpoint, SPA fallback, and cache headers. Desktop stays ungated.
+- In the sibling qalatra.com repo, added audited, permission-protected permanent Connect comp
+  grants to existing members and comp-pool revocation. Grants assign the seat atomically and
+  never touch paid subscriptions or Cloud provisioning. No schema migration is needed.
+- Validation: shared account/lifecycle/native-storage tests, mobile and portal typechecks,
+  hosted build, Docker build/browser smoke, portal billing tests, and local iOS bundle export.
+  Release remains pending production deployment and a replacement mobile build/upload. Expo
+  access was restored September 23 under `pirateandfox`; the latest existing successful production
+  iOS build is 0.2.0 (9), from June 24. See `docs/hosted-client-release.md`.
+
+## Account/subscription release audit (2026-09-22)
+
+- Audited the existing client gates and qalatra.com billing implementation against Railway and
+  public API behavior. Saved findings and the release sequence in
+  `plan/ACCOUNT_SUBSCRIPTION_RELEASE_AUDIT.md`.
+- Confirmed remaining gaps: Connect-specific complimentary seats (existing comps provision
+  Cloud servers), ongoing client access rechecks, organization/multi-plan handling, and hosted
+  deployment. `app.qalatra.com` did not resolve; its account API preflight was rejected while
+  `qalatra.com` was accepted. Shared account tests pass; authenticated checkout/device validation
+  remains pending. No product code or production configuration changed in this audit.
+
 ## The folder's FlightDesk credential reaches the job (2026-09-20)
 
 - Shi canary follow-up: `.flightdeskrc` was used by the *poller* only. The job launched in the

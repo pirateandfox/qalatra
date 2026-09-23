@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:hosted": "tsc -b && vite build --mode hosted",
     "build:mdpdf": "vite build --config vite.mdpdf.config.ts",
     "build:terminal": "vite build --config vite.terminal.config.ts",
     "lint": "eslint .",

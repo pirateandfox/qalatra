@@ -1,62 +1,43 @@
-import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
+import { type FormEvent, type ReactNode, useEffect, useState, useSyncExternalStore } from 'react'
 import {
   accountPortalUrl,
   clearAccountToken,
   completeAccount2FA,
-  getAccountEntitlement,
-  getAccountToken,
+  createAccountAccessController,
   getPlatform,
-  hydrateAccount,
   loginAccount,
 } from '@qalatra/shared'
 import './AccountGate.css'
 
-type GateState =
-  'checking' | 'login' | 'two_factor' | 'licensed' | 'unlicensed' | 'error'
-
 export function AccountGate({ children }: { children: ReactNode }) {
-  const platform = getPlatform()
-  const [state, setState] = useState<GateState>(
-    platform.capabilities.requiresAccountAuth ? 'checking' : 'licensed',
-  )
+  return getPlatform().capabilities.requiresAccountAuth
+    ? <AuthenticatedAccountGate>{children}</AuthenticatedAccountGate>
+    : children
+}
+
+function AuthenticatedAccountGate({ children }: { children: ReactNode }) {
+  const [access] = useState(() => createAccountAccessController())
+  const snapshot = useSyncExternalStore(access.subscribe, access.getSnapshot)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [tempToken, setTempToken] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-
-  async function checkLicense() {
-    if (!platform.capabilities.requiresAccountAuth) {
-      setState('licensed')
-      return
-    }
-    if (!getAccountToken()) {
-      setState('login')
-      return
-    }
-    setState('checking')
-    try {
-      const entitlement = await getAccountEntitlement()
-      setState(
-        entitlement?.active && entitlement.hasSeat ? 'licensed' : 'unlicensed',
-      )
-      setMessage('')
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : 'Could not check your Qalatra license.',
-      )
-      setState('error')
-    }
-  }
+  const state = snapshot.status === 'login' && tempToken ? 'two_factor' : snapshot.status
+  const checkLicense = access.check
 
   useEffect(() => {
-    void hydrateAccount().then(checkLicense)
-    // Platform configuration is immutable for the lifetime of the app.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    const stop = access.start()
+    const recheck = () => { if (document.visibilityState === 'visible') void access.check() }
+    window.addEventListener('focus', recheck)
+    document.addEventListener('visibilitychange', recheck)
+    return () => {
+      stop()
+      window.removeEventListener('focus', recheck)
+      document.removeEventListener('visibilitychange', recheck)
+    }
+  }, [access])
 
   async function submitLogin(event: FormEvent) {
     event.preventDefault()
@@ -64,9 +45,9 @@ export function AccountGate({ children }: { children: ReactNode }) {
     setMessage('')
     try {
       const result = await loginAccount(email.trim(), password)
+      setPassword('')
       if (result.status === 'requires_2fa') {
         setTempToken(result.tempToken)
-        setState('two_factor')
       } else {
         await checkLicense()
       }
@@ -83,6 +64,8 @@ export function AccountGate({ children }: { children: ReactNode }) {
     setMessage('')
     try {
       await completeAccount2FA(tempToken, code.trim())
+      setTempToken('')
+      setCode('')
       await checkLicense()
     } catch (error) {
       setMessage(
@@ -156,6 +139,7 @@ export function AccountGate({ children }: { children: ReactNode }) {
                 {busy ? 'Verifying…' : 'Verify'}
               </button>
             </form>
+            <button className="account-secondary" onClick={() => { setTempToken(''); setCode(''); setMessage('') }}>Back to sign in</button>
           </>
         )}
         {state === 'unlicensed' && (
@@ -172,11 +156,13 @@ export function AccountGate({ children }: { children: ReactNode }) {
             >
               Open the Qalatra portal
             </a>
+            <button onClick={() => void checkLicense()}>Check access again</button>
             <button
               className="account-secondary"
               onClick={() => {
                 clearAccountToken()
-                setState('login')
+                setTempToken('')
+                setPassword('')
               }}
             >
               Use another account
@@ -186,13 +172,14 @@ export function AccountGate({ children }: { children: ReactNode }) {
         {state === 'error' && (
           <>
             <h1>We couldn’t verify your license</h1>
-            <p>{message}</p>
+            <p>{snapshot.message}</p>
             <button onClick={() => void checkLicense()}>Try again</button>
             <button
               className="account-secondary"
               onClick={() => {
                 clearAccountToken()
-                setState('login')
+                setTempToken('')
+                setPassword('')
               }}
             >
               Sign in again

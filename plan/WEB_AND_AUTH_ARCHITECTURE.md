@@ -1,6 +1,9 @@
 # Qalatra — Web App, Accounts & Monetization Architecture
 
-Status: **implemented locally; production deployment and app-store validation pending.** The
+Status: **implemented locally; production deployment and app-store validation pending.**
+
+September 22 completion: see `docs/hosted-client-release.md` for Connect comps, cross-organization
+account entitlement checks, ongoing access revalidation, hosted builds, and login-only mobile release. The
 account login, 2FA, bearer-token entitlement check, hosted-web build gate, and native mobile gate
 are in source as of 2026-07-30. The free Electron build remains auth-free.
 
@@ -100,16 +103,13 @@ environment variables documented below.
 
 - **Web:** charge via Stripe in qalatra.com (Nestled already has billing). No Apple
   involvement.
-- **iOS — the gotcha:** a ~$10/mo subscription that unlocks app functionality
-  normally must use **In-App Purchase** (15–30%). The **Asana/Slack model** avoids
-  it: the app **sells nothing in-app** — no pricing, no "subscribe," just a login to
-  an account paid for on the web (Apple treats this as a "multiplatform service",
-  guideline 3.1.3). This is a real, widely-used path, but it's a **gray area for
-  consumer apps** (Apple is lenient with business/productivity services, stricter
-  with consumer ones). Keep the app purchase-UI-free; have IAP as the fallback if a
-  reviewer pushes back.
-- **Android:** Play has a similar default but is more permissive post-2024; less of
-  a blocker than iOS.
+- **iOS:** the current implementation is login-only: no purchases, registration, or billing links.
+  Apple's companion-app exception (3.1.3(f)) permits qualifying free companions to paid web tools
+  without IAP when there is no purchase UI or external purchase call to action. App Review must
+  still validate that Qalatra qualifies. The general multiplatform rule (3.1.3(b)) does not by
+  itself waive IAP. See https://developer.apple.com/app-store/review/guidelines/#other-purchase-methods.
+- **Android:** the native client also remains login-only; validate Play distribution requirements
+  before a Play release.
 - **Unify entitlement server-side:** qalatra.com records "active" whether payment
   came from Stripe (web) or an Apple/Google IAP receipt (mobile). Clients just ask
   "is this account active?" — one entitlement API, many payment sources.

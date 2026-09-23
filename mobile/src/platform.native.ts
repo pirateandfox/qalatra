@@ -79,7 +79,7 @@ function secureStorageKV(namespace = ''): PlatformKV {
 
 const nativePlatform: Platform = {
   persistent: asyncStorageKV(),
-  secure: secureStorageKV('qalatra.secure:'),
+  secure: secureStorageKV('qalatra.secure.'),
   session: asyncStorageKV('qalatra.session:'),
   capabilities: { canManageLocalServer: false, requiresAccountAuth: true },
   account: {

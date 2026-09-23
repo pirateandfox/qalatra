@@ -1,4 +1,17 @@
 import { getPlatform } from './platform'
+import { createEmitter } from './emitter'
+
+const accountChanges = createEmitter()
+export const onAccountChange = accountChanges.on
+
+export class AccountServiceError extends Error {
+  readonly temporary: boolean
+  constructor(message: string, temporary = false) {
+    super(message)
+    this.temporary = temporary
+    this.name = 'AccountServiceError'
+  }
+}
 
 const TOKEN_KEY = 'qalatra.account.token'
 
@@ -48,7 +61,13 @@ async function graphql<T>(
   token?: string,
 ): Promise<T> {
   const { graphqlUrl } = config()
-  const response = await fetch(graphqlUrl, {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15_000)
+  let response: Response
+  let result: GraphqlEnvelope<T>
+  try {
+    response = await fetch(graphqlUrl, {
+    signal: controller.signal,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -56,7 +75,12 @@ async function graphql<T>(
     },
     body: JSON.stringify({ query, variables }),
   })
-  const result = (await response.json().catch(() => ({}))) as GraphqlEnvelope<T>
+    result = (await response.json().catch(() => ({}))) as GraphqlEnvelope<T>
+  } catch {
+    throw new AccountServiceError('The account service could not be reached. Please try again.', true)
+  } finally {
+    clearTimeout(timeout)
+  }
   if (!response.ok || result.errors?.length || !result.data) {
     const unauthorized =
       response.status === 401 ||
@@ -68,14 +92,15 @@ async function graphql<T>(
           ),
       )
     if (token && unauthorized) {
-      tokenStorage().removeItem(TOKEN_KEY)
+      if (getAccountToken() === token) clearAccountToken()
       throw new Error(
         'Your Qalatra session expired or was revoked. Sign in again.',
       )
     }
-    throw new Error(
+    throw new AccountServiceError(
       result.errors?.[0]?.message ||
         `Account service returned HTTP ${response.status}`,
+      response.status >= 500 || response.status === 429,
     )
   }
   return result.data
@@ -87,6 +112,7 @@ export function getAccountToken(): string | null {
 
 export function clearAccountToken(): void {
   tokenStorage().removeItem(TOKEN_KEY)
+  accountChanges.emit()
 }
 
 export async function hydrateAccount(): Promise<void> {
@@ -105,6 +131,7 @@ function saveLogin(result: {
   if (!result.token)
     throw new Error('Login succeeded without an account token.')
   tokenStorage().setItem(TOKEN_KEY, result.token)
+  accountChanges.emit()
   return {
     status: 'authenticated',
     token: result.token,
@@ -180,14 +207,12 @@ export async function getAccountEntitlement(
   const data = await graphql<{ entitlements: AccountEntitlement[] }>(
     `
       query AccountEntitlements {
-        entitlements {
+        entitlements: accountEntitlements {
           productKey
           planName
           status
           active
           hasSeat
-          seatsTotal
-          seatsUsed
           currentPeriodEnd
         }
       }
@@ -196,7 +221,7 @@ export async function getAccountEntitlement(
     token,
   )
   const exact = data.entitlements.find(
-    (entitlement) => entitlement.productKey === productKey,
+    (entitlement) => entitlement.productKey === productKey && entitlement.active && entitlement.hasSeat,
   )
   if (exact?.active && exact.hasSeat) return exact
 
@@ -212,7 +237,7 @@ export async function getAccountEntitlement(
     )
     if (includedCloudSeat) return includedCloudSeat
   }
-  return exact ?? null
+  return data.entitlements.find(entitlement => entitlement.productKey === productKey) ?? null
 }
 
 export function accountPortalUrl(path = ''): string {
