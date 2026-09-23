@@ -9,8 +9,8 @@ export function AddInstanceScreen({ navigation }: Props) {
   return (
     <Screen>
       <ConnectForm
-        title="Add a backend"
-        subtitle="Connect another Qalatra server with its URL + access token."
+        title="Connect another server"
+        subtitle="Add a Qalatra server using its URL and access token."
         onConnected={() => navigation.goBack()}
       />
     </Screen>

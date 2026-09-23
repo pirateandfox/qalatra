@@ -1,5 +1,14 @@
 # Qalatra — Evolution Notes
 
+## Native server setup guidance (2026-09-23)
+
+- Expanded the existing mobile first-server screen with a numbered guide to finding a
+  server URL and creating an access token, plus Cloud credentials guidance. The guide
+  is also available when adding another server, where it starts collapsed.
+- Clarified server-key versus account-password copy, corrected the Settings path and
+  token placeholder, added accessible field labels, and trim pasted credentials before
+  testing. Connection errors keep the form open; no purchase links were added.
+
 ## Hosted first-server setup (2026-09-23)
 
 - Replaced the missing-server task error with a dedicated welcome screen before any

@@ -11,8 +11,9 @@ export function OnboardingScreen() {
   return (
     <SafeAreaView style={styles.root}>
       <ConnectForm
-        title="Connect to Qalatra"
-        subtitle="Enter a server URL and access token from Settings → Access Tokens."
+        title="Connect your Qalatra server"
+        subtitle="You’re signed in. Add the server where your tasks live to start using your workspace here."
+        showGuide
       />
     </SafeAreaView>
   )
