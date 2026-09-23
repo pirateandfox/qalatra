@@ -75,13 +75,18 @@
 .account-card button,
 .account-primary-link {
   display: inline-flex;
+  align-items: center;
   justify-content: center;
+  min-height: 44px;
   padding: 12px 16px;
   border: 0;
   border-radius: 9px;
   color: #17121f;
   background: #c9a8ff;
-  font: 650 14px/1 inherit;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
   cursor: pointer;
   text-decoration: none;
 }
@@ -93,10 +98,40 @@
   color: #c9a8ff;
 }
 .account-card .account-secondary {
-  margin: 12px 0 0 10px;
   color: #ddd4e8;
   background: #2b2733;
 }
+.account-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+.account-card .account-tertiary {
+  color: #b8afc4;
+  background: transparent;
+}
+.account-card button:not(:disabled):hover,
+.account-primary-link:hover {
+  filter: brightness(1.12);
+}
+.account-card .account-tertiary:hover {
+  color: #f7f4ef;
+  background: rgb(255 255 255 / 4%);
+}
+.account-card button:focus-visible,
+.account-card a:focus-visible {
+  outline: 2px solid #c9a8ff;
+  outline-offset: 3px;
+}
 .account-error {
   color: #ff9eab !important;
+}
+
+@media (max-width: 480px) {
+  .account-gate {
+    padding: 20px;
+  }
+  .account-card {
+    padding: 28px 24px;
+  }
 }

@@ -1,5 +1,12 @@
 # Qalatra — Evolution Notes
 
+## Account access screen spacing (2026-09-23)
+
+- Stacked the access-screen actions with consistent gaps and full-width targets. The portal is
+  the primary action, checking access is secondary, and switching accounts is a quiet action.
+- Applied the same spacing to verification errors, corrected button typography, and reduced
+  card padding on narrow screens. Account and subscription behavior is unchanged.
+
 ## Hosted client production launch and renewed iOS beta (2026-09-23)
 
 - Published the hosted task client at `https://app.qalatra.com` as a separate Railway service,

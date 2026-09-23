@@ -150,40 +150,44 @@ function AuthenticatedAccountGate({ children }: { children: ReactNode }) {
               Connect seat or the admin seat included with a Cloud node. An
               organization owner can purchase or assign access in the portal.
             </p>
-            <a
-              className="account-primary-link"
-              href={accountPortalUrl('/team')}
-            >
-              Open the Qalatra portal
-            </a>
-            <button onClick={() => void checkLicense()}>Check access again</button>
-            <button
-              className="account-secondary"
-              onClick={() => {
-                clearAccountToken()
-                setTempToken('')
-                setPassword('')
-              }}
-            >
-              Use another account
-            </button>
+            <div className="account-actions">
+              <a
+                className="account-primary-link"
+                href={accountPortalUrl('/team')}
+              >
+                Open the Qalatra portal
+              </a>
+              <button className="account-secondary" onClick={() => void checkLicense()}>Check access again</button>
+              <button
+                className="account-tertiary"
+                onClick={() => {
+                  clearAccountToken()
+                  setTempToken('')
+                  setPassword('')
+                }}
+              >
+                Use another account
+              </button>
+            </div>
           </>
         )}
         {state === 'error' && (
           <>
             <h1>We couldn’t verify your license</h1>
             <p>{snapshot.message}</p>
-            <button onClick={() => void checkLicense()}>Try again</button>
-            <button
-              className="account-secondary"
-              onClick={() => {
-                clearAccountToken()
-                setTempToken('')
-                setPassword('')
-              }}
-            >
-              Sign in again
-            </button>
+            <div className="account-actions">
+              <button onClick={() => void checkLicense()}>Try again</button>
+              <button
+                className="account-secondary"
+                onClick={() => {
+                  clearAccountToken()
+                  setTempToken('')
+                  setPassword('')
+                }}
+              >
+                Sign in again
+              </button>
+            </div>
           </>
         )}
         {message && state !== 'error' && (
