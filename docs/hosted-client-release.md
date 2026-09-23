@@ -95,8 +95,12 @@ had expired.
   tested locally with controlled account responses; real account/device validation remains manual.
 - iOS **0.3.0 (10)** built successfully: EAS build
   `31cd3a54-0a3e-4698-84db-d28f6e87bfd5`. Submission
-  `5c85bd83-3c36-4237-afad-ad41526ca56f` finished successfully. Check Apple's processing/testing
-  state with `eas submit:status --platform ios --json --non-interactive` from `mobile/`.
+  `5c85bd83-3c36-4237-afad-ad41526ca56f` finished successfully. Apple confirmed processing
+  `VALID`, internal testing `IN_BETA_TESTING`, and external testing `READY_FOR_BETA_SUBMISSION`.
+  External beta review has not been submitted. Check current status with
+  `eas submit:status --platform ios --json --non-interactive` from `mobile/`.
+- Desktop v1.9.51 release workflow completed successfully on all platforms, including its
+  required-asset verification and publication of curated release notes.
 - No complimentary access was granted during deployment; grant the intended existing portal
   member through the admin form before testing that account.
 

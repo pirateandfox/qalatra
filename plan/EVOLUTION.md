@@ -4,8 +4,8 @@
 
 - Published the hosted task client at `https://app.qalatra.com` as a separate Railway service,
   with valid HTTPS, API CORS, and the account gate. Portal billing/comp changes are deployed.
-- Built iOS 0.3.0 (10) and completed its upload to the existing App Store Connect app; Apple
-  processing/testing state is separate from upload completion. Pinned the app ID in EAS submit
+- Built iOS 0.3.0 (10), uploaded it to the existing App Store Connect app, and confirmed Apple
+  processing is valid and internal beta testing is active. Pinned the app ID in EAS submit
   configuration. Prior 0.2.0 betas were confirmed expired.
 - Desktop release tag: `v1.9.51`. Website changelog and remote-instance documentation now
   describe hosted/mobile account access. Full pre-publish checks and live unauthenticated browser
