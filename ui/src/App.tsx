@@ -25,6 +25,7 @@ import HeartbeatsView from './components/HeartbeatsView'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import EmailPreview from './components/EmailPreview'
 import { AccountGate } from './components/AccountGate'
+import { ServerSetupGate } from './components/ServerSetupGate'
 import MdView from './mdpdf/MdView'
 import './index.css'
 
@@ -51,7 +52,9 @@ export default function App() {
   return (
     <ThemeProvider>
       <AccountGate>
-        <AppInner />
+        <ServerSetupGate>
+          <AppInner />
+        </ServerSetupGate>
       </AccountGate>
     </ThemeProvider>
   )

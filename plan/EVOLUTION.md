@@ -1,5 +1,15 @@
 # Qalatra — Evolution Notes
 
+## Hosted first-server setup (2026-09-23)
+
+- Replaced the missing-server task error with a dedicated welcome screen before any
+  task views mount. It explains how to find a Cloud server's credentials or create an
+  access token in Desktop, with a URL/token form directly on the screen.
+- Connect tests the server before saving and activating it; failed connections stay
+  on setup with a recoverable message. Previously saved servers can also be selected.
+- Desktop retains its implicit local server and bypasses this screen. Configured
+  servers with connection failures retain the existing error/retry behavior.
+
 ## Website login destinations (2026-09-23)
 
 - Added a visible Log in entry on the website, with a choice of the hosted Qalatra web app or
