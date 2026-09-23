@@ -1,5 +1,15 @@
 # Qalatra — Evolution Notes
 
+## Website login destinations (2026-09-23)
+
+- Added a visible Log in entry on the website, with a choice of the hosted Qalatra web app or
+  the account portal for billing, teams, servers, and platform administration.
+- Portal deep links retain their destination through login, including an already signed-in
+  visit. Signed-out portal layouts check the session before preloading organization data,
+  fixing the `/connect` server error. The web client's access screen now links to `/connect`.
+- The choice happens before entering credentials; each destination uses its own existing
+  sign-in/session. This does not introduce cross-site single sign-on or alter desktop/mobile.
+
 ## Account access screen spacing (2026-09-23)
 
 - Stacked the access-screen actions with consistent gaps and full-width targets. The portal is

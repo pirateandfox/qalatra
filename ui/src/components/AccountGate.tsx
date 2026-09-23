@@ -153,7 +153,7 @@ function AuthenticatedAccountGate({ children }: { children: ReactNode }) {
             <div className="account-actions">
               <a
                 className="account-primary-link"
-                href={accountPortalUrl('/team')}
+                href={accountPortalUrl('/connect')}
               >
                 Open the Qalatra portal
               </a>
