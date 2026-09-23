@@ -74,12 +74,31 @@ plus an accessible demo backend for App Review.
 
 Expo access was restored on September 23 by signing the local EAS CLI into `pirateandfox`
 (`justin@pirateandfox.com`). The verified project is `@pirateandfox/qalatra`, ID
-`aada33e2-e5c5-4cf8-9ad1-c0ca22ccb0d4`. The latest existing successful production iOS build is
-version 0.2.0, build 9, created June 24, 2026 (EAS build
-`faab0a87-7f0c-4b23-9c15-6c3b71454c9f`). Builds 8 and 6 also completed successfully for store
-distribution. This confirms EAS cloud builds were used; App Store submission history has not yet
-been inspected. Local iOS bundle export succeeded. Production deployment and the replacement
-build/upload remain pending.
+`aada33e2-e5c5-4cf8-9ad1-c0ca22ccb0d4`. The existing App Store app ID is `6782659910`, now pinned
+in `mobile/eas.json` for non-interactive submissions. Apple confirmed the prior 0.2.0 (9) beta
+had expired.
+
+## September 23 production rollout
+
+- Portal/API deployed with admin Connect comps and `accountEntitlements`. Production CORS
+  retains the existing origins and allows `https://app.qalatra.com`.
+- Hosted client is live at **https://app.qalatra.com**, Railway service `app`
+  (`a2429b81-7fc2-4974-a757-a98b609bb332`) in the qalatra.com production project. The service
+  tracks `pirateandfox/qalatra` develop, watching `ui/`, `packages/shared/`, and `deploy/`.
+  Its configuration is recorded in the website repository's `.railway/railway.ts`.
+- Cloudflare has a DNS-only CNAME to `xryhc4re.up.railway.app` and the required TXT ownership
+  record at `_railway-verify.app.qalatra.com`. Railway's MCP domain response omitted the TXT;
+  `railway domain status app.qalatra.com --service app --json` exposes `verification.dnsHost`
+  and `verification.token`. HTTPS was verified after adding both records.
+- Live browser smoke passed: login screen, no JavaScript errors, real API CORS and unauthenticated
+  denial, health, SPA fallback, and missing-asset 404. Granted/denied/revoked access and 2FA were
+  tested locally with controlled account responses; real account/device validation remains manual.
+- iOS **0.3.0 (10)** built successfully: EAS build
+  `31cd3a54-0a3e-4698-84db-d28f6e87bfd5`. Submission
+  `5c85bd83-3c36-4237-afad-ad41526ca56f` finished successfully. Check Apple's processing/testing
+  state with `eas submit:status --platform ios --json --non-interactive` from `mobile/`.
+- No complimentary access was granted during deployment; grant the intended existing portal
+  member through the admin form before testing that account.
 
 A fresh TestFlight binary is required for an expired beta; an OTA update or account comp does not
 renew Apple's 90-day build lifetime. Login-only companion-app review eligibility still depends on

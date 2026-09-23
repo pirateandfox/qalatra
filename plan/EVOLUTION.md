@@ -1,5 +1,18 @@
 # Qalatra — Evolution Notes
 
+## Hosted client production launch and renewed iOS beta (2026-09-23)
+
+- Published the hosted task client at `https://app.qalatra.com` as a separate Railway service,
+  with valid HTTPS, API CORS, and the account gate. Portal billing/comp changes are deployed.
+- Built iOS 0.3.0 (10) and completed its upload to the existing App Store Connect app; Apple
+  processing/testing state is separate from upload completion. Pinned the app ID in EAS submit
+  configuration. Prior 0.2.0 betas were confirmed expired.
+- Desktop release tag: `v1.9.51`. Website changelog and remote-instance documentation now
+  describe hosted/mobile account access. Full pre-publish checks and live unauthenticated browser
+  smoke passed. Real account/device testing remains manual; no comp was silently granted.
+- Operational IDs and DNS ownership verification gotcha are recorded in
+  `docs/hosted-client-release.md`.
+
 ## Complete Connect account access in hosted and mobile clients (2026-09-22)
 
 - Added a shared access controller: rechecks every minute and on foreground/focus, denies revoked
@@ -18,9 +31,7 @@
   never touch paid subscriptions or Cloud provisioning. No schema migration is needed.
 - Validation: shared account/lifecycle/native-storage tests, mobile and portal typechecks,
   hosted build, Docker build/browser smoke, portal billing tests, and local iOS bundle export.
-  Release remains pending production deployment and a replacement mobile build/upload. Expo
-  access was restored September 23 under `pirateandfox`; the latest existing successful production
-  iOS build is 0.2.0 (9), from June 24. See `docs/hosted-client-release.md`.
+  The September 23 rollout is recorded above and in `docs/hosted-client-release.md`.
 
 ## Account/subscription release audit (2026-09-22)
 
