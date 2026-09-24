@@ -51,6 +51,8 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
   const [tokenMsg, setTokenMsg] = useState<string | null>(null)
   const [draggingInstanceId, setDraggingInstanceId] = useState<string | null>(null)
   const [instanceDropTarget, setInstanceDropTarget] = useState<{ id: string; edge: 'before' | 'after' } | null>(null)
+  const existingTokens = accessTokens.filter(token => !token.revoked_at)
+  const revokedTokens = accessTokens.filter(token => !!token.revoked_at)
 
   useEffect(() => {
     refreshInstances()
@@ -467,8 +469,11 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
         <div className="settings-row">
           <label className="settings-label">Existing Tokens</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {accessTokens.map(token => {
-              const inactive = !!token.revoked_at || tokenIsExpired(token)
+            {existingTokens.length === 0 && (
+              <span className="settings-hint">No active or expired tokens.</span>
+            )}
+            {existingTokens.map(token => {
+              const inactive = tokenIsExpired(token)
               return (
                 <div key={token.id} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, alignItems: 'center', fontSize: 12 }}>
                   <strong style={{ color: inactive ? 'var(--muted)' : 'var(--text)', textDecoration: inactive ? 'line-through' : 'none' }}>{token.label}</strong>
@@ -477,20 +482,36 @@ export function InstancesSettings({ settings, setSettings, markSaved }: Instance
                   <span style={{ color: 'var(--muted)' }}>{token.last_used_at ? `Used ${token.last_used_at}` : 'Never used'}</span>
                   <button
                     className="settings-save"
-                    disabled={!!token.revoked_at}
-                    style={{ background: 'transparent', border: '1px solid var(--border)', color: token.revoked_at ? 'var(--muted)' : '#ef4444', padding: '3px 8px', fontSize: 11 }}
+                    style={{ background: 'transparent', border: '1px solid var(--border)', color: '#ef4444', padding: '3px 8px', fontSize: 11 }}
                     onClick={async () => {
                       if (!confirm(`Revoke ${token.label}?`)) return
                       await revokeAccessToken(token.id)
                       await refreshAccessTokens()
                     }}
                   >
-                    {token.revoked_at ? 'Revoked' : 'Revoke'}
+                    Revoke
                   </button>
                 </div>
               )
             })}
           </div>
+          {revokedTokens.length > 0 && (
+            <details style={{ marginTop: 16 }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: 12, padding: '8px 0' }}>
+                View revoked tokens ({revokedTokens.length})
+              </summary>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                {revokedTokens.map(token => (
+                  <div key={token.id} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--muted)' }}>
+                    <strong>{token.label}</strong>
+                    <span style={{ fontFamily: 'monospace' }}>{token.scopes}</span>
+                    <span>Revoked {token.revoked_at}</span>
+                    <span>{token.last_used_at ? `Used ${token.last_used_at}` : 'Never used'}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       )}
 

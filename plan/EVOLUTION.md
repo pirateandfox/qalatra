@@ -1,5 +1,12 @@
 # Qalatra — Evolution Notes
 
+## Revoked token history (2026-09-24)
+
+- Settings → Instances keeps active and expired access tokens in the main list.
+  Revoked tokens are retained in a collapsed “View revoked tokens” section with a
+  count and revocation dates. Revoking a token moves it into that history after refresh;
+  no token records or authentication behavior are changed.
+
 ## Native server setup guidance (2026-09-23)
 
 - Expanded the existing mobile first-server screen with a numbered guide to finding a
