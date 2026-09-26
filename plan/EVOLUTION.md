@@ -1,5 +1,12 @@
 # Qalatra — Evolution Notes
 
+## Release 1.9.52 (2026-09-25)
+
+- Packages native Claude approval reporting for FlightDesk, clearer client connection
+  setup, and collapsed revoked-token history. Desktop remains free without account login.
+- Includes the hosted/mobile improvements made since 1.9.51; mobile stays on runtime
+  0.3.0. Matching FlightDesk approval handling is being released separately.
+
 ## Native Claude approvals reach FlightDesk (2026-09-25)
 
 - Session state reads preserve Bridge's `needsHuman` flag and full `approval` card for
