@@ -1,5 +1,14 @@
 # Qalatra — Evolution Notes
 
+## Native Claude approvals reach FlightDesk (2026-09-25)
+
+- Session state reads preserve Bridge's `needsHuman` flag and full `approval` card for
+  FlightDesk, including when the transcript is unavailable. `requires_action` also normalizes
+  older Bridge state responses to `awaiting_approval`; permission cards never count as idle.
+- The existing SESSION_OP reporting path carries these fields without spending a model turn.
+  FlightDesk's matching server change creates and reconciles the human question. Answering a
+  card remains an explicit agent action through Bridge, guided by FlightDesk's central prompts.
+
 ## Revoked token history (2026-09-24)
 
 - Settings → Instances keeps active and expired access tokens in the main list.

@@ -110,9 +110,10 @@ export function createSessionOps({ bridgeUrl = process.env.CLAUDE_BRIDGE_URL || 
       if (!sessionId) throw new Error('sessionId required')
       return withClient(async c => {
         const s = await call(c, 'claude_session_get_state', { session_id: sessionId })
+        const needsHuman = s?.needsHuman === true || s?.state === 'awaiting_approval' || s?.workerStatus === 'requires_action' || Boolean(s?.approval)
         let lastTurnAt = null, lastTurnEndsWithQuestion = false, lastTurnRole = null, lastTurnAsk = false
         try {
-          const t = await call(c, 'claude_session_get_transcript', { session_id: sessionId, last_n: 2 })
+          const t = needsHuman ? [] : await call(c, 'claude_session_get_transcript', { session_id: sessionId, last_n: 2 })
           const turns = turnsOf(t)
           const last = turns[turns.length - 1]
           if (last) {
@@ -122,7 +123,7 @@ export function createSessionOps({ bridgeUrl = process.env.CLAUDE_BRIDGE_URL || 
             lastTurnEndsWithQuestion = (last.role ?? 'assistant') !== 'user' && lastTurnAsk
           }
         } catch { /* transcript is a bonus; state alone is still an answer */ }
-        const state = s?.state ?? 'unknown'
+        const state = needsHuman ? 'awaiting_approval' : (s?.state ?? 'unknown')
         // "unknown" must be treated as busy, never idle (bridge contract). Idle = the session is
         // not running, the worker reports idle, and the last word was the assistant's — i.e. it
         // stopped and is waiting on someone, whatever it said.
@@ -130,6 +131,8 @@ export function createSessionOps({ bridgeUrl = process.env.CLAUDE_BRIDGE_URL || 
         return {
           state,
           workerStatus: s?.workerStatus ?? null,
+          needsHuman,
+          approval: s?.approval ?? null,
           statusBucket: s?.statusBucket ?? null,
           prUrl: s?.prUrl ?? null,
           branch: s?.branchBar ?? s?.branch ?? null,

@@ -179,12 +179,13 @@ function moveToFailed(dir, name, reason) {
 
 /**
  * FlightDesk's update schema is `optional()` strings/booleans — `null` is rejected, and unknown
- * keys are stripped. Drop nulls so a `state` read with no transcript still reports.
+ * keys are stripped. Drop nulls except the nullable approval card: explicit null plus
+ * needsHuman=false lets FlightDesk reconcile a permission answered directly in Claude.
  */
 export function compactReport(extra) {
   const out = {}
   for (const [k, v] of Object.entries(extra ?? {})) {
-    if (v === null || v === undefined) continue
+    if (v === undefined || (v === null && k !== 'approval')) continue
     out[k] = v
   }
   return out
