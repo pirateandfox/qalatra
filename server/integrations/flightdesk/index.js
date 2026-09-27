@@ -12,6 +12,9 @@ export const POLL_INTERVAL_MS = 30_000
 // A folder whose credential was rejected keeps trying, slowly, so the attempt stays visible on
 // both sides once the token is fixed — but it must not hammer a 401 every tick.
 export const REJECTED_RETRY_MS = 5 * 60_000
+// How often every open FlightDesk-bound task is checked against FlightDesk for closure. Job-end
+// checks catch the common case immediately; this catches tasks finished by a human or elsewhere.
+export const CLOSE_SWEEP_INTERVAL_MS = 15 * 60_000
 
 export function startFlightDeskIntegration(ctx, { setIntervalImpl = setInterval, setTimeoutImpl = setTimeout } = {}) {
   const { dbCall, loadSettings, log = console } = ctx
@@ -52,18 +55,39 @@ export function startFlightDeskIntegration(ctx, { setIntervalImpl = setInterval,
     }
   }
 
+  let sweeping = false
+  async function sweep() {
+    if (sweeping || !enabled()) return null
+    sweeping = true
+    try {
+      const summary = await dispatcher.sweepFinishedTasks()
+      if (summary.closed) log.log?.(`[flightdesk] closed ${summary.closed} finished task(s) (${summary.checked} checked)`)
+      return summary
+    } catch (err) {
+      log.error(`[flightdesk] close sweep failed: ${err.message}`)
+      return null
+    } finally {
+      sweeping = false
+    }
+  }
+
   const offStarted = onJobStarted(payload => enabled() ? dispatcher.onJobStarted(payload) : undefined)
   const offFinished = onJobFinished(payload => enabled() ? dispatcher.onJobFinished(payload) : undefined)
   orphanedAtBoot.then(jobs => enabled() ? dispatcher.reportOrphaned(jobs) : undefined).catch(() => {})
 
   const first = setTimeoutImpl(() => tick().catch(() => {}), 5_000)
   const timer = setIntervalImpl(() => tick().catch(() => {}), POLL_INTERVAL_MS)
-  timer.unref?.(); first.unref?.()
+  // The first sweep, shortly after boot, is also the one-time backfill for tasks that piled up
+  // before closing existed.
+  const firstSweep = setTimeoutImpl(() => sweep().catch(() => {}), 60_000)
+  const sweepTimer = setIntervalImpl(() => sweep().catch(() => {}), CLOSE_SWEEP_INTERVAL_MS)
+  timer.unref?.(); first.unref?.(); firstSweep.unref?.(); sweepTimer.unref?.()
 
   return {
     name: 'flightdesk',
     tick,
     pollNow: () => tick({ force: true }),
+    sweep,
     status() {
       return {
         enabled: enabled(),
@@ -71,6 +95,6 @@ export function startFlightDeskIntegration(ctx, { setIntervalImpl = setInterval,
         folders: [...dispatcher.folders.values()].map(f => ({ ...f, apiUrl: loadFolderRc(f.path)?.apiUrl ?? null })),
       }
     },
-    stop() { clearInterval(timer); clearTimeout(first); offStarted(); offFinished() },
+    stop() { clearInterval(timer); clearTimeout(first); clearInterval(sweepTimer); clearTimeout(firstSweep); offStarted(); offFinished() },
   }
 }

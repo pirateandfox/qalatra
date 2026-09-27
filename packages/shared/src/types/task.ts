@@ -42,6 +42,9 @@ export interface Task {
   agent_job_status?: 'queued' | 'running' | 'done' | 'failed' | 'orphaned' | 'timed_out' | null
   inbox: 0 | 1
   notes: string | null
+  /** Set when an outside system (e.g. 'flightdesk') drives the task; such tasks are coding tasks. */
+  orchestrator?: string | null
+  orchestrator_ref?: string | null
 }
 
 export interface RelatedTask {

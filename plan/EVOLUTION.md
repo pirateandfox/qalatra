@@ -1,5 +1,20 @@
 # Qalatra — Evolution Notes
 
+## FlightDesk tasks stay in the Coding view and close themselves (2026-09-26)
+
+- Problem: FlightDesk-bound tasks showed in the priority view (the dispatch path never set a type;
+  only `agent.config` `coding: true` did, at launch — 9 of 15 were `task`), and they never closed
+  (40 piled up since 2026-09-18, most pointing at DONE or deleted FlightDesk tasks).
+- Any task with `orchestrator IS NOT NULL` is now `task_type='coding'`: set on create and every
+  bind, backfilled at boot, and every owner-facing list also filters `orchestrator IS NULL`
+  (today/priority, inbox, briefings, EOD triage, stale reviews, overdue, `get_todays_tasks`,
+  project counts). The Coding view keys on `task_type='coding' OR orchestrator IS NOT NULL`.
+- A bound task closes when FlightDesk's task is `DONE`/archived/deleted and no job is queued or
+  running — checked on job end and by a 15-minute sweep (first run a minute after boot = the
+  backfill). No write-back to FlightDesk; MCP `complete_task` no longer queues a sync entry for
+  orchestrated tasks. A new dispatch on a closed task reopens the same task.
+- Tests in `npm run test:flightdesk-dispatch` (section 14).
+
 ## Release 1.9.52 (2026-09-25)
 
 - Packages native Claude approval reporting for FlightDesk, clearer client connection

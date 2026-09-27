@@ -71,6 +71,22 @@ whose task is blocked; consume answers server-side before queuing a `RESUME`; wi
 `RESUME`/`ANSWER` runs before older kinds on the same task. At most one job runs per agent folder
 at a time (`concurrency_key`).
 
+## The bound Qalatra task
+
+One Qalatra task per FlightDesk task (`orchestrator='flightdesk'`, `orchestrator_ref=<task id>`),
+reused by every dispatch for it (plan, build, closeout). It is always `task_type='coding'`, pinned
+by `bindTaskOrchestrator` on every bind and backfilled at boot, and every owner-facing list (today/
+priority, inbox, briefings, EOD triage, stale reviews, overdue, `get_todays_tasks`) additionally
+excludes `orchestrator IS NOT NULL`, so it shows only in the Coding view.
+
+It closes itself when FlightDesk is finished with it: the FlightDesk task's `phase` is `DONE`,
+it is `archived`, or `userTask` says it no longer exists — **and** no job for the Qalatra task is
+queued or running. Checked when a bound job ends and by a sweep every 15 minutes (the first,
+a minute after boot, doubles as the backfill). Closing appends
+`Closed: FlightDesk task <id> is DONE; no pending jobs.` and writes nothing back — no dispatch
+update, no `sync_log` entry (MCP `complete_task` also skips its sync entry for orchestrated tasks).
+A new dispatch for a closed task reopens the same task inside `queueExternalJob`.
+
 ## Session operations (`SESSION_OP`, D28)
 
 Some of what a pipeline agent does to a cloud session needs no judgement — relay "CI failed on

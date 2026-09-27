@@ -1,5 +1,6 @@
 import { openDb, today, nowIso, appendAiContext } from '../db.js';
 import { enrichTaskRows } from './trust-signals.js';
+import { NOT_ORCHESTRATED } from './briefing.js';
 
 export const toolDefs = [
   {
@@ -56,7 +57,8 @@ export const handlers = {
     const t = today();
     const conditions = [
       `status = 'active'`,
-      `task_type NOT IN ('event', 'reading')`,
+      `task_type NOT IN ('event', 'reading', 'coding')`,
+      NOT_ORCHESTRATED,
       `(start_date IS NULL OR start_date <= '${t}')`,
       `(surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime'))`,
     ];
@@ -77,7 +79,7 @@ export const handlers = {
     return db.prepare(
       `SELECT id, title, task_type, tags, context, project, due_date, my_priority, energy_required, time_estimate, source_url
        FROM tasks
-       WHERE status = 'active' AND task_type NOT IN ('event', 'reading') AND due_date IS NOT NULL AND due_date < ?
+       WHERE status = 'active' AND task_type NOT IN ('event', 'reading', 'coding') AND ${NOT_ORCHESTRATED} AND due_date IS NOT NULL AND due_date < ?
        ORDER BY due_date ASC`
     ).all(t);
   },
@@ -98,7 +100,7 @@ export const handlers = {
     const t = today();
     return db.prepare(
       `SELECT * FROM tasks
-       WHERE status = 'active' AND task_type != 'event'
+       WHERE status = 'active' AND task_type NOT IN ('event', 'coding') AND ${NOT_ORCHESTRATED}
        AND (due_date IS NULL OR due_date <= ?)
        AND (last_touched_human IS NULL OR last_touched_human < ?)
        ORDER BY my_priority ASC NULLS LAST, due_date ASC NULLS LAST`

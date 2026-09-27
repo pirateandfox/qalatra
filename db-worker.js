@@ -299,6 +299,10 @@ function migrate() {
   tryAlter('ALTER TABLE tasks ADD COLUMN orchestrator_ref TEXT')
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_jobs_external_ref ON agent_jobs(external_ref) WHERE external_ref IS NOT NULL')
   db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_orchestrator ON tasks(orchestrator, orchestrator_ref)')
+  // A task an orchestrator drives is a coding task, always: the orchestrator is its system of
+  // record, so it belongs in the Coding view and never in the owner's priority/today lists.
+  // Earlier bind paths skipped the type; this backfills them on every boot (idempotent).
+  db.exec(`UPDATE tasks SET task_type = 'coding' WHERE orchestrator IS NOT NULL AND task_type != 'coding'`)
   // Ledger of code-shaped operations executed on behalf of an orchestrator (session inject, state,
   // archive…) that never become agent jobs. Keyed by the orchestrator's request id so a request
   // re-delivered after a lost report is answered from the ledger instead of executed twice — an
@@ -522,14 +526,14 @@ function getTasksForDate(date) {
             AND time(COALESCE(end_time, time(event_time, '+1 hour'))) <= time('now', 'localtime'))
       )
     `).run(date, date)
-    const inbox       = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 1 AND status = 'active' AND parent_id IS NULL AND task_type = 'task' ORDER BY created_at DESC`).all())
-    const overdue     = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND due_date IS NOT NULL AND due_date < ? AND task_type = 'task' ORDER BY due_date ASC, ${ORDER}`).all(date))
-    const dueToday    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND strftime('%Y-%m-%d', due_date) = ? AND task_type = 'task' AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime') OR strftime('%Y-%m-%d', due_date) <= ?) ORDER BY ${ORDER}`).all(date, date))
-    const active      = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND task_type = 'task' AND (due_date IS NULL OR due_date > ?) AND ((start_date IS NULL AND due_date IS NULL) OR (start_date IS NOT NULL AND start_date <= ?)) AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')) ORDER BY ${ORDER}`).all(date, date))
-    const doneToday   = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'done' AND parent_id IS NULL AND task_type != 'event' AND last_touched_human >= ? AND last_touched_human < ? ORDER BY last_touched_human DESC`).all(date, nextDay))
+    const inbox       = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 1 AND status = 'active' AND parent_id IS NULL AND task_type = 'task' AND orchestrator IS NULL ORDER BY created_at DESC`).all())
+    const overdue     = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND due_date IS NOT NULL AND due_date < ? AND task_type = 'task' AND orchestrator IS NULL ORDER BY due_date ASC, ${ORDER}`).all(date))
+    const dueToday    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND strftime('%Y-%m-%d', due_date) = ? AND task_type = 'task' AND orchestrator IS NULL AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime') OR strftime('%Y-%m-%d', due_date) <= ?) ORDER BY ${ORDER}`).all(date, date))
+    const active      = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE inbox = 0 AND status = 'active' AND parent_id IS NULL AND task_type = 'task' AND orchestrator IS NULL AND (due_date IS NULL OR due_date > ?) AND ((start_date IS NULL AND due_date IS NULL) OR (start_date IS NOT NULL AND start_date <= ?)) AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')) ORDER BY ${ORDER}`).all(date, date))
+    const doneToday   = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'done' AND parent_id IS NULL AND task_type != 'event' AND orchestrator IS NULL AND last_touched_human >= ? AND last_touched_human < ? ORDER BY last_touched_human DESC`).all(date, nextDay))
     const events      = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE task_type = 'event' AND parent_id IS NULL AND (due_date = ? OR due_date IS NULL) ORDER BY event_time ASC NULLS LAST, created_at ASC`).all(date))
     const reminders   = db.prepare(`SELECT * FROM tasks WHERE task_type = 'reminder' AND parent_id IS NULL AND status != 'done' AND (due_date IS NULL OR due_date <= ?) AND (surface_after IS NULL OR surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')) ORDER BY ${ORDER}`).all(date)
-    const timeSnoozed = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'snoozed' AND parent_id IS NULL AND task_type = 'task' AND strftime('%Y-%m-%d', due_date) = ? AND surface_after > strftime('%Y-%m-%d %H:%M', 'now', 'localtime') ORDER BY surface_after ASC`).all(date))
+    const timeSnoozed = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'snoozed' AND parent_id IS NULL AND task_type = 'task' AND orchestrator IS NULL AND strftime('%Y-%m-%d', due_date) = ? AND surface_after > strftime('%Y-%m-%d %H:%M', 'now', 'localtime') ORDER BY surface_after ASC`).all(date))
     const allHabits   = db.prepare('SELECT * FROM habits WHERE active = 1 ORDER BY created_at ASC').all()
     const todayHabits = allHabits.filter(h => isHabitDueOn(h, date))
     const habitLogs   = todayHabits.length ? db.prepare(`SELECT * FROM habit_logs WHERE date = ? AND habit_id IN (${todayHabits.map(() => '?').join(',')})`).all(date, ...todayHabits.map(h => h.id)) : []
@@ -539,15 +543,15 @@ function getTasksForDate(date) {
     stampAgentJobs(inbox, overdue, dueToday, active)
     return { view: 'today', date, inbox, overdue, dueToday, active, doneToday, timeSnoozed, events, reminders, habits }
   } else if (date > t) {
-    const scheduled   = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE strftime('%Y-%m-%d', due_date) = ? AND parent_id IS NULL AND task_type = 'task' AND status = 'active' ORDER BY ${ORDER}`).all(date))
-    const timeSnoozed = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE strftime('%Y-%m-%d', due_date) = ? AND parent_id IS NULL AND task_type = 'task' AND status = 'snoozed' ORDER BY surface_after ASC`).all(date))
+    const scheduled   = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE strftime('%Y-%m-%d', due_date) = ? AND parent_id IS NULL AND task_type = 'task' AND orchestrator IS NULL AND status = 'active' ORDER BY ${ORDER}`).all(date))
+    const timeSnoozed = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE strftime('%Y-%m-%d', due_date) = ? AND parent_id IS NULL AND task_type = 'task' AND orchestrator IS NULL AND status = 'snoozed' ORDER BY surface_after ASC`).all(date))
     const events      = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE task_type = 'event' AND parent_id IS NULL AND status != 'done' AND due_date = ? ORDER BY event_time ASC NULLS LAST, created_at ASC`).all(date))
     const reminders   = db.prepare(`SELECT * FROM tasks WHERE task_type = 'reminder' AND parent_id IS NULL AND status != 'done' AND due_date = ? ORDER BY ${ORDER}`).all(date)
     stampAgentJobs(scheduled, timeSnoozed)
     return { view: 'future', date, scheduled, timeSnoozed, events, reminders }
   } else {
-    const completed = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'done' AND parent_id IS NULL AND task_type = 'task' AND last_touched_human >= ? AND last_touched_human < ? ORDER BY last_touched_human DESC`).all(date, nextDay))
-    const wasDue    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE due_date = ? AND parent_id IS NULL AND task_type = 'task' ORDER BY status ASC, ${ORDER}`).all(date))
+    const completed = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'done' AND parent_id IS NULL AND task_type = 'task' AND orchestrator IS NULL AND last_touched_human >= ? AND last_touched_human < ? ORDER BY last_touched_human DESC`).all(date, nextDay))
+    const wasDue    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE due_date = ? AND parent_id IS NULL AND task_type = 'task' AND orchestrator IS NULL ORDER BY status ASC, ${ORDER}`).all(date))
     const events    = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE task_type = 'event' AND parent_id IS NULL AND due_date = ? ORDER BY event_time ASC NULLS LAST, created_at ASC`).all(date))
     return { view: 'past', date, completed, wasDue, events }
   }
@@ -561,7 +565,7 @@ function getSubtasks(id) { return attachTrustSignals(db.prepare(`SELECT * FROM t
 function getBacklog() { return attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'backlog' AND parent_id IS NULL ORDER BY context ASC, project ASC NULLS LAST, sort_order ASC NULLS LAST, created_at ASC`).all()) }
 
 function getCodingTasks() {
-  const tasks = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE task_type = 'coding' AND status NOT IN ('done','archived') AND parent_id IS NULL ORDER BY created_at DESC`).all())
+  const tasks = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE (task_type = 'coding' OR orchestrator IS NOT NULL) AND status NOT IN ('done','archived') AND parent_id IS NULL ORDER BY created_at DESC`).all())
   stampAgentJobs(tasks)
   return tasks
 }
@@ -822,6 +826,7 @@ function getStaleTasks(days = null) {
     SELECT * FROM tasks
     WHERE status IN ('active', 'backlog')
       AND task_type != 'event'
+      AND orchestrator IS NULL
       AND recurrence IS NULL
       AND parent_id IS NULL
       AND ${staleWhere}
@@ -931,8 +936,8 @@ function deleteContext(slug) { db.prepare('DELETE FROM contexts WHERE slug = ?')
 
 function getProjectSummaries() {
   const projects = db.prepare('SELECT * FROM projects WHERE archived = 0 ORDER BY name ASC').all()
-  const activeCounts = db.prepare(`SELECT project, COUNT(*) as n FROM tasks WHERE status = 'active' AND task_type NOT IN ('coding','event') AND project IS NOT NULL GROUP BY project`).all()
-  const codingCounts = db.prepare(`SELECT project, COUNT(*) as n FROM tasks WHERE task_type = 'coding' AND status NOT IN ('done','archived') AND project IS NOT NULL GROUP BY project`).all()
+  const activeCounts = db.prepare(`SELECT project, COUNT(*) as n FROM tasks WHERE status = 'active' AND task_type NOT IN ('coding','event') AND orchestrator IS NULL AND project IS NOT NULL GROUP BY project`).all()
+  const codingCounts = db.prepare(`SELECT project, COUNT(*) as n FROM tasks WHERE (task_type = 'coding' OR orchestrator IS NOT NULL) AND status NOT IN ('done','archived') AND project IS NOT NULL GROUP BY project`).all()
   const backlogCounts = db.prepare(`SELECT project, COUNT(*) as n FROM tasks WHERE status = 'backlog' AND project IS NOT NULL GROUP BY project`).all()
   // Fallback context from tasks for projects that predate the context column
   const ctxRows = db.prepare(`SELECT project, context FROM tasks WHERE project IS NOT NULL AND status NOT IN ('archived') GROUP BY project`).all()
@@ -964,8 +969,8 @@ function getProjectSummaries() {
 
 function getProjectDetail(name) {
   const project = db.prepare('SELECT * FROM projects WHERE name = ?').get(name)
-  const active = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE project = ? AND status = 'active' AND task_type NOT IN ('coding','event') AND parent_id IS NULL ORDER BY ${ORDER}`).all(name))
-  const coding = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE project = ? AND task_type = 'coding' AND status NOT IN ('done','archived') AND parent_id IS NULL ORDER BY created_at DESC`).all(name))
+  const active = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE project = ? AND status = 'active' AND task_type NOT IN ('coding','event') AND orchestrator IS NULL AND parent_id IS NULL ORDER BY ${ORDER}`).all(name))
+  const coding = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE project = ? AND (task_type = 'coding' OR orchestrator IS NOT NULL) AND status NOT IN ('done','archived') AND parent_id IS NULL ORDER BY created_at DESC`).all(name))
   const backlog = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE project = ? AND status = 'backlog' AND parent_id IS NULL ORDER BY ${ORDER}`).all(name))
   const doneRecent = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE project = ? AND status = 'done' AND parent_id IS NULL AND last_touched_human >= datetime('now','-14 days','localtime') ORDER BY last_touched_human DESC LIMIT 20`).all(name))
   stampAgentJobs(active, coding)
@@ -1205,8 +1210,16 @@ function queueExternalJob(body = {}) {
     const existing = db.prepare('SELECT id, status FROM agent_jobs WHERE external_ref = ?').get(externalRef)
     if (existing) return { id: existing.id, status: existing.status, existing: true }
   }
-  if (body.task_id && !db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(body.task_id)) throw validationError('task not found')
+  const task = body.task_id ? db.prepare('SELECT id, status, orchestrator, ai_context FROM tasks WHERE id = ?').get(body.task_id) : null
+  if (body.task_id && !task) throw validationError('task not found')
   const id = crypto.randomUUID()
+  // New work for an orchestrated task that already closed (a PR reopened, a late closeout) reopens
+  // that same task, so one orchestrator task always maps to one Qalatra task. Done in the same
+  // synchronous call as the insert, so a sweep can never close it between reopen and queue.
+  if (task?.orchestrator && (task.status === 'done' || task.status === 'archived')) {
+    db.prepare(`UPDATE tasks SET status = 'active', outcome = NULL, ai_context = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run(appendAiContext(task.ai_context, `Reopened: new ${task.orchestrator} dispatch.`), task.id)
+  }
   db.prepare(`INSERT INTO agent_jobs (id, task_id, agent_path, prompt, user_message, external_ref, external_meta, resume_session) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(id, body.task_id ?? null, body.agent_path, prompt, prompt, externalRef,
       body.external_meta == null ? null : JSON.stringify(body.external_meta),
@@ -1221,10 +1234,40 @@ function findTaskByOrchestratorRef(orchestrator, ref) {
   const row = db.prepare('SELECT id FROM tasks WHERE orchestrator = ? AND orchestrator_ref = ? ORDER BY created_at ASC LIMIT 1').get(orchestrator, String(ref))
   return row ? getTask(row.id) : null
 }
+// Every create/bind path goes through here, and it always makes the task a coding task: the
+// orchestrator is its system of record, so it lives in the Coding view, never the priority view.
 function bindTaskOrchestrator(taskId, orchestrator, ref) {
-  const info = db.prepare('UPDATE tasks SET orchestrator = ?, orchestrator_ref = ? WHERE id = ?').run(orchestrator, String(ref), taskId)
+  const info = db.prepare(`UPDATE tasks SET orchestrator = ?, orchestrator_ref = ?, task_type = 'coding' WHERE id = ?`).run(orchestrator, String(ref), taskId)
   if (!info.changes) throw new Error('Task not found')
   return { ok: true }
+}
+// Open tasks an orchestrator drives, with whether any job for them is still queued or running —
+// the input to the orchestrator's "is this finished?" sweep.
+function listOpenOrchestratedTasks(orchestrator) {
+  return db.prepare(`
+    SELECT t.id, t.orchestrator_ref, t.status,
+      COALESCE(t.agent_path, (SELECT j.agent_path FROM agent_jobs j WHERE j.task_id = t.id ORDER BY j.created_at DESC LIMIT 1)) AS agent_path,
+      EXISTS (SELECT 1 FROM agent_jobs j WHERE j.task_id = t.id AND j.status IN ('queued', 'running')) AS has_pending_job
+    FROM tasks t
+    WHERE t.orchestrator = ? AND t.status NOT IN ('done', 'archived')
+    ORDER BY t.created_at ASC
+  `).all(orchestrator).map(r => ({ ...r, has_pending_job: Boolean(r.has_pending_job) }))
+}
+// Close a task because its orchestrator is finished with it. Refuses while a job is queued or
+// running — the same task receives later dispatches (build after plan, closeout after merge), so
+// "a job finished" alone is never enough. Writes nothing to sync_log: the orchestrator is the
+// system of record and already knows. Check and write happen in one synchronous call.
+function closeOrchestratedTask(taskId, note) {
+  const task = db.prepare('SELECT id, status, orchestrator, ai_context FROM tasks WHERE id = ?').get(taskId)
+  if (!task) return { closed: false, reason: 'not_found' }
+  if (!task.orchestrator) return { closed: false, reason: 'not_orchestrated' }
+  if (task.status === 'done' || task.status === 'archived') return { closed: false, reason: 'already_closed' }
+  const pending = db.prepare(`SELECT 1 FROM agent_jobs WHERE task_id = ? AND status IN ('queued', 'running') LIMIT 1`).get(taskId)
+  if (pending) return { closed: false, reason: 'job_pending' }
+  const now = nowIso()
+  db.prepare(`UPDATE tasks SET status = 'done', outcome = 'completed', last_reviewed_at = ?, updated_at = datetime('now'), ai_context = ? WHERE id = ?`)
+    .run(now, appendAiContext(task.ai_context, note || 'Closed: orchestrator finished; no pending jobs.'), taskId)
+  return { closed: true }
 }
 function recordExternalOp({ external_ref, orchestrator, op, status, result }) {
   db.prepare(`INSERT INTO external_ops (external_ref, orchestrator, op, status, result) VALUES (?, ?, ?, ?, ?)
@@ -1466,7 +1509,7 @@ const METHODS = {
   listAgentJobs, getAgentJob, createAgentJob,
   getQueuedJobs, startAgentJob, setAgentJobRuntime, finishAgentJob, insertAgentNote,
   resetStuckJobs, getAutorunTasks, insertAutorunJob,
-  queueExternalJob, getAgentJobByExternalRef, findTaskByOrchestratorRef, bindTaskOrchestrator,
+  queueExternalJob, getAgentJobByExternalRef, findTaskByOrchestratorRef, bindTaskOrchestrator, listOpenOrchestratedTasks, closeOrchestratedTask,
   recordExternalOp, getExternalOp, folderHasRunningJob,
   listHeartbeats, createHeartbeat, updateHeartbeat, deleteHeartbeat, toggleHeartbeat,
   getDueHeartbeats, markHeartbeatRun, createHeartbeatJob, listHeartbeatJobs,

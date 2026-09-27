@@ -233,11 +233,17 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
     return true
   }
 
+  // Every dispatch — first or fiftieth — goes through bindTaskOrchestrator, which pins
+  // task_type='coding'. A closed task is reopened by queueExternalJob when the job lands on it.
   async function findOrCreateTask(agent, request) {
     const existing = await dbCall('findTaskByOrchestratorRef', ORCHESTRATOR, request.taskId)
-    if (existing) return existing
+    if (existing) {
+      if (existing.task_type !== 'coding') await dbCall('bindTaskOrchestrator', existing.id, ORCHESTRATOR, request.taskId)
+      return existing
+    }
     const t = request.task ?? {}
     const created = await dbCall('createTask', {
+      task_type: 'coding',
       title: t.title || `FlightDesk task ${request.taskId}`,
       description: t.description ?? undefined,
       context: agent.context || 'internal',
@@ -250,6 +256,44 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
     })
     await dbCall('bindTaskOrchestrator', created.id, ORCHESTRATOR, request.taskId)
     return created
+  }
+
+  /**
+   * Close the Qalatra task bound to a FlightDesk task once FlightDesk is finished with it: the
+   * FlightDesk task is DONE, archived, or gone, *and* no job for the Qalatra task is queued or
+   * running (enforced again inside closeOrchestratedTask, atomically). Never on "a job finished"
+   * alone — the same task gets a build after its plan and a closeout after its merge. Nothing is
+   * written back to FlightDesk; it already knows.
+   */
+  async function closeIfFinished(client, { taskId, ref }) {
+    if (!taskId || !ref) return { closed: false, reason: 'unbound' }
+    const fdTask = await client.getTask(ref)
+    const why = !fdTask ? 'no longer exists'
+      : fdTask.archived ? 'is archived'
+      : fdTask.phase === 'DONE' ? 'is DONE'
+      : null
+    if (!why) return { closed: false, reason: 'flightdesk_open', phase: fdTask.phase }
+    return dbCall('closeOrchestratedTask', taskId, `Closed: FlightDesk task ${ref} ${why}; no pending jobs.`)
+  }
+
+  /** Periodic pass over every open FlightDesk-bound task, so ones finished by a human or another box close too. */
+  async function sweepFinishedTasks() {
+    const summary = { checked: 0, closed: 0, errors: 0 }
+    const tasks = await dbCall('listOpenOrchestratedTasks', ORCHESTRATOR)
+    for (const task of tasks) {
+      if (task.has_pending_job) continue
+      const client = task.agent_path ? clientFor(task.agent_path) : null
+      if (!client) continue
+      summary.checked++
+      try {
+        const r = await closeIfFinished(client, { taskId: task.id, ref: task.orchestrator_ref })
+        if (r?.closed) summary.closed++
+      } catch (err) {
+        summary.errors++
+        log.error(`[flightdesk] close check for task ${task.id} (FlightDesk ${task.orchestrator_ref}) failed: ${err.message}`)
+      }
+    }
+    return summary
   }
 
   function finishExtras({ status, result, sessionId, diagnostics }) {
@@ -424,8 +468,14 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
     const client = clientFor(meta.agent_path ?? job.agent_path)
     if (!client) return
     const target = status === 'done' ? 'DONE' : 'FAILED'
-    await advance(client, { id: job.external_ref, status: known.get(job.external_ref) ?? 'ACKNOWLEDGED' }, target,
-      { qalatraJobId: job.id, ...finishExtras({ status, result, sessionId, diagnostics }) })
+    try {
+      await advance(client, { id: job.external_ref, status: known.get(job.external_ref) ?? 'ACKNOWLEDGED' }, target,
+        { qalatraJobId: job.id, ...finishExtras({ status, result, sessionId, diagnostics }) })
+    } finally {
+      // A closeout that just reported DONE is usually the last job this task will get.
+      try { await closeIfFinished(client, { taskId: job.task_id, ref: meta.task_ref }) }
+      catch (err) { log.error(`[flightdesk] close check after job ${job.id} failed: ${err.message}`) }
+    }
   }
 
   async function reportOrphaned(jobs) {
@@ -446,5 +496,5 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
     }
   }
 
-  return { pollFolder, onJobStarted, onJobFinished, reportOrphaned, folders, advance, handleRequest, handleSessionOp }
+  return { pollFolder, onJobStarted, onJobFinished, reportOrphaned, sweepFinishedTasks, closeIfFinished, folders, advance, handleRequest, handleSessionOp }
 }

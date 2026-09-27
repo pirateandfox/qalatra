@@ -15,6 +15,7 @@ import { Worker } from 'node:worker_threads'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qalatra-fd-'))
+process.env.TASKOS_DB_DIR = dir // MCP tools (mcp/db.js) read the same throwaway DB
 const worker = new Worker(path.join(ROOT, 'db-worker.js'), { workerData: { dbPath: path.join(dir, 'tasks.db') } })
 let seq = 0
 const pending = new Map()
@@ -48,9 +49,11 @@ function fakeFlightDesk() {
   const allowed = { REQUESTED: ['ACKNOWLEDGED', 'FAILED'], ACKNOWLEDGED: ['RUNNING', 'FAILED'], RUNNING: ['DONE', 'FAILED'], DONE: [], FAILED: [] }
   let answers = { questions: [], blocked: false, blockingQuestions: [] }
   let failNextUpdate = false
+  const tasks = new Map() // FlightDesk task id -> { phase, archived }; absent from the map = still open (BUILD)
+  const deleted = new Set()
   const rejection = message => { const e = new Error(message); e.graphql = true; return e }
   return {
-    requests, calls,
+    requests, calls, tasks, deleted,
     add(r) { requests.set(r.id, { status: 'REQUESTED', requestedAt: new Date().toISOString(), task: { id: r.taskId, title: `Task ${r.taskId}`, description: 'desc', blocked: false }, ...r }); return requests.get(r.id) },
     setAnswers(a) { answers = a },
     failNext() { failNextUpdate = true },
@@ -64,6 +67,11 @@ function fakeFlightDesk() {
         if (!allowed[r.status].includes(input.status)) throw rejection('Invalid dispatch transition')
         Object.assign(r, { status: input.status, qalatraJobId: input.qalatraJobId ?? r.qalatraJobId, extras: input })
         return structuredClone(r)
+      },
+      async getTask(taskId) {
+        calls.push(['getTask', taskId])
+        if (deleted.has(taskId)) return null
+        return { id: taskId, phase: 'BUILD', archived: false, ...tasks.get(taskId) }
       },
       async consumeAnswers(taskId) { calls.push(['answers', taskId]); return structuredClone(answers) },
     },
@@ -278,6 +286,130 @@ try {
   check('transition rejection detection', [isTransitionRejection(Object.assign(new Error('Invalid dispatch transition'), { graphql: true })), isTransitionRejection(new Error('Invalid dispatch transition'))], [true, false])
   check('diagnostics kinds', ['done', 'timed_out', 'orphaned', 'failed'].map(s => diagnosticsKindFor({ status: s })).concat(diagnosticsKindFor({ status: 'failed', failureKind: 'launch_failed' })), [null, 'timed_out', 'orphaned', 'error', 'launch_failed'])
   check('externalEnv refuses reserved and malformed names', externalEnv({ external_meta: JSON.stringify({ env: { QALATRA_TASK_ID: 'x', 'bad-name': 'y', OK_ONE: 'z', NUM: 3, OBJ: {}, FLIGHTDESK_API_KEY: 'wrong', FLIGHTDESK_API_URL: 'https://evil.test', FLIGHTDESK_ORGANIZATION_ID: 'evil' } }) }), { OK_ONE: 'z', NUM: '3' })
+
+  // ── 14. Orchestrated tasks are coding tasks, stay out of the owner's lists, and close themselves ──
+  {
+    const { handlers: briefing } = await import('../mcp/tools/briefing.js')
+    const { handlers: triage } = await import('../mcp/tools/triage.js')
+    const { handlers: mcpTasks } = await import('../mcp/tools/tasks.js')
+    const { today } = await import('../server/task-logic.js')
+    const fdCalls = () => fd.calls.filter(c => c[0] === 'update').length
+
+    // Type: create path, re-dispatch onto a task whose type drifted, and a bare bind.
+    check('create path: new FlightDesk task is task_type=coding', (await dbCall('findTaskByOrchestratorRef', 'flightdesk', 'fd-task-1')).task_type, 'coding')
+    const drifted = await dbCall('findTaskByOrchestratorRef', 'flightdesk', 'fd-task-2')
+    await dbCall('updateTask', drifted.id, { task_type: 'task' })
+    fd.add({ id: 'c1', taskId: 'fd-task-2', kind: 'EXECUTE', prompt: 'more' })
+    await dispatcher.pollFolder(agent)
+    check('re-dispatch path: existing task re-pinned to coding', (await dbCall('getTask', drifted.id)).task_type, 'coding')
+    // No agent_path on the task itself: the sweep finds the folder through its latest job.
+    const manual = await dbCall('createTask', { title: 'bound later', task_type: 'task' })
+    const mj = await dbCall('queueExternalJob', { task_id: manual.id, agent_path: agent.path, prompt: 'x', external_ref: 'manual-1' })
+    await dbCall('startAgentJob', mj.id); await dbCall('finishAgentJob', mj.id, 'done', 'ok', null)
+    await dbCall('bindTaskOrchestrator', manual.id, 'flightdesk', 'fd-task-manual')
+    check('bind path: binding makes it coding', (await dbCall('getTask', manual.id)).task_type, 'coding')
+
+    // Backfill: a fresh worker on the same DB repairs any orchestrated task still typed 'task'.
+    await dbCall('updateTask', manual.id, { task_type: 'task' })
+    const w2 = new Worker(path.join(ROOT, 'db-worker.js'), { workerData: { dbPath: path.join(dir, 'tasks.db') } })
+    await new Promise(resolve => w2.once('message', m => m.ready && resolve()))
+    await w2.terminate()
+    check('migration backfills task_type=coding where orchestrator IS NOT NULL', (await dbCall('getTask', manual.id)).task_type, 'coding')
+
+    // Views: even a leaked type (task, inbox, due today, stale) never reaches the owner's lists.
+    await dbCall('updateTask', manual.id, { task_type: 'task', inbox: 1, due_date: today() })
+    const orchestratedIds = new Set([manual.id, drifted.id, (await dbCall('findTaskByOrchestratorRef', 'flightdesk', 'fd-task-1')).id])
+    const leaks = list => (list ?? []).filter(t => orchestratedIds.has(t.id ?? t.task_id)).length
+    const day = await dbCall('getTasksForDate', today())
+    check('today view: no orchestrated task in inbox/overdue/dueToday/active', [day.inbox, day.overdue, day.dueToday, day.active].map(leaks), [0, 0, 0, 0])
+    check('Coding view: keyed on orchestrator too, so the leaked one is there', (await dbCall('getCodingTasks')).some(t => t.id === manual.id), true)
+    check('stale review (db-worker) excludes orchestrated tasks', leaks(await dbCall('getStaleTasks', -1)), 0)
+    const morning = briefing.morning_briefing()
+    const afternoon = briefing.afternoon_briefing()
+    check('MCP briefings exclude orchestrated tasks', [leaks(morning.overdue), leaks(morning.due_today), leaks(afternoon.still_active), leaks(afternoon.overdue)], [0, 0, 0, 0])
+    check('MCP get_todays_tasks / overdue / EOD triage exclude them', [leaks(triage.get_todays_tasks({})), leaks(triage.get_overdue_tasks()), leaks(triage.end_of_day_triage())], [0, 0, 0])
+    check('MCP get_stale_tasks excludes them', leaks(mcpTasks.get_stale_tasks({ days: -1 })), 0)
+    await dbCall('updateTask', manual.id, { task_type: 'coding', inbox: 0, due_date: null })
+
+    // Fresh task for the lifecycle cases.
+    fd.add({ id: 'L1', taskId: 'fd-life', kind: 'PLAN', prompt: 'plan' })
+    await dispatcher.pollFolder(agent)
+    const life = await dbCall('findTaskByOrchestratorRef', 'flightdesk', 'fd-life')
+    let lj = await dbCall('getAgentJobByExternalRef', 'L1')
+
+    // No close while a job is queued, even when FlightDesk says DONE.
+    fd.tasks.set('fd-life', { phase: 'DONE' })
+    let swept = await dispatcher.sweepFinishedTasks()
+    check('no-close-while-job-queued: sweep skips it', (await dbCall('getTask', life.id)).status, 'active')
+    check('closeOrchestratedTask refuses with a queued job', (await dbCall('closeOrchestratedTask', life.id, 'x')).reason, 'job_pending')
+
+    // Job ends while FlightDesk is still open (PLAN done, BUILD next) → stays active.
+    fd.tasks.set('fd-life', { phase: 'WAITING' })
+    await dbCall('startAgentJob', lj.id); lj = await dbCall('getAgentJob', lj.id)
+    await dispatcher.onJobStarted({ job: lj })
+    await dbCall('finishAgentJob', lj.id, 'done', 'planned', 'sess-L1')
+    await dispatcher.onJobFinished({ job: lj, status: 'done', result: 'planned', sessionId: 'sess-L1', diagnostics: { kind: null } })
+    check('job finished + FlightDesk WAITING → task stays active', (await dbCall('getTask', life.id)).status, 'active')
+    const openDay = await dbCall('getTasksForDate', today())
+    check('...and it is in the Coding view only', [(await dbCall('getCodingTasks')).some(t => t.id === life.id), [openDay.inbox, openDay.overdue, openDay.dueToday, openDay.active].flat().some(t => t.id === life.id)], [true, false])
+
+    // Closeout job ends and FlightDesk is DONE → closed on job end, with a note, no write-back.
+    fd.add({ id: 'L2', taskId: 'fd-life', kind: 'EXECUTE', prompt: 'closeout' })
+    await dispatcher.pollFolder(agent)
+    let lj2 = await dbCall('getAgentJobByExternalRef', 'L2')
+    await dbCall('startAgentJob', lj2.id); lj2 = await dbCall('getAgentJob', lj2.id)
+    await dispatcher.onJobStarted({ job: lj2 })
+    fd.tasks.set('fd-life', { phase: 'DONE' })
+    await dbCall('finishAgentJob', lj2.id, 'done', 'merged', 'sess-L2')
+    await dispatcher.onJobFinished({ job: lj2, status: 'done', result: 'merged', sessionId: 'sess-L2', diagnostics: { kind: null } })
+    const updatesBeforeCheck = fdCalls()
+    let closed = await dbCall('getTask', life.id)
+    check('close-on-job-end: status done', closed.status, 'done')
+    check('close note appended to ai_context', /Closed: FlightDesk task fd-life is DONE; no pending jobs\./.test(closed.ai_context ?? ''), true)
+    check('Coding view no longer lists it', (await dbCall('getCodingTasks')).some(t => t.id === life.id), false)
+
+    // No sync back: closing wrote no sync_log row and sent FlightDesk nothing; MCP complete_task
+    // on an orchestrated task queues nothing either.
+    await dispatcher.closeIfFinished(fd.client, { taskId: life.id, ref: 'fd-life' })
+    check('no-sync-to-FlightDesk: closing sent no dispatch/task update', fdCalls(), updatesBeforeCheck)
+    const { openDb } = await import('../mcp/db.js')
+    const mdb = openDb()
+    const syncCount = () => mdb.prepare('SELECT count(*) AS n FROM sync_log WHERE task_id = ?').get(life.id).n
+    check('no-sync-to-FlightDesk: no sync_log entry from the close', syncCount(), 0)
+    const other = await dbCall('findTaskByOrchestratorRef', 'flightdesk', 'fd-task-1')
+    mcpTasks.complete_task({ task_id: other.id })
+    check('no-sync-to-FlightDesk: MCP complete_task skips the sync entry for orchestrated tasks', mdb.prepare('SELECT count(*) AS n FROM sync_log WHERE task_id = ?').get(other.id).n, 0)
+
+    // Reopen on a new dispatch: same task, active again, job queued on it.
+    fd.tasks.set('fd-life', { phase: 'BUILD' })
+    fd.add({ id: 'L3', taskId: 'fd-life', kind: 'EXECUTE', prompt: 'PR reopened' })
+    await dispatcher.pollFolder(agent)
+    const reopened = await dbCall('getTask', life.id)
+    const lj3 = await dbCall('getAgentJobByExternalRef', 'L3')
+    check('reopen-on-new-dispatch: same task reopened, not a new one', [reopened.status, lj3.task_id, (await dbCall('findTaskByOrchestratorRef', 'flightdesk', 'fd-life')).id], ['active', life.id, life.id])
+    check('reopen noted in ai_context', /Reopened: new flightdesk dispatch\./.test(reopened.ai_context ?? ''), true)
+
+    // Close by sweep: finished elsewhere (archived / deleted) while no job pending.
+    await dbCall('startAgentJob', lj3.id); await dbCall('finishAgentJob', lj3.id, 'done', 'ok', 'sess-L3')
+    fd.tasks.set('fd-life', { phase: 'BUILD', archived: true })
+    fd.deleted.add('fd-task-manual')
+    swept = await dispatcher.sweepFinishedTasks()
+    check('close-by-sweep: archived FlightDesk task closes', (await dbCall('getTask', life.id)).status, 'done')
+    check('close-by-sweep: deleted FlightDesk task closes with its reason', [(await dbCall('getTask', manual.id)).status, /fd-task-manual no longer exists/.test((await dbCall('getTask', manual.id)).ai_context ?? '')], ['done', true])
+    check('sweep leaves FlightDesk-open tasks active', (await dbCall('getTask', drifted.id)).status, 'active')
+    check('sweep summary counts', swept.closed >= 2, true)
+
+    // Burst: 20 dispatches never reach the owner's lists.
+    for (let i = 0; i < 20; i++) fd.add({ id: `B${i}`, taskId: `fd-burst-${i}`, kind: 'EXECUTE', prompt: `closeout ${i}` })
+    await dispatcher.pollFolder(agent)
+    const burstDay = await dbCall('getTasksForDate', today())
+    const burstIds = new Set()
+    for (let i = 0; i < 20; i++) burstIds.add((await dbCall('findTaskByOrchestratorRef', 'flightdesk', `fd-burst-${i}`)).id)
+    const inLists = [burstDay.inbox, burstDay.overdue, burstDay.dueToday, burstDay.active].flat().filter(t => burstIds.has(t.id)).length
+    check('20-dispatch burst: none in the priority view or inbox', inLists, 0)
+    check('20-dispatch burst: all in the Coding view', (await dbCall('getCodingTasks')).filter(t => burstIds.has(t.id)).length, 20)
+    mdb.close()
+  }
 
   // ── 13. Folder identity reaches the job env ──
   // The CLI inside a job walks up from its cwd for a .flightdeskrc; an agent that cds to its repo

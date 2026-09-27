@@ -8,6 +8,7 @@ export class FlightDeskAuthError extends Error {
 const LIST_DISPATCHES = 'query { userDispatchRequests }'
 const UPDATE_DISPATCH = 'mutation($input: JSON!) { userUpdateDispatch(input: $input) }'
 const CONSUME_ANSWERS = 'mutation($taskId: String!) { userConsumeAnswers(taskId: $taskId) }'
+const GET_TASK = 'query($taskId: String!) { userTask(taskId: $taskId) { id phase archived } }'
 
 export function createFlightDeskClient({ apiUrl, apiKey, fetchImpl = globalThis.fetch, timeoutMs = 20_000 }) {
   if (!apiKey) throw new Error('apiKey required')
@@ -43,6 +44,16 @@ export function createFlightDeskClient({ apiUrl, apiKey, fetchImpl = globalThis.
     async updateDispatch(input) {
       const data = await graphql(UPDATE_DISPATCH, { input })
       return data.userUpdateDispatch ?? null
+    },
+    /** The task's lifecycle fields, or null when FlightDesk no longer has it (deleted). */
+    async getTask(taskId) {
+      try {
+        const data = await graphql(GET_TASK, { taskId })
+        return data.userTask ?? null
+      } catch (err) {
+        if (err.graphql && /not found/i.test(err.message)) return null
+        throw err
+      }
     },
     async consumeAnswers(taskId) {
       const data = await graphql(CONSUME_ANSWERS, { taskId })

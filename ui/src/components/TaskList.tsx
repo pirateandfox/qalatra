@@ -318,8 +318,8 @@ function PriorityView({ data, selectedId, onSelect, onMeetingOpen, onMutate }: O
   // Scheduled = autorun tasks that haven't fired yet (no agent job)
   const scheduledTasks = allRaw.filter(t => t.agent_autorun === 1 && !t.agent_job_status)
   const scheduledIds = new Set(scheduledTasks.map(t => t.id))
-  // Coding tasks live in the Code view, not Priority
-  const allTasks = allRaw.filter(t => !scheduledIds.has(t.id) && t.task_type !== 'coding')
+  // Coding tasks (including anything an orchestrator drives) live in the Code view, not Priority
+  const allTasks = allRaw.filter(t => !scheduledIds.has(t.id) && t.task_type !== 'coding' && !t.orchestrator)
   const waitingTasks = allTasks.filter(t => !!t.blocked)
   const actionableTasks = allTasks.filter(t => !t.blocked)
   const noCurrentMatches = !!trimmedQuery && currentMatchCount === 0

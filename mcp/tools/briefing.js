@@ -1,6 +1,10 @@
 import { openDb, today, nowIso, appendAiContext, nextRecurrenceDate, offsetDate, daysBetween } from '../db.js';
 import { v4 as uuidv4 } from 'uuid';
 
+// Coding tasks — anything an orchestrator such as FlightDesk drives — are not the owner's to-dos.
+// Keyed on the column as well as task_type so a task bound with the wrong type can't leak in.
+export const NOT_ORCHESTRATED = 'orchestrator IS NULL';
+
 // Spawn the next occurrence of a recurring task, preserving every field db-worker preserves
 // (bug C4: this copy previously dropped notes/links/agent_path/agent_resume/agent_autorun/
 // agent_autorun_time and re-anchored start-date-only tasks). Field-for-field parity with
@@ -96,29 +100,30 @@ export const handlers = {
     const overdue = db.prepare(
       `SELECT id, title, task_type, tags, context, project, due_date, my_priority, energy_required, time_estimate, source_url, parent_id
        FROM tasks WHERE status = 'active' AND due_date IS NOT NULL AND due_date < ?
-         AND task_type NOT IN ('event', 'reading')
+         AND task_type NOT IN ('event', 'reading', 'coding') AND ${NOT_ORCHESTRATED}
        ORDER BY due_date ASC`
     ).all(t);
 
     const waking_up = db.prepare(
       `SELECT id, title, task_type, tags, context, project, due_date, my_priority, surface_after, ai_context, source_url
        FROM tasks WHERE status IN ('snoozed', 'archived') AND surface_after IS NOT NULL
+       AND ${NOT_ORCHESTRATED}
        AND surface_after <= strftime('%Y-%m-%d %H:%M', 'now', 'localtime')
        ORDER BY surface_after ASC`
     ).all();
 
     const due_today = db.prepare(
       `SELECT id, title, task_type, tags, context, project, due_date, my_priority, energy_required, time_estimate, source_url, parent_id
-       FROM tasks WHERE status = 'active' AND due_date = ? AND task_type NOT IN ('event', 'reading')
+       FROM tasks WHERE status = 'active' AND due_date = ? AND task_type NOT IN ('event', 'reading', 'coding') AND ${NOT_ORCHESTRATED}
        ORDER BY my_priority ASC NULLS LAST`
     ).all(t);
 
     const { active_count } = db.prepare(
-      `SELECT count(*) as active_count FROM tasks WHERE status = 'active' AND task_type != 'event'`
+      `SELECT count(*) as active_count FROM tasks WHERE status = 'active' AND task_type NOT IN ('event', 'coding') AND ${NOT_ORCHESTRATED}`
     ).get();
 
     const contextRows = db.prepare(
-      `SELECT context, count(*) as count FROM tasks WHERE status = 'active' AND task_type != 'event' GROUP BY context ORDER BY count DESC`
+      `SELECT context, count(*) as count FROM tasks WHERE status = 'active' AND task_type NOT IN ('event', 'coding') AND ${NOT_ORCHESTRATED} GROUP BY context ORDER BY count DESC`
     ).all();
 
     const by_context = Object.fromEntries(contextRows.map(r => [r.context, r.count]));
@@ -141,20 +146,20 @@ export const handlers = {
 
     const completed_today = db.prepare(
       `SELECT id, title, context, project, last_touched_human
-       FROM tasks WHERE status = 'done' AND task_type != 'event' AND last_touched_human >= ?
+       FROM tasks WHERE status = 'done' AND task_type NOT IN ('event', 'coding') AND ${NOT_ORCHESTRATED} AND last_touched_human >= ?
        ORDER BY last_touched_human DESC`
     ).all(t);
 
     const still_active = db.prepare(
       `SELECT id, title, task_type, tags, context, project, due_date, my_priority, energy_required, time_estimate, source_url
-       FROM tasks WHERE status = 'active' AND task_type NOT IN ('event', 'reading')
+       FROM tasks WHERE status = 'active' AND task_type NOT IN ('event', 'reading', 'coding') AND ${NOT_ORCHESTRATED}
        ORDER BY my_priority ASC NULLS LAST, due_date ASC NULLS LAST`
     ).all();
 
     const overdue = db.prepare(
       `SELECT id, title, task_type, tags, context, project, due_date, my_priority, time_estimate, source_url, parent_id
        FROM tasks WHERE status = 'active' AND due_date IS NOT NULL AND due_date < ?
-         AND task_type NOT IN ('event', 'reading')
+         AND task_type NOT IN ('event', 'reading', 'coding') AND ${NOT_ORCHESTRATED}
        ORDER BY due_date ASC`
     ).all(t);
 
@@ -169,6 +174,7 @@ export const handlers = {
 
     const conditions = [
       `status = 'backlog'`,
+      NOT_ORCHESTRATED,
       `(last_surfaced IS NULL OR last_surfaced < '${cutoff}')`,
     ];
     if (args.context) conditions.push(`context = '${args.context.replace(/'/g, "''")}'`);

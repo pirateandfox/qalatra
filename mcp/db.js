@@ -216,6 +216,10 @@ function initSchema(db) {
   if (!existingCols.includes('hard_deadline'))      db.exec('ALTER TABLE tasks ADD COLUMN hard_deadline INTEGER NOT NULL DEFAULT 0');
   if (!existingCols.includes('last_reviewed_at'))   db.exec('ALTER TABLE tasks ADD COLUMN last_reviewed_at TEXT');
   if (!existingCols.includes('time_estimate'))      db.exec('ALTER TABLE tasks ADD COLUMN time_estimate INTEGER');
+  // Owned by db-worker's migration; mirrored so the review/briefing filters below work on an
+  // MCP-only DB. An orchestrated task (orchestrator IS NOT NULL) is never the owner's to-do.
+  if (!existingCols.includes('orchestrator'))       db.exec('ALTER TABLE tasks ADD COLUMN orchestrator TEXT');
+  if (!existingCols.includes('orchestrator_ref'))   db.exec('ALTER TABLE tasks ADD COLUMN orchestrator_ref TEXT');
   db.exec(`UPDATE tasks SET last_reviewed_at = COALESCE(last_touched_human, created_at, datetime('now')) WHERE last_reviewed_at IS NULL`);
 
   // Migrations for contexts table columns added after initial schema

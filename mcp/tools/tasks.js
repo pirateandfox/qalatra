@@ -525,7 +525,7 @@ export const handlers = {
     let spawned = null;
     if (args.status === 'done' && task.status !== 'done' && task.recurrence) {
       db.prepare(`UPDATE tasks SET outcome = 'completed' WHERE id = ?`).run(args.task_id);
-      if (task.source && task.source !== 'manual') {
+      if (task.source && task.source !== 'manual' && !task.orchestrator) {
         queueSyncEntry(db, args.task_id, task.source, 'completed', { title: task.title });
       }
       spawned = spawnNextOccurrence(db, task, now);
@@ -559,6 +559,7 @@ export const handlers = {
       SELECT * FROM tasks
       WHERE status IN ('active', 'backlog')
         AND task_type != 'event'
+        AND orchestrator IS NULL
         AND recurrence IS NULL
         AND ${where.sql}
       ORDER BY date(COALESCE(last_reviewed_at, created_at)) ASC,
@@ -717,7 +718,9 @@ export const handlers = {
       WHERE id = @id
     `).run({ now, ai_context, id: args.task_id });
 
-    if (task.source && task.source !== 'manual') {
+    // An orchestrated task's orchestrator is the system of record and already knows it's done —
+    // pushing a completion back would be noise at best and a stale overwrite at worst.
+    if (task.source && task.source !== 'manual' && !task.orchestrator) {
       queueSyncEntry(db, args.task_id, task.source, 'completed', { title: task.title });
     }
 
