@@ -1,5 +1,10 @@
 # Qalatra — Evolution Notes
 
+## Release 1.9.53 (2026-09-26)
+
+- FlightDesk-bound tasks are always coding tasks, stay out of every owner-facing list, and
+  close themselves once FlightDesk is finished with them (see the entry below).
+
 ## FlightDesk tasks stay in the Coding view and close themselves (2026-09-26)
 
 - Problem: FlightDesk-bound tasks showed in the priority view (the dispatch path never set a type;
