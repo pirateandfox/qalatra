@@ -1,5 +1,12 @@
 # Qalatra — Evolution Notes
 
+## Resolved-approval history reaches FlightDesk (2026-09-28)
+
+- SESSION_OP `state` forwards Claude Bridge 0.1.18's `resolvedApprovals`,
+  `resolvedApprovalsCursor` and `resolvedApprovalsTruncated` verbatim, so FlightDesk can reconcile
+  card pages answered in Claude. No `resolved_since` (FlightDesk dedupes by approvalId,
+  questionIndex, seq); `resolvedApprovalsError` stays out. Absent on older bridges → omitted.
+
 ## Release 1.9.53 (2026-09-26)
 
 - FlightDesk-bound tasks are always coding tasks, stay out of every owner-facing list, and

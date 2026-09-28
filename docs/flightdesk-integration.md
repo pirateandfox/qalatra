@@ -103,8 +103,12 @@ as fields on the request, under `sessionOp`, or as JSON in `prompt` until Flight
   is not from a FlightDesk-owned template. It does not inspect the text. `DONE` only when the
   bridge verified the prompt landed as a new turn in *that* session; otherwise `FAILED` with
   `inject unverified` and no retry (a retry of an inject that did land double-posts).
-- `state` returns `{ state, workerStatus, prUrl, branch, lastTurnAt, lastTurnRole,
-  lastTurnEndsWithQuestion }` so "ended asking a human" is visible without an agent.
+- `state` returns `{ state, workerStatus, needsHuman, approval, prUrl, branch, lastTurnAt,
+  lastTurnRole, lastTurnEndsWithQuestion }` so "ended asking a human" is visible without an agent.
+  With Claude Bridge 0.1.18 it also forwards `resolvedApprovals`, `resolvedApprovalsCursor` and
+  `resolvedApprovalsTruncated` verbatim (omitted when the bridge doesn't send them). No
+  `resolved_since` is passed — FlightDesk dedupes on `(approvalId, questionIndex, seq)` — and
+  `resolvedApprovalsError` is never reported.
 - Lifecycle is `REQUESTED → DONE | FAILED` directly; on a FlightDesk without that exception the
   reporter falls back to walking the ladder.
 - Every executed op is recorded in `external_ops`; a re-delivered request is answered from the

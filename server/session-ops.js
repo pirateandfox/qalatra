@@ -133,6 +133,12 @@ export function createSessionOps({ bridgeUrl = process.env.CLAUDE_BRIDGE_URL || 
           workerStatus: s?.workerStatus ?? null,
           needsHuman,
           approval: s?.approval ?? null,
+          // Claude Bridge 0.1.18: every resolved card page, including answers clicked in Claude.
+          // Passed through verbatim; FlightDesk dedupes on (approvalId, questionIndex, seq), so no
+          // resolved_since cursor is sent. resolvedApprovalsError is deliberately not forwarded.
+          resolvedApprovals: s?.resolvedApprovals ?? null,
+          resolvedApprovalsCursor: s?.resolvedApprovalsCursor ?? null,
+          resolvedApprovalsTruncated: s?.resolvedApprovalsTruncated ?? null,
           statusBucket: s?.statusBucket ?? null,
           prUrl: s?.prUrl ?? null,
           branch: s?.branchBar ?? s?.branch ?? null,

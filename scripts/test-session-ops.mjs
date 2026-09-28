@@ -12,14 +12,16 @@ const approval = {
 
 function fixture(state, transcript = [{ role: 'user', text: 'Implement the task' }]) {
   const calls = []
+  const args = []
   const ops = createSessionOps({ connectImpl: async () => ({
-    async callTool({ name }) {
+    async callTool({ name, arguments: a }) {
       calls.push(name)
+      args.push([name, a])
       if (name.includes('transcript') && transcript instanceof Error) throw transcript
       return { content: [{ type: 'text', text: JSON.stringify(name.includes('get_state') ? state : transcript) }] }
     },
   }) })
-  return { ops, calls }
+  return { ops, calls, args }
 }
 
 test('native approval survives the session reader and FlightDesk report without needing a transcript', async () => {
@@ -70,4 +72,34 @@ test('unknown state cannot clear an approval or count as idle', async () => {
   const result = await ops.state({ sessionId: 'session_test' })
   assert.equal(result.state, 'unknown')
   assert.equal(result.sessionIdle, false)
+})
+
+const resolvedApprovals = [
+  { approvalId: 'appr_1', questionIndex: 0, seq: 3, source: 'bridge', decisionId: 'q_1', applied: ['Allow once'] },
+  { approvalId: 'appr_1', questionIndex: 1, seq: 4, source: 'ui', applied: ['Deny'] },
+]
+
+test('Claude Bridge 0.1.18 resolved-approval history reaches the FlightDesk report verbatim', async () => {
+  const { ops, args } = fixture({
+    state: 'running', workerStatus: 'running', needsHuman: false, approval: null,
+    resolvedApprovals, resolvedApprovalsCursor: 4, resolvedApprovalsTruncated: false,
+    resolvedApprovalsError: 'should not travel',
+  })
+  const result = await ops.state({ sessionId: 'session_test' })
+  const report = compactReport(result)
+  assert.deepEqual(report.resolvedApprovals, resolvedApprovals)
+  assert.equal(report.resolvedApprovalsCursor, 4)
+  assert.equal(report.resolvedApprovalsTruncated, false)
+  assert.equal('resolvedApprovalsError' in result, false)
+  assert.equal('resolvedApprovalsError' in report, false)
+  // No resolved_since cursor: FlightDesk dedupes, and the default page of 20 is enough.
+  assert.deepEqual(args.find(([n]) => n === 'claude_session_get_state')[1], { session_id: 'session_test' })
+})
+
+test('older bridge without history: the fields are omitted from the report, not sent as null', async () => {
+  const { ops } = fixture({ state: 'running', workerStatus: 'running', needsHuman: false, approval: null })
+  const result = await ops.state({ sessionId: 'session_test' })
+  assert.equal(result.resolvedApprovals, null)
+  const report = compactReport(result)
+  for (const k of ['resolvedApprovals', 'resolvedApprovalsCursor', 'resolvedApprovalsTruncated']) assert.equal(k in report, false)
 })
