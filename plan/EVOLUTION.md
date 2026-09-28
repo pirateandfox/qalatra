@@ -1,5 +1,10 @@
 # Qalatra — Evolution Notes
 
+## Release 1.9.54 (2026-09-28)
+
+- SESSION_OP `state` reports forward Claude Bridge 0.1.18 resolved-approval history to
+  FlightDesk (see the entry below).
+
 ## Resolved-approval history reaches FlightDesk (2026-09-28)
 
 - SESSION_OP `state` forwards Claude Bridge 0.1.18's `resolvedApprovals`,
