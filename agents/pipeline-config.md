@@ -22,6 +22,6 @@ Canonical checks plus the Intelligence Check; no SonarCloud gate is configured f
 
 ## Source System
 
-FlightDesk is the source of truth for task state (D23). This folder's agent never writes status,
-comments or state changes to Linear; the FlightDesk turn (`flightdesk turn end`) reports the
-outcome and FlightDesk advances the task. Linear is not used for this repo.
+FlightDesk is the source of truth for task state and the only work ledger (D23); Linear is
+retired (2026-10-03). This folder's agent reports only through FlightDesk: the FlightDesk turn
+(`flightdesk turn end`) reports the outcome and FlightDesk advances the task.
