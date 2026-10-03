@@ -1,5 +1,20 @@
 # Qalatra — Evolution Notes
 
+## Per-task worktrees for parallel FlightDesk work (2026-10-03)
+
+- Problem: every job in an agent folder shares one key, so a repo's FlightDesk workload ran one
+  job at a time. Drift, 14 days: 56 jobs waited > 30 min (max 579); shi 87 (max 167).
+- `agent.config` `"worktrees": true` (off by default): a job with `external_meta.task_ref` runs in
+  `<repo>/.qalatra-worktrees/<task_ref>/<subfolder>` and is keyed `<folder key>#<task_ref>`.
+  New `agents.worktrees` and `agent_jobs.run_cwd` columns; `server/worktrees.js` creates (fetch +
+  detached `worktree add` from the resolved base), reuses, and removes (task close, 6-hourly idle
+  sweep, `worktreeIdleDays` default 7). Identity/env stay on the bound folder. Failures are
+  `launch_failed`, never a fallback to the shared folder. Tasks with a folder session finish in
+  the folder. The agent scan skips `.qalatra-worktrees`.
+- Needs in step: FlightDesk stage prompts must stop `git checkout <base>` (fails in a worktree);
+  fleet slice memory must cover parallel runs. Rollout: drift's moceanic-ai pipeline first, then
+  mi-core (wisp/loom/forge) and shi. Compare `started_at - created_at` and timeouts to the baseline.
+
 ## Per-agent memory cap and OOM reporting (2026-10-03)
 
 - Problem: per-run `MemoryHigh=1G`/`MemoryMax=2G` were hardcoded. On drift, 5 kernel OOM kills in

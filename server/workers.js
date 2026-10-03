@@ -8,6 +8,7 @@ import { syncPendingAttachments } from './attachments.js'
 import { getRuntime, isKnownRuntime, DEFAULT_RUNTIME, runtimeNames } from './agent-runtimes.js'
 import { createAgentWatchdog } from './agent-watchdog.js'
 import { loadFolderRc } from './integrations/flightdesk/rc.js'
+import { ensureTaskWorktree, sweepIdleWorktrees } from './worktrees.js'
 
 const MAX_CONCURRENT_JOBS = 3
 /** stderr is stored verbatim in job results, so keep it bounded on a long or noisy run. */
@@ -677,6 +678,14 @@ export function startBackgroundWorkers(ctx) {
   setInterval(() => syncPendingAttachments(ctx).catch(() => {}), 5 * 60 * 1000)
   setInterval(() => processAgentJobs({ dbCall, loadSettings, notify }).catch(() => {}), 30_000)
   setInterval(() => autoRunAgents({ dbCall }).catch(() => {}), 5 * 60_000)
+  // Per-task worktrees (agent.config `worktrees: true`) that ran nothing for worktreeIdleDays go,
+  // so an abandoned task does not hold a checkout forever. Finished FlightDesk tasks are removed
+  // sooner, when the integration closes them.
+  const sweepWorktrees = () => sweepIdleWorktrees({ dbCall, idleDays: Number(loadSettings().worktreeIdleDays) || 7 })
+    .then(r => { if (r.removed) console.error(`[workers] removed ${r.removed} idle worktree(s)`) })
+    .catch(err => console.error(`[workers] worktree sweep failed: ${err.message}`))
+  setTimeout(sweepWorktrees, 10 * 60_000)
+  setInterval(sweepWorktrees, 6 * 60 * 60_000)
   setTimeout(() => runDueHeartbeats({ dbCall }).catch(() => {}), 5_000)
   setInterval(() => runDueHeartbeats({ dbCall }).catch(() => {}), 60_000)
 }
@@ -790,6 +799,30 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       continue
     }
 
+    // Where the agent actually runs. getQueuedJobs decided whether this job gets its task's own
+    // worktree (and keyed it per task accordingly), so that decision is followed here even if
+    // agent.config changed since the last scan — the key and the checkout must agree. Everything
+    // that identifies the job (agent.config, .flightdeskrc, agent_path) still comes from the folder.
+    let runCwd = job.agent_path
+    let worktree = null
+    if (job.worktreeTaskRef) {
+      try {
+        let meta = null
+        try { meta = job.external_meta ? JSON.parse(job.external_meta) : null } catch {}
+        worktree = await ensureTaskWorktree({ agentPath: job.agent_path, taskRef: job.worktreeTaskRef, cfg, meta })
+        runCwd = worktree.cwd
+      } catch (err) {
+        // Never fall back to the shared folder: another task may be running there right now.
+        runningJobs--
+        await finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result: `Could not prepare the worktree for task ${job.worktreeTaskRef}: ${err.message} (${job.agent_path})`, sessionId: null, failureKind: 'launch_failed' })
+        continue
+      }
+    }
+    // Recorded for every job, not only worktree ones: a task with a session from a folder run keeps
+    // running in the folder (getQueuedJobs), and this is how that is told apart.
+    try { await dbCall('setAgentJobRunCwd', job.id, runCwd) }
+    catch (err) { console.error(`[workers] failed to record cwd for job ${job.id}: ${err.message}`) }
+
     const shellBin = defaultShell()
     const agentEnv = buildAgentEnv(settings, cfg, shellBin, job.agent_path)
     const memory = resolveAgentMemoryLimits(settings, cfg, { label: job.agent_path })
@@ -840,13 +873,14 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         // same agent land in one batch (they spawn back-to-back without awaiting), so job 1's
         // shell reads job 2's spec. A unique name per job keeps them isolated.
         const specName = `spec-${job.id}.md`
-        const specPath = path.join(job.agent_path, specName)
+        const specPath = path.join(runCwd, specName)
         fs.writeFileSync(specPath, job.prompt, 'utf8')
         specFile = specPath
         values.spec_file = `./${specName}`
       }
       // Reserved names: set after buildAgentEnv so an agent.config `env` entry cannot shadow them.
       Object.assign(agentEnv, templateEnv({ job, values }))
+      if (worktree) agentEnv.QALATRA_WORKTREE = worktree.worktree
       Object.assign(agentEnv, externalEnv(job))
 
       if (isTemplateCommand && argvCommand) {
@@ -857,11 +891,11 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         bin = argv[0]
         spawnArgs = argv.slice(1)
         proc = process.platform === 'win32'
-          ? spawn(bin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
+          ? spawn(bin, spawnArgs, { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
           : (() => {
             const launched = withLauncher(shellBin, loginShellArgv(bin, spawnArgs), job.id, memory)
             scopeUnit = launched.scopeUnit
-            return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
+            return spawn(launched.command, launched.args, { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
           })()
       } else if (isTemplateCommand) {
         resolvedCommand = agentCommand
@@ -873,11 +907,11 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         bin = shellBin
         spawnArgs = ['-i', '-l', '-c', resolvedCommand]
         proc = process.platform === 'win32'
-          ? spawn('cmd.exe', ['/c', resolvedCommand], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
+          ? spawn('cmd.exe', ['/c', resolvedCommand], { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
           : (() => {
             const launched = withLauncher(shellBin, spawnArgs, job.id, memory)
             scopeUnit = launched.scopeUnit
-            return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
+            return spawn(launched.command, launched.args, { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
           })()
       } else {
         const parts = argvCommand ? agentCommand : agentCommand.trim().split(/\s+/)
@@ -900,7 +934,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
           onWarn: message => console.error(`[workers] job ${job.id} (${runtimeName || DEFAULT_RUNTIME}): ${message}`),
         })
         proc = process.platform === 'win32'
-          ? spawn(bin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], shell: true, env: agentEnv })
+          ? spawn(bin, spawnArgs, { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], shell: true, env: agentEnv })
           : (() => {
             // The -c '"$0" "$@"' bin ...args structure must survive intact — the args are
             // deliberately not re-parsed by the shell — so the launcher wraps the whole shell
@@ -908,7 +942,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
             // agent's own, so launch diagnostics keep reporting the agent, not systemd-run.
             const launched = withLauncher(shellBin, loginShellArgv(bin, spawnArgs), job.id, memory)
             scopeUnit = launched.scopeUnit
-            return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
+            return spawn(launched.command, launched.args, { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
           })()
       }
     } catch (spawnErr) {
@@ -917,7 +951,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${spawnErr.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName, memory },
+        { cwd: runCwd, agentPath: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName, memory },
       )
       await finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null, failureKind: 'launch_failed' })
       continue
@@ -1003,7 +1037,8 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       }
       if (status === 'failed') {
         result = appendLaunchDiagnostics(result, {
-          cwd: job.agent_path,
+          cwd: runCwd,
+          agentPath: job.agent_path,
           shellBin,
           env: agentEnv,
           agentCommand,
@@ -1034,7 +1069,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName, memory },
+        { cwd: runCwd, agentPath: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName, memory },
       )
       finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null, failureKind: 'launch_failed' })
         .catch(err => console.error(`[workers] agent error handler failed for job ${job.id}: ${err.message}`))

@@ -69,7 +69,15 @@ were running when the server restarted are reported `FAILED / orphaned` at boot.
 Rules the poller follows: dedupe by dispatch id (`agent_jobs.external_ref`, unique); skip requests
 whose task is blocked; consume answers server-side before queuing a `RESUME`; within one batch a
 `RESUME`/`ANSWER` runs before older kinds on the same task. At most one job runs per agent folder
-at a time (`concurrency_key`).
+at a time (`concurrency_key`) — unless the folder sets `"worktrees": true`, in which case each
+FlightDesk task gets its own git worktree and its own key, so different tasks run in parallel and
+one task's dispatches still serialize. The worktree is removed when the bound task closes. Stage
+prompts must be worktree-safe there: `git checkout <base>` fails in a worktree because the main
+tree has the base checked out, so use `git fetch origin <base> && git switch --detach
+origin/<base>` (or create the task branch from `origin/<base>`).
+
+`diagnostics.kind` `oom` (a run killed by its memory limit) is reported to FlightDesk as `error`,
+with the OOM headline leading the text, until FlightDesk's enum accepts it.
 
 ## The bound Qalatra task
 

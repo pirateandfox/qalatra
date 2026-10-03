@@ -319,6 +319,39 @@ that splits `plan/`, `execute/`, `pipeline/` over one checkout gives them the sa
 and only the oldest queued job per key appears in a batch. A backlog landing after a restart
 therefore drains one per key at a time. Covered by `npm run test:job-concurrency`.
 
+**Per-task worktrees (opt-in, `agent.config` `"worktrees": true`).** One key per folder serializes
+a repo's whole FlightDesk workload behind itself (on drift, four dispatches queued together started
+90–303 minutes later). With the opt-in, a job carrying a task identity (`external_meta.task_ref`)
+runs in its own checkout at `<repo-root>/.qalatra-worktrees/<task_ref>/<same subfolder>` and is keyed
+`<folder key>#<task_ref>`: different tasks run in parallel up to `MAX_CONCURRENT_JOBS`, one task's
+jobs still serialize. `server/worktrees.js` owns it:
+
+- Created on the task's first job with `git fetch origin <base>` + `git worktree add --detach …
+  origin/<base>` (detached: the main tree has the base checked out). Base = dispatch
+  `external_meta.base_branch` → `agent.config` `worktree_base` → `agents/pipeline-config.md`
+  `base_branch` → `origin/HEAD`; never hardcoded. Lock collisions on the shared `.git` retry briefly.
+  `/.qalatra-worktrees/` goes into `.git/info/exclude`. `worktree_copy: [".env", …]` copies declared
+  untracked files (repo-relative) on creation.
+- Reused as is afterwards — the path is stable per task because Claude keys sessions by cwd.
+- Only the spawn cwd moves. `agent_path` stays the bound folder; `agent.config` and `.flightdeskrc`
+  (untracked, never in a worktree) are read from there, so identity never falls back to
+  `~/.flightdeskrc`. `agent_jobs.run_cwd` records where each job ran; `QALATRA_WORKTREE` is set.
+- Any failure to prepare it fails the job as `launch_failed`. It never falls back to the shared
+  folder — two jobs in one tree is what this prevents.
+- Exceptions that keep the folder key and folder cwd: jobs without a task ref (heartbeats, manual
+  runs), and a task that already has a session from a run in the folder (`run_cwd` NULL or the
+  folder) — it could not resume from a new cwd, so it finishes where it started.
+- Removed (`git worktree remove --force` + `prune`) when the FlightDesk integration closes the task,
+  and by a 6-hourly sweep after `worktreeIdleDays` (setting, default 7) with no job. Never while a
+  job for that task is queued or running; creation and removal share a per-worktree lock.
+- The agent scan skips `.qalatra-worktrees`. `folderHasRunningJob` stays on the base key (a
+  session op names a session, not a task). Folders of one repo that opt in must share a
+  `concurrency_key`, as they already must when they share the checkout — worktrees are per repo +
+  task, not per folder.
+- Each worktree needs its own `node_modules` (first install per task costs minutes and memory), and
+  N parallel runs need N × the per-run memory inside `qalatra-agents.slice`.
+  Covered by `npm run test:worktrees` and `npm run test:job-concurrency`.
+
 **Adding a runtime:** implement `buildArgs({ baseArgs, prompt, resumeMessage, resumeId, stream,
 onWarn })` and `createConsumer({ stream }) -> { push(chunk), finish() -> { result, sessionId } }`,
 then register it in `RUNTIMES`. Use the shared `createNdjsonConsumer` helper for a JSONL CLI — it

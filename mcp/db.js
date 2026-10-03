@@ -267,6 +267,9 @@ function initSchema(db) {
   }
   // Which CLI adapter ran the job (claude | codex | raw). Mirrors db-worker.js: either process may
   // open the database first, so both must be able to create the column. (Server owns the writes.)
+  if (!agentJobCols.includes('run_cwd')) {
+    db.exec(`ALTER TABLE agent_jobs ADD COLUMN run_cwd TEXT`);
+  }
   if (!agentJobCols.includes('runtime')) {
     db.exec(`ALTER TABLE agent_jobs ADD COLUMN runtime TEXT`);
   }

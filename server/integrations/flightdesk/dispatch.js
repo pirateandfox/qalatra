@@ -17,6 +17,7 @@ import fs from 'fs'
 import path from 'path'
 import { isTransitionRejection, FlightDeskAuthError } from './client.js'
 import { SESSION_OPS, BridgeUnavailableError, UnknownSessionError } from '../../session-ops.js'
+import { removeTaskWorktree } from '../../worktrees.js'
 
 export const ORCHESTRATOR = 'flightdesk'
 export const RESULT_TAIL_CHARS = 8192
@@ -267,7 +268,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
    * alone — the same task gets a build after its plan and a closeout after its merge. Nothing is
    * written back to FlightDesk; it already knows.
    */
-  async function closeIfFinished(client, { taskId, ref }) {
+  async function closeIfFinished(client, { taskId, ref, agentPath = null }) {
     if (!taskId || !ref) return { closed: false, reason: 'unbound' }
     const fdTask = await client.getTask(ref)
     const why = !fdTask ? 'no longer exists'
@@ -275,7 +276,15 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
       : fdTask.phase === 'DONE' ? 'is DONE'
       : null
     if (!why) return { closed: false, reason: 'flightdesk_open', phase: fdTask.phase }
-    return dbCall('closeOrchestratedTask', taskId, `Closed: FlightDesk task ${ref} ${why}; no pending jobs.`)
+    const closed = await dbCall('closeOrchestratedTask', taskId, `Closed: FlightDesk task ${ref} ${why}; no pending jobs.`)
+    // The task's per-task worktree (agent.config `worktrees: true`) has nothing left to run.
+    // removeTaskWorktree re-checks for queued/running jobs under the worktree lock, and is a no-op
+    // for folders that never made one.
+    if (closed?.closed && agentPath) {
+      try { await removeTaskWorktree({ dbCall, agentPath, taskRef: ref, log }) }
+      catch (err) { log.error(`[flightdesk] worktree cleanup for FlightDesk task ${ref} failed: ${err.message}`) }
+    }
+    return closed
   }
 
   /** Periodic pass over every open FlightDesk-bound task, so ones finished by a human or another box close too. */
@@ -288,7 +297,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
       if (!client) continue
       summary.checked++
       try {
-        const r = await closeIfFinished(client, { taskId: task.id, ref: task.orchestrator_ref })
+        const r = await closeIfFinished(client, { taskId: task.id, ref: task.orchestrator_ref, agentPath: task.agent_path })
         if (r?.closed) summary.closed++
       } catch (err) {
         summary.errors++
@@ -482,7 +491,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
         { qalatraJobId: job.id, ...finishExtras({ status, result, sessionId, diagnostics }) })
     } finally {
       // A closeout that just reported DONE is usually the last job this task will get.
-      try { await closeIfFinished(client, { taskId: job.task_id, ref: meta.task_ref }) }
+      try { await closeIfFinished(client, { taskId: job.task_id, ref: meta.task_ref, agentPath: job.agent_path }) }
       catch (err) { log.error(`[flightdesk] close check after job ${job.id} failed: ${err.message}`) }
     }
   }

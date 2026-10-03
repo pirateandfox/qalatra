@@ -285,6 +285,12 @@ function migrate() {
   // Jobs that share a concurrency key never run at the same time (see getQueuedJobs). NULL means
   // the agent folder itself is the key, so an agent with no config opt-in is serialized per folder.
   tryAlter('ALTER TABLE agents ADD COLUMN concurrency_key TEXT')
+  // agent.config `worktrees: true`: a job carrying a task identity (external_meta.task_ref) runs in
+  // its own per-task git worktree, so its concurrency key gains the task (see jobConcurrencyKeySql).
+  tryAlter('ALTER TABLE agents ADD COLUMN worktrees INTEGER NOT NULL DEFAULT 0')
+  // The directory a job was actually spawned in. agent_path stays the bound folder (identity, rc,
+  // scans); run_cwd differs from it only for a worktree job. NULL on jobs from before this column.
+  tryAlter('ALTER TABLE agent_jobs ADD COLUMN run_cwd TEXT')
   // External orchestration (generic — FlightDesk is the first consumer, see server/integrations/):
   // a job queued by an outside system carries that system's request id in external_ref so a
   // re-delivered request maps to the same job instead of a second one; external_meta is the
@@ -1017,13 +1023,13 @@ function updateProject(name, fields) {
 }
 function upsertAgents(agents) {
   const upsert = db.prepare(`
-    INSERT INTO agents (path, name, context, project, description, command, coding, relative_path, folder, concurrency_key, last_seen)
-    VALUES (@path, @name, @context, @project, @description, @command, @coding, @relative_path, @folder, @concurrency_key, datetime('now'))
+    INSERT INTO agents (path, name, context, project, description, command, coding, relative_path, folder, concurrency_key, worktrees, last_seen)
+    VALUES (@path, @name, @context, @project, @description, @command, @coding, @relative_path, @folder, @concurrency_key, @worktrees, datetime('now'))
     ON CONFLICT(path) DO UPDATE SET
       name = excluded.name, context = excluded.context, project = excluded.project,
       description = excluded.description, command = excluded.command, coding = excluded.coding,
       relative_path = excluded.relative_path, folder = excluded.folder,
-      concurrency_key = excluded.concurrency_key, last_seen = excluded.last_seen
+      concurrency_key = excluded.concurrency_key, worktrees = excluded.worktrees, last_seen = excluded.last_seen
   `)
   const run = db.transaction(list => { for (const a of list) upsert.run(a) })
   run(agents.map(a => ({
@@ -1031,6 +1037,7 @@ function upsertAgents(agents) {
     description: a.description ?? null, command: a.command ?? null,
     coding: a.coding ? 1 : 0, relative_path: a.relativePath ?? null, folder: a.folder ?? null,
     concurrency_key: a.concurrencyKey ?? null,
+    worktrees: a.worktrees ? 1 : 0,
   })))
   upsertScannedCapabilities(db, agents)
   return { ok: true, count: agents.length }
@@ -1174,19 +1181,43 @@ function createAgentJob(taskId, userMessage) {
 // batch only the oldest queued job per key is returned, and none while a running job holds it.
 // Ties on created_at (second resolution) break on rowid so two jobs queued in the same second
 // still serialize.
+//
+// A folder with `worktrees: true` gives each task its own checkout instead, so a job that carries a
+// task identity (external_meta.task_ref) is keyed `<folder key>#<task_ref>`: different tasks run in
+// parallel up to MAX_CONCURRENT_JOBS, one task's jobs still run one at a time. Two exceptions keep
+// the folder key and the folder cwd: a job with no task identity (heartbeat, manual run), and a
+// task that already has a session from a run in the folder itself. Claude keys sessions by cwd, so
+// that task could not resume from a worktree; it finishes where it started.
+const JOB_TASK_REF_SQL = `CASE WHEN json_valid(j.external_meta) THEN json_extract(j.external_meta, '$.task_ref') END`
+const JOB_BASE_KEY_SQL = `COALESCE(a.concurrency_key, j.agent_path)`
+const JOB_USES_WORKTREE_SQL = `(
+  COALESCE(a.worktrees, 0) = 1 AND j.task_id IS NOT NULL AND ${JOB_TASK_REF_SQL} IS NOT NULL AND ${JOB_TASK_REF_SQL} != ''
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_jobs p
+    WHERE p.task_id = j.task_id AND p.id != j.id AND p.session_id IS NOT NULL
+      AND (p.run_cwd IS NULL OR p.run_cwd = p.agent_path)
+  )
+)`
 function getQueuedJobs(limit) {
   const jobs = db.prepare(`
-    WITH keyed AS (
-      SELECT j.rowid AS rid, j.*, COALESCE(a.concurrency_key, j.agent_path) AS ckey
+    WITH base AS (
+      SELECT j.rowid AS rid, j.*, ${JOB_BASE_KEY_SQL} AS base_ckey,
+        ${JOB_USES_WORKTREE_SQL} AS use_worktree, ${JOB_TASK_REF_SQL} AS worktree_task_ref
       FROM agent_jobs j LEFT JOIN agents a ON a.path = j.agent_path
       WHERE j.status IN ('queued', 'running')
+    ),
+    keyed AS (
+      SELECT *, base_ckey || CASE WHEN use_worktree THEN '#' || worktree_task_ref ELSE '' END AS ckey FROM base
     )
     SELECT * FROM keyed q
     WHERE q.status = 'queued'
       AND NOT EXISTS (SELECT 1 FROM keyed r WHERE r.status = 'running' AND r.ckey = q.ckey)
       AND q.rid = (SELECT rid FROM keyed f WHERE f.status = 'queued' AND f.ckey = q.ckey ORDER BY f.created_at ASC, f.rid ASC LIMIT 1)
     ORDER BY q.created_at ASC, q.rid ASC LIMIT ?
-  `).all(limit).map(({ rid, ckey, ...job }) => job)
+  `).all(limit).map(({ rid, ckey, base_ckey, use_worktree, worktree_task_ref, ...job }) => ({
+    ...job,
+    worktreeTaskRef: use_worktree ? worktree_task_ref : null,
+  }))
   return jobs.map(job => {
     const task = job.task_id ? db.prepare('SELECT agent_resume FROM tasks WHERE id = ?').get(job.task_id) : null
     const canResume = task?.agent_resume !== 0 && job.resume_session !== 0
@@ -1284,14 +1315,37 @@ function getExternalOp(externalRef) {
 }
 // Whether anything is running under this folder's concurrency key (see getQueuedJobs). A code-
 // shaped session operation must wait while an agent turn holds the folder, since that agent may
-// be mid-inject itself.
+// be mid-inject itself. Deliberately the *base* key: an op names a session, not a task, so with
+// worktrees on a running job for any task in the folder still counts.
 function folderHasRunningJob(agentPath) {
   const row = db.prepare(`
     WITH me AS (SELECT COALESCE((SELECT concurrency_key FROM agents WHERE path = @path), @path) AS ckey)
     SELECT 1 AS busy FROM agent_jobs j LEFT JOIN agents a ON a.path = j.agent_path, me
-    WHERE j.status = 'running' AND COALESCE(a.concurrency_key, j.agent_path) = me.ckey LIMIT 1
+    WHERE j.status = 'running' AND ${JOB_BASE_KEY_SQL} = me.ckey LIMIT 1
   `).get({ path: agentPath })
   return Boolean(row?.busy)
+}
+function setAgentJobRunCwd(id, cwd) {
+  db.prepare('UPDATE agent_jobs SET run_cwd = ? WHERE id = ?').run(cwd, id)
+  return { ok: true }
+}
+// Inputs to worktree cleanup: which task refs still have a queued or running job (a worktree is
+// never removed under one), and when a worktree last ran anything.
+function listActiveTaskRefs() {
+  return db.prepare(`
+    SELECT DISTINCT j.agent_path, ${JOB_TASK_REF_SQL} AS task_ref
+    FROM agent_jobs j WHERE j.status IN ('queued', 'running') AND ${JOB_TASK_REF_SQL} IS NOT NULL
+  `).all()
+}
+function lastJobActivityUnder(cwd) {
+  const row = db.prepare(`
+    SELECT MAX(COALESCE(completed_at, started_at, created_at)) AS last
+    FROM agent_jobs WHERE run_cwd = @cwd OR run_cwd LIKE @prefix ESCAPE '\\'
+  `).get({ cwd, prefix: `${cwd.replace(/[\\%_]/g, m => `\\${m}`)}/%` })
+  return row?.last ?? null
+}
+function listWorktreeAgents() {
+  return db.prepare('SELECT path, concurrency_key FROM agents WHERE worktrees = 1').all()
 }
 function startAgentJob(id) {
   // Atomic claim (bug C6): only transition a job that is still 'queued'. If another worker/
@@ -1511,6 +1565,7 @@ const METHODS = {
   resetStuckJobs, getAutorunTasks, insertAutorunJob,
   queueExternalJob, getAgentJobByExternalRef, findTaskByOrchestratorRef, bindTaskOrchestrator, listOpenOrchestratedTasks, closeOrchestratedTask,
   recordExternalOp, getExternalOp, folderHasRunningJob,
+  setAgentJobRunCwd, listActiveTaskRefs, lastJobActivityUnder, listWorktreeAgents,
   listHeartbeats, createHeartbeat, updateHeartbeat, deleteHeartbeat, toggleHeartbeat,
   getDueHeartbeats, markHeartbeatRun, createHeartbeatJob, listHeartbeatJobs,
 }

@@ -35,6 +35,7 @@
     "test:mcp-telemetry": "node scripts/test-mcp-telemetry.mjs",
     "test:ai-context-cap": "node scripts/test-ai-context-cap.mjs",
     "test:mcp-lifecycle": "node scripts/test-mcp-lifecycle.mjs",
+    "test:worktrees": "node scripts/test-worktrees.mjs",
     "test:job-concurrency": "ELECTRON_RUN_AS_NODE=1 electron scripts/test-job-concurrency.mjs",
     "test:flightdesk-dispatch": "ELECTRON_RUN_AS_NODE=1 electron scripts/test-flightdesk-dispatch.mjs",
     "test:session-ops": "node --test scripts/test-session-ops.mjs",

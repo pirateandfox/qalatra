@@ -328,6 +328,11 @@ Put execution details in the normal agent fields:
 - `concurrency_key` — jobs sharing a key never run at the same time; defaults to the agent
   folder. Set the same key in every folder that works on one checkout (`plan/`, `execute/`,
   `pipeline/` under a repo).
+- `worktrees` — `true` runs each task-bound job (`external_meta.task_ref`, e.g. a FlightDesk
+  dispatch) in its own git worktree under `<repo>/.qalatra-worktrees/<task>`, so different tasks
+  in one folder run in parallel. `worktree_base` overrides the base branch (default: the repo's
+  `agents/pipeline-config.md` `base_branch`, then `origin/HEAD`); `worktree_copy` lists untracked
+  repo-relative files (`.env`) to copy into a new worktree. See AGENTS.md "Per-task worktrees".
 - `memory_high` / `memory_max` — per-run cgroup limits on Linux/systemd hosts, in systemd size
   syntax (`"2G"`, `"3072M"`). Default `1G`/`2G`, or the box's `agentMemoryHigh`/`agentMemoryMax`
   settings. Invalid values or `memory_max` below `memory_high` are logged and ignored.

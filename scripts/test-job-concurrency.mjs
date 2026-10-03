@@ -111,6 +111,83 @@ try {
   batch = await call('getQueuedJobs', 10)
   const a3row = batch.find(j => j.id === a3.id)
   check('prevSessionId still resolved per task', a3row?.prevSessionId, 'sess-a2')
+
+  // ── Per-task worktrees (agent.config `worktrees: true`) ──────────────────────────────────────
+  // A job with a task identity (external_meta.task_ref) in an opted-in folder is keyed
+  // `<folder key>#<task_ref>`, so different tasks run side by side and one task's jobs still
+  // serialize. Everything else keeps the folder key.
+  await call('upsertAgents', [
+    { path: '/agents/wt', name: 'wt', worktrees: true },
+    { path: '/agents/nowt', name: 'nowt' },
+  ])
+  const only = (batch, prefix) => ids(batch.filter(j => j.agent_path.startsWith(prefix)))
+  const ext = async (agentPath, ref, taskId = null) => {
+    const task = taskId ? { id: taskId } : await call('createTask', { title: `task ${ref}`, agent_path: agentPath, context: 'internal' })
+    const job = await call('queueExternalJob', {
+      task_id: task.id, agent_path: agentPath, prompt: `work ${ref}`,
+      external_meta: { orchestrator: 'flightdesk', task_ref: ref, agent_path: agentPath },
+    })
+    return { taskId: task.id, id: job.id }
+  }
+
+  const w1a = await ext('/agents/wt', 'fd-1')
+  const w1b = await ext('/agents/wt', 'fd-1', w1a.taskId)
+  const w2 = await ext('/agents/wt', 'fd-2')
+  batch = await call('getQueuedJobs', 10)
+  check('worktrees: two task refs in one folder are offered together', only(batch, '/agents/wt'), ids([w1a, w2]))
+  check('worktrees: the job carries its task ref', batch.find(j => j.id === w1a.id)?.worktreeTaskRef, 'fd-1')
+
+  await call('startAgentJob', w1a.id)
+  batch = await call('getQueuedJobs', 10)
+  check('worktrees: same task ref waits while its job runs', only(batch, '/agents/wt'), ids([w2]))
+  await call('startAgentJob', w2.id)
+  batch = await call('getQueuedJobs', 10)
+  check('worktrees: both tasks running → nothing more for either', only(batch, '/agents/wt'), [])
+
+  // A job without a task identity in the same folder uses the folder key and the folder itself,
+  // so it is not blocked by the worktree jobs — and two of them still serialize.
+  const plain1 = await mk('p1', '/agents/wt', 'plain 1')
+  const plain2 = await mk('p2', '/agents/wt', 'plain 2')
+  batch = await call('getQueuedJobs', 10)
+  check('worktrees: a job without a task ref uses the folder key', only(batch, '/agents/wt'), ids([plain1]))
+  check('worktrees: …and runs in the folder', batch.find(j => j.id === plain1.id)?.worktreeTaskRef, null)
+  void plain2
+
+  // Folder without the opt-in: unchanged, one per folder even across task refs.
+  const n1 = await ext('/agents/nowt', 'fd-10')
+  const n2 = await ext('/agents/nowt', 'fd-11')
+  batch = await call('getQueuedJobs', 10)
+  check('no worktrees: one per folder across task refs', only(batch, '/agents/nowt'), ids([n1]))
+  check('no worktrees: no task ref handed to the worker', batch.find(j => j.id === n1.id)?.worktreeTaskRef, null)
+  void n2
+
+  // A task that already has a session from a run in the folder itself keeps running there under
+  // the folder key: Claude keys sessions by cwd, so a worktree could not resume it.
+  await call('finishAgentJob', w1a.id, 'done', 'ok', 'sess-w1a')
+  await call('setAgentJobRunCwd', w1a.id, '/repo/.qalatra-worktrees/fd-1/agents/wt')
+  const legacy = await ext('/agents/wt', 'fd-legacy')
+  await call('startAgentJob', legacy.id)
+  await call('setAgentJobRunCwd', legacy.id, '/agents/wt')
+  await call('finishAgentJob', legacy.id, 'done', 'ok', 'sess-legacy')
+  const legacy2 = await ext('/agents/wt', 'fd-legacy', legacy.taskId)
+  const preColumn = await ext('/agents/wt', 'fd-old')
+  await call('startAgentJob', preColumn.id)
+  await call('finishAgentJob', preColumn.id, 'done', 'ok', 'sess-old') // run_cwd NULL: pre-dates the column
+  const preColumn2 = await ext('/agents/wt', 'fd-old', preColumn.taskId)
+  await call('startAgentJob', plain1.id)
+  batch = await call('getQueuedJobs', 10)
+  check('worktrees: a worktree session keeps the task in its worktree', batch.find(j => j.id === w1b.id)?.worktreeTaskRef, 'fd-1')
+  check('worktrees: resume still finds the worktree session', batch.find(j => j.id === w1b.id)?.prevSessionId, 'sess-w1a')
+  check('worktrees: folder-session tasks wait on the folder key', only(batch, '/agents/wt'), ids([w1b]))
+  await call('finishAgentJob', plain1.id, 'done', 'ok', null)
+  await call('startAgentJob', plain2.id)
+  await call('finishAgentJob', plain2.id, 'done', 'ok', null)
+  batch = await call('getQueuedJobs', 10)
+  const legacyRow = batch.find(j => j.id === legacy2.id) ?? batch.find(j => j.id === preColumn2.id)
+  check('worktrees: a folder-session task is offered once the folder is free', Boolean(legacyRow), true)
+  check('worktrees: …and runs in the folder, not a worktree', legacyRow?.worktreeTaskRef, null)
+  check('worktrees: folder-session tasks serialize with each other on the folder key',
+    only(batch, '/agents/wt').filter(id => id === legacy2.id || id === preColumn2.id).length, 1)
 } catch (err) {
   failures++
   console.log(`FAIL  ${err.stack || err}`)

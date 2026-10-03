@@ -29,6 +29,7 @@ export async function scanAgents(root, excludeFolders = []) {
           command: Array.isArray(cfg.command) ? JSON.stringify(cfg.command) : (cfg.command || null),
           coding: !!cfg.coding,
           concurrencyKey: typeof cfg.concurrency_key === 'string' && cfg.concurrency_key.trim() ? cfg.concurrency_key.trim() : null,
+          worktrees: cfg.worktrees === true,
           relativePath: rel,
           folder: topFolder,
         }
@@ -46,7 +47,9 @@ export async function scanAgents(root, excludeFolders = []) {
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
-      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') continue
+      // .qalatra-worktrees holds per-task checkouts of a repo whose agent folders are already
+      // registered from the main tree; scanning them would register every task's copy as an agent.
+      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist' || entry.name === '.qalatra-worktrees') continue
       if (exclude.has(entry.name)) continue
       const child = path.join(dir, entry.name)
       await walk(child, topFolder ?? entry.name)

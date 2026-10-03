@@ -9,7 +9,7 @@ const DEFAULT_LIST_LIMIT = 10;
 const DEFAULT_RESULT_CHARS = 2000;
 
 const AGENT_JOB_LIST_FIELDS = 'id,task_id,status,runtime,created_at,started_at,completed_at,terminated_by,mcp_tool_calls,usage';
-const AGENT_JOB_DETAIL_FIELDS = 'id,task_id,status,runtime,result,session_id,created_at,started_at,completed_at,terminated_by,terminated_boundary,mcp_tool_calls,usage';
+const AGENT_JOB_DETAIL_FIELDS = 'id,task_id,status,runtime,result,session_id,run_cwd,created_at,started_at,completed_at,terminated_by,terminated_boundary,mcp_tool_calls,usage';
 
 function withUsage(rows) {
   const convert = row => {
