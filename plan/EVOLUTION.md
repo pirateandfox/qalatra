@@ -1,5 +1,18 @@
 # Qalatra — Evolution Notes
 
+## Release 1.9.55 (2026-10-03)
+
+- Opt-in per-task worktrees, configurable per-agent memory limits with explicit OOM reporting,
+  and dependency updates that clear the new audit advisories (see the entries below).
+
+## Dependency advisories cleared for the release gate (2026-10-03)
+
+- Root: `@electron/get` overridden to ^5.1.0 (drops `got` → `http-cache-semantics`, no patched
+  release); packaging verified with an empty Electron cache. UI: `vite-plugin-singlefile` replaced
+  by `ui/vite-single-file.ts` (byte-identical output; dropped micromatch → braces). Mobile:
+  brace-expansion/markdown-it overrides; braces and node-forge (no patched release, Expo
+  build/CLI only) added to `scripts/audit-mobile.mjs` exceptions.
+
 ## Per-task worktrees for parallel FlightDesk work (2026-10-03)
 
 - Problem: every job in an agent folder shares one key, so a repo's FlightDesk workload ran one
