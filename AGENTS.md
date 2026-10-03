@@ -264,9 +264,22 @@ Linux. macOS, non-systemd Linux and no-user-manager all fall back to the previou
 The watchdog passes that known scope name to `systemctl --user kill --kill-whom=all`, which reaches
 tools even after they leave the agent's process group or the tracked pid disappears. The negative-pid
 kill remains the fallback when no usable systemd user manager exists. Each transient scope also has
-`MemoryHigh=1G`, `MemoryMax=2G`, and `OOMPolicy=kill`: reclaim pressure is charged and throttled at
-the individual run first, while the hard ceiling takes down the complete scope rather than leaving
-siblings behind.
+`MemoryHigh`, `MemoryMax` (default `1G`/`2G`), and `OOMPolicy=kill`: reclaim pressure is charged and
+throttled at the individual run first, while the hard ceiling takes down the complete scope rather
+than leaving siblings behind. A folder that needs more (a pnpm install plus an Nx/vite build) sets
+`memory_high`/`memory_max` in `agent.config`; a box sets `agentMemoryHigh`/`agentMemoryMax` in
+Qalatra settings once for every folder. Values must be systemd sizes (`^\d+(\.\d+)?[KMGT]?$`, max ≥
+high) — anything else is logged and the next layer down is used, so no unvalidated string reaches
+`systemd-run`. Launch diagnostics print the effective pair. **The fleet's slice sizing follows these
+numbers:** slice `MemoryHigh` ≥ 3 × the largest per-scope high, or three parallel runs throttle at
+the slice before any one reaches its own limit.
+
+**An OOM kill is its own reason.** With `memory.oom.group` the kernel takes the agent and every tool
+down together, which used to look like an ordinary `failed` with no error text. At close Qalatra
+reads the scope's `memory.events` (definitive while the cgroup exists) or, if `--collect` already
+removed it, a rise in the slice's hierarchical `oom_kill` counter plus a SIGKILL exit. The job stays
+`failed` but gets `terminated_by = 'oom'`, `failureKind: 'oom'` for orchestrators, and a result line
+naming the limits; like `timed_out`, its session is included in the resume lookup.
 
 **The slice needs limits from the fleet, and the code refuses to run without them.** An unknown
 `--slice=` is auto-created with *no* limits, so using the launcher before the fleet has installed the

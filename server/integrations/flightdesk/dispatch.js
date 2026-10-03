@@ -21,6 +21,8 @@ import { SESSION_OPS, BridgeUnavailableError, UnknownSessionError } from '../../
 export const ORCHESTRATOR = 'flightdesk'
 export const RESULT_TAIL_CHARS = 8192
 export const DIAGNOSTICS_CHARS = 4096
+// The kinds FlightDesk's dispatch status endpoint accepts; anything newer is reported as 'error'.
+const FLIGHTDESK_DIAGNOSTIC_KINDS = new Set(['error', 'timed_out', 'orphaned', 'launch_failed', 'dependency_down'])
 // D11: a human just spoke (RESUME/ANSWER) beats an older assignment on the same task.
 const KIND_PRIORITY = { RESUME: 0, ANSWER: 0 }
 // Kinds handled inline by Qalatra Server rather than as agent jobs (D28). Anything else unknown is
@@ -304,7 +306,14 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
       resumable: Boolean(sessionId),
     }
     const kind = diagnostics?.kind ?? (status === 'done' ? null : 'error')
-    if (kind) extras.diagnostics = { kind, text: tail(text, DIAGNOSTICS_CHARS) }
+    if (kind === 'oom') {
+      // FlightDesk's diagnostics enum has no 'oom' yet, so it travels as 'error' — but the headline
+      // naming the memory limit leads the text, where the tail of a long result would have cut it.
+      const headline = text.split('\n', 1)[0]
+      extras.diagnostics = { kind: 'error', text: `${headline}\n…\n${tail(text, DIAGNOSTICS_CHARS - headline.length - 3)}`.slice(0, DIAGNOSTICS_CHARS) }
+    } else if (kind) {
+      extras.diagnostics = { kind: FLIGHTDESK_DIAGNOSTIC_KINDS.has(kind) ? kind : 'error', text: tail(text, DIAGNOSTICS_CHARS) }
+    }
     return extras
   }
 
@@ -314,7 +323,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
     if (!target) return
     if (target === 'DONE' || target === 'FAILED') {
       const diagnostics = target === 'FAILED'
-        ? { kind: job.status === 'timed_out' ? 'timed_out' : job.status === 'orphaned' ? 'orphaned' : 'error' }
+        ? { kind: job.status === 'timed_out' ? 'timed_out' : job.status === 'orphaned' ? 'orphaned' : job.terminated_by === 'oom' ? 'oom' : 'error' }
         : null
       await advance(client, request, target, { qalatraJobId: job.id, ...finishExtras({ status: job.status, result: job.result, sessionId: job.session_id, diagnostics }) })
     } else {

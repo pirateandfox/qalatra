@@ -143,6 +143,46 @@ function defaultShell() {
 const AGENT_SLICE = 'qalatra-agents.slice'
 const PER_AGENT_MEMORY_HIGH = '1G'
 const PER_AGENT_MEMORY_MAX = '2G'
+export const DEFAULT_AGENT_MEMORY = Object.freeze({ high: PER_AGENT_MEMORY_HIGH, max: PER_AGENT_MEMORY_MAX })
+
+const MEMORY_SIZE = /^\d+(\.\d+)?[KMGT]?$/
+const MEMORY_UNITS = { '': 1, K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4 }
+function memoryBytes(value) {
+  const unit = value.slice(-1)
+  return unit in MEMORY_UNITS && unit !== ''
+    ? Number(value.slice(0, -1)) * MEMORY_UNITS[unit]
+    : Number(value)
+}
+
+/**
+ * Per-scope MemoryHigh/MemoryMax for one job, lowest to highest precedence: the built-in 1G/2G,
+ * the box-wide settings (agentMemoryHigh/agentMemoryMax, set once per host by the fleet), then the
+ * folder's agent.config (memory_high/memory_max). A pnpm install plus an Nx/vite build in a large
+ * monorepo goes past 2G, and OOMPolicy=kill with memory.oom.group then takes the whole agent down
+ * mid-turn, so heavy folders need room the defaults can't give everyone.
+ *
+ * These strings become systemd-run arguments, so each one must match systemd size syntax exactly
+ * and max must not sit below high. Anything else is logged and the layer falls back to the one
+ * beneath it — never passed through.
+ */
+export function resolveAgentMemoryLimits(settings, cfg, { onWarn = console.error, label = 'agent' } = {}) {
+  const layer = (base, high, max, source) => {
+    const next = { ...base }
+    for (const [key, value] of [['high', high], ['max', max]]) {
+      if (value == null || value === '') continue
+      const text = String(value).trim()
+      if (MEMORY_SIZE.test(text)) next[key] = text
+      else onWarn(`[workers] ${label}: ignoring invalid ${source} memory_${key} "${value}" (expected systemd size like 2G or 3072M)`)
+    }
+    if (memoryBytes(next.max) < memoryBytes(next.high)) {
+      onWarn(`[workers] ${label}: ${source} memory_max ${next.max} is below memory_high ${next.high}; using ${base.high}/${base.max}`)
+      return base
+    }
+    return next
+  }
+  const box = layer(DEFAULT_AGENT_MEMORY, settings?.agentMemoryHigh, settings?.agentMemoryMax, 'settings')
+  return layer(box, cfg?.memory_high, cfg?.memory_max, 'agent.config')
+}
 
 let systemdRunProbe = null
 function systemdRunAvailable() {
@@ -173,12 +213,65 @@ function agentSliceIsBounded() {
 }
 
 let lastLauncherState = null
+
+/**
+ * OOM attribution for a per-job scope. A kernel OOM kill inside the scope, with memory.oom.group,
+ * takes the agent and every tool down together and used to surface as a plain `failed` with no
+ * error text. Two reads, because the scope is created with --collect and systemd may already have
+ * removed its cgroup by the time the agent's stdio closes:
+ *  - the scope's own memory.events, which is definitive while the cgroup still exists;
+ *  - otherwise the slice's memory.events, which counts its children's kills hierarchically. A rise
+ *    across this job's lifetime plus the agent dying by SIGKILL is attributed to this job. A slice-
+ *    level OOM also picks a whole oom.group scope as its victim, so that attribution is still right.
+ */
+const CGROUP_ROOT = '/sys/fs/cgroup'
+let agentSliceCgroup = null
+function agentSliceCgroupPath() {
+  if (agentSliceCgroup) return agentSliceCgroup
+  if (process.platform !== 'linux') return null
+  const shown = spawnSync('systemctl', ['--user', 'show', AGENT_SLICE, '-p', 'ControlGroup', '--value'], { encoding: 'utf8', timeout: 5_000 })
+  const cgroup = shown.status === 0 ? String(shown.stdout ?? '').trim() : ''
+  if (cgroup) agentSliceCgroup = path.join(CGROUP_ROOT, cgroup)
+  return agentSliceCgroup
+}
+
+export function parseOomKills(memoryEvents) {
+  const match = /^oom_kill\s+(\d+)\s*$/m.exec(String(memoryEvents ?? ''))
+  return match ? Number(match[1]) : null
+}
+
+function readOomKills(cgroupDir) {
+  if (!cgroupDir) return null
+  try { return parseOomKills(fs.readFileSync(path.join(cgroupDir, 'memory.events'), 'utf8')) }
+  catch { return null }
+}
+
+function oomBaseline(scopeUnit) {
+  if (!scopeUnit) return null
+  return readOomKills(agentSliceCgroupPath())
+}
+
+export function scopeWasOomKilled({ scopeKills, sliceBefore, sliceAfter, signal }) {
+  if (scopeKills != null) return scopeKills > 0
+  return signal === 'SIGKILL' && sliceBefore != null && sliceAfter != null && sliceAfter > sliceBefore
+}
+
+function detectScopeOom(scopeUnit, sliceBefore, signal) {
+  if (!scopeUnit) return false
+  const slice = agentSliceCgroupPath()
+  return scopeWasOomKilled({
+    scopeKills: slice ? readOomKills(path.join(slice, scopeUnit)) : null,
+    sliceBefore,
+    sliceAfter: readOomKills(slice),
+    signal,
+  })
+}
 function agentScopeUnit(jobId) {
   const safeId = String(jobId).replace(/[^A-Za-z0-9_.:-]/g, '-').slice(0, 180)
   return `qalatra-agent-${safeId}.scope`
 }
 
-export function buildSystemdAgentLauncher(jobId) {
+export function buildSystemdAgentLauncher(jobId, memory = DEFAULT_AGENT_MEMORY) {
   const scopeUnit = agentScopeUnit(jobId)
   return {
     scopeUnit,
@@ -190,14 +283,14 @@ export function buildSystemdAgentLauncher(jobId) {
       '--collect',
       `--unit=${scopeUnit}`,
       `--slice=${AGENT_SLICE}`,
-      `--property=MemoryHigh=${PER_AGENT_MEMORY_HIGH}`,
-      `--property=MemoryMax=${PER_AGENT_MEMORY_MAX}`,
+      `--property=MemoryHigh=${memory.high}`,
+      `--property=MemoryMax=${memory.max}`,
       '--property=OOMPolicy=kill',
     ],
   }
 }
 
-function agentLauncher(jobId) {
+function agentLauncher(jobId, memory = DEFAULT_AGENT_MEMORY) {
   let reason = null
   if (!systemdRunAvailable()) reason = 'no systemd user manager'
   else if (!agentSliceIsBounded()) reason = `${AGENT_SLICE} has no memory ceiling — agents stay in the server cgroup, which is at least bounded`
@@ -207,7 +300,7 @@ function agentLauncher(jobId) {
   }
   if (reason) return { args: [], scopeUnit: null }
 
-  return buildSystemdAgentLauncher(jobId)
+  return buildSystemdAgentLauncher(jobId, memory)
 }
 
 /**
@@ -215,8 +308,8 @@ function agentLauncher(jobId) {
  * before spawn, so the watchdog can kill the scope even after the tracked agent pid has disappeared.
  * A per-scope ceiling limits one run independently of its siblings in the shared agent slice.
  */
-function withLauncher(command, args, jobId) {
-  const launcher = agentLauncher(jobId)
+function withLauncher(command, args, jobId, memory) {
+  const launcher = agentLauncher(jobId, memory)
   return launcher.args.length
     ? { command: launcher.args[0], args: [...launcher.args.slice(1), command, ...args], scopeUnit: launcher.scopeUnit }
     : { command, args, scopeUnit: null }
@@ -493,12 +586,13 @@ function commandLookup(shellBin, env, cwd) {
   }
 }
 
-function launchDiagnostics({ cwd, shellBin, env, agentCommand, resolvedCommand, commandMode, runtimeName }) {
+function launchDiagnostics({ cwd, shellBin, env, agentCommand, resolvedCommand, commandMode, runtimeName, memory, agentPath }) {
   const home = env.HOME || os.homedir()
   const markers = presentEnvMarkers(env)
   const lines = [
     'Launch diagnostics (sanitized):',
     `- cwd: ${cwd}`,
+    ...(agentPath && agentPath !== cwd ? [`- agent folder: ${agentPath}`] : []),
     `- user: ${env.USER || env.LOGNAME || '(unset)'}`,
     `- uid: ${process.getuid ? process.getuid() : '(n/a)'}`,
     `- home: ${home}`,
@@ -507,7 +601,8 @@ function launchDiagnostics({ cwd, shellBin, env, agentCommand, resolvedCommand, 
     `- runtime: ${runtimeName || DEFAULT_RUNTIME}`,
     // Whether the run was placed in its own cgroup slice. If this says "none", agents share the
     // server's cgroup and one runaway can still throttle the MCP endpoint.
-    `- launcher: ${launcherDescription()}`,
+    `- launcher: ${launcherDescription(memory)}`,
+    `- memory per run: MemoryHigh=${memory?.high ?? PER_AGENT_MEMORY_HIGH} MemoryMax=${memory?.max ?? PER_AGENT_MEMORY_MAX} (memory_high/memory_max in agent.config)`,
     ...commandDiagnosticLines(agentCommand, resolvedCommand),
     `- PATH: ${env.PATH || '(unset)'}`,
   ]
@@ -530,8 +625,8 @@ function launchDiagnostics({ cwd, shellBin, env, agentCommand, resolvedCommand, 
   return lines.join('\n')
 }
 
-function launcherDescription() {
-  const launcher = agentLauncher('<job-id>')
+function launcherDescription(memory) {
+  const launcher = agentLauncher('<job-id>', memory)
   return launcher.args.length ? launcher.args.join(' ') : `none (agents share the server cgroup; ${AGENT_SLICE} not installed or unbounded)`
 }
 
@@ -697,6 +792,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
 
     const shellBin = defaultShell()
     const agentEnv = buildAgentEnv(settings, cfg, shellBin, job.agent_path)
+    const memory = resolveAgentMemoryLimits(settings, cfg, { label: job.agent_path })
     const argvCommand = isArgvCommand(agentCommand)
     const isTemplateCommand = commandHasPlaceholder(agentCommand)
     const commandMode = isTemplateCommand ? (argvCommand ? 'template (argv)' : 'template (shell)') : 'prompt'
@@ -763,7 +859,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         proc = process.platform === 'win32'
           ? spawn(bin, spawnArgs, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
           : (() => {
-            const launched = withLauncher(shellBin, loginShellArgv(bin, spawnArgs), job.id)
+            const launched = withLauncher(shellBin, loginShellArgv(bin, spawnArgs), job.id, memory)
             scopeUnit = launched.scopeUnit
             return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
           })()
@@ -779,7 +875,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         proc = process.platform === 'win32'
           ? spawn('cmd.exe', ['/c', resolvedCommand], { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
           : (() => {
-            const launched = withLauncher(shellBin, spawnArgs, job.id)
+            const launched = withLauncher(shellBin, spawnArgs, job.id, memory)
             scopeUnit = launched.scopeUnit
             return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
           })()
@@ -810,7 +906,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
             // deliberately not re-parsed by the shell — so the launcher wraps the whole shell
             // invocation rather than being folded into the -c payload. bin/spawnArgs stay the
             // agent's own, so launch diagnostics keep reporting the agent, not systemd-run.
-            const launched = withLauncher(shellBin, loginShellArgv(bin, spawnArgs), job.id)
+            const launched = withLauncher(shellBin, loginShellArgv(bin, spawnArgs), job.id, memory)
             scopeUnit = launched.scopeUnit
             return spawn(launched.command, launched.args, { cwd: job.agent_path, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
           })()
@@ -821,13 +917,14 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${spawnErr.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName },
+        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName, memory },
       )
       await finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null, failureKind: 'launch_failed' })
       continue
     }
 
     const runHandle = { proc, scopeUnit }
+    const sliceOomBefore = oomBaseline(scopeUnit)
     runningAgentProcs.add(runHandle)
     // The process is up: this is the moment an orchestrator should see RUNNING.
     void runJobHooks('started', { job })
@@ -864,11 +961,13 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
     }
     bumpIdle = () => watchdog?.activity()
 
-    proc.on('close', code => {
+    proc.on('close', (code, signal) => {
       if (settled) return
       settled = true
       const timeoutKind = watchdog?.timeoutKind ?? null
       watchdog?.cancel()
+      // Before the reap below: the scope's own memory.events is only readable while it exists.
+      const oomKilled = !timeoutKind && !watchdogArmError && detectScopeOom(scopeUnit, sliceOomBefore, signal)
       // The tracked command can exit while a daemonized tool remains in the scope with closed
       // stdio. Reap any such remainder on every terminal path, not only when the watchdog fired.
       if (scopeUnit) killProcessTree(runHandle)
@@ -889,6 +988,10 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
         : `Agent timed out after ${timeoutMinutes} minutes (set timeout_minutes in agent.config to raise it).`
       if (watchdogArmError) {
         result = `${watchdogArmError}\n\nThe agent was stopped rather than allowed to run without its configured timeout.${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
+      } else if (oomKilled) {
+        const partial = result ? `\n\nPartial output before the kill:\n${result}` : ''
+        const resumable = sessionId ? `\n\nSession ${sessionId} is resumable — send a follow-up message on this task to continue it.` : ''
+        result = `Agent killed by the kernel OOM killer: the run exceeded its memory limit (MemoryHigh=${memory.high} MemoryMax=${memory.max}), and the whole run was stopped together. Raise memory_high/memory_max in agent.config, and keep the fleet's qalatra-agents.slice sized to match.${resumable}${partial}${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
       } else if (timeoutKind) {
         const partial = result ? `\n\nPartial output before the kill:\n${result}` : ''
         const resumable = sessionId ? `\n\nSession ${sessionId} is resumable — send a follow-up message on this task to continue it.` : ''
@@ -907,10 +1010,16 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
           resolvedCommand,
           commandMode,
           runtimeName,
+          memory,
         })
       }
 
-      finishAgentJobSafely({ dbCall, notify, job, status, result, sessionId, terminatedBy: timeoutKind ? 'timeout' : null, usage, mcpToolCalls, outputRules: cfg?.output_rules })
+      finishAgentJobSafely({
+        dbCall, notify, job, status, result, sessionId,
+        terminatedBy: timeoutKind ? 'timeout' : (oomKilled ? 'oom' : null),
+        usage, mcpToolCalls, outputRules: cfg?.output_rules,
+        failureKind: oomKilled ? 'oom' : null,
+      })
         .catch(err => console.error(`[workers] agent completion handler failed for job ${job.id}: ${err.message}`))
     })
 
@@ -925,7 +1034,7 @@ async function processAgentJobs({ dbCall, loadSettings, notify }) {
       if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
       const result = appendLaunchDiagnostics(
         `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName },
+        { cwd: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName, memory },
       )
       finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null, failureKind: 'launch_failed' })
         .catch(err => console.error(`[workers] agent error handler failed for job ${job.id}: ${err.message}`))

@@ -328,6 +328,9 @@ Put execution details in the normal agent fields:
 - `concurrency_key` — jobs sharing a key never run at the same time; defaults to the agent
   folder. Set the same key in every folder that works on one checkout (`plan/`, `execute/`,
   `pipeline/` under a repo).
+- `memory_high` / `memory_max` — per-run cgroup limits on Linux/systemd hosts, in systemd size
+  syntax (`"2G"`, `"3072M"`). Default `1G`/`2G`, or the box's `agentMemoryHigh`/`agentMemoryMax`
+  settings. Invalid values or `memory_max` below `memory_high` are logged and ignored.
 - runtime-specific behavior
 - output rules
 

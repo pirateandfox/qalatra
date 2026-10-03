@@ -1,5 +1,19 @@
 # Qalatra — Evolution Notes
 
+## Per-agent memory cap and OOM reporting (2026-10-03)
+
+- Problem: per-run `MemoryHigh=1G`/`MemoryMax=2G` were hardcoded. On drift, 5 kernel OOM kills in
+  14 days hit FlightDesk pipeline runs during pnpm/Nx builds, and each showed up as `failed` with
+  no error text because `memory.oom.group` took the agent down with the build.
+- `agent.config` `memory_high`/`memory_max` and box-wide settings `agentMemoryHigh`/
+  `agentMemoryMax` (folder over box over 1G/2G). Validated against systemd size syntax with max ≥
+  high; invalid input is logged and falls back a layer. Launch diagnostics show the effective pair.
+- OOM kills are detected at close (scope `memory.events`, or slice `oom_kill` rise + SIGKILL when
+  the collected scope is already gone) and recorded as `terminated_by = 'oom'` with
+  `failureKind: 'oom'` and an explicit result line. OOM-killed sessions are resumable.
+- Fleet: slice sizing must follow the per-scope numbers (slice high ≥ 3 × per-scope high).
+  Suggested first value for moceanic-ai `agents/pipeline`: `2G`/`3G`.
+
 ## Release 1.9.54 (2026-09-28)
 
 - SESSION_OP `state` reports forward Claude Bridge 0.1.18 resolved-approval history to

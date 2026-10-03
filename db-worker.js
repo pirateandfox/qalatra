@@ -1191,7 +1191,7 @@ function getQueuedJobs(limit) {
     const task = job.task_id ? db.prepare('SELECT agent_resume FROM tasks WHERE id = ?').get(job.task_id) : null
     const canResume = task?.agent_resume !== 0 && job.resume_session !== 0
     const prev = canResume && job.task_id
-      ? db.prepare(`SELECT session_id FROM agent_jobs WHERE task_id = ? AND session_id IS NOT NULL AND status IN ('done', 'timed_out') ORDER BY completed_at DESC, rowid DESC LIMIT 1`).get(job.task_id)
+      ? db.prepare(`SELECT session_id FROM agent_jobs WHERE task_id = ? AND session_id IS NOT NULL AND (status IN ('done', 'timed_out') OR (status = 'failed' AND terminated_by = 'oom')) ORDER BY completed_at DESC, rowid DESC LIMIT 1`).get(job.task_id)
       : null
     return { ...job, prevSessionId: prev?.session_id ?? null }
   })
