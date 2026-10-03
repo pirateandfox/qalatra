@@ -67,6 +67,7 @@
   "overrides": {
     "shell-quote": "^1.9.0",
     "@hono/node-server": "^2.0.5",
-    "builder-util-runtime": "^9.7.0"
+    "builder-util-runtime": "^9.7.0",
+    "@electron/get": "^5.1.0"
   }
 }

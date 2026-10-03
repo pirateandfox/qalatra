@@ -8,6 +8,15 @@ const allowed = new Map([
   // remote input. Remove when Expo/Metro moves to a patched image-size.
   ['GHSA-w3rx-r6r6-pgpr', { package: 'image-size', why: 'ICNS parser infinite loop in Metro build tooling' }],
   ['GHSA-5p2g-fcmc-qvqq', { package: 'image-size', why: 'JXL/HEIF parser infinite loop in Metro build tooling' }],
+  // No patched braces release exists as of 2026-10-03 (all versions <= 3.0.3). Reached only through
+  // micromatch in Metro's / @expo/metro-file-map's file watcher, matching repository-owned glob
+  // patterns at bundle time — never app input. Remove when braces publishes a fix or Metro drops it.
+  ['GHSA-vfj7-8cjw-p6xm', { package: 'braces', why: 'brace-pattern stack exhaustion in Metro file-watcher build tooling' }],
+  // No patched node-forge release exists as of 2026-10-03 (<= 1.4.0). Used by
+  // @expo/code-signing-certificates in the Expo CLI and expo-updates' `cli/` signing-key commands;
+  // the shipped app verifies update signatures natively and never loads node-forge. Remove when
+  // node-forge publishes a fix.
+  ['GHSA-86w9-cpqp-85rv', { package: 'node-forge', why: 'RSA signature parsing in Expo CLI code-signing tooling, not the app' }],
 ])
 
 const audit = spawnSync('npm', ['audit', '--json', '--prefix', 'mobile'], {

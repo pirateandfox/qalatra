@@ -1,10 +1,10 @@
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
-import { viteSingleFile } from 'vite-plugin-singlefile'
+import { singleFile } from './vite-single-file'
 
 // Builds the touch-scroll test harness as one self-contained HTML for Playwright.
 export default defineConfig({
-  plugins: [viteSingleFile()],
+  plugins: [singleFile()],
   build: {
     outDir: 'dist-harness',
     emptyOutDir: true,
