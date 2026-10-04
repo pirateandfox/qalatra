@@ -1,5 +1,11 @@
 # Qalatra — Evolution Notes
 
+## Release 1.9.56 (2026-10-04)
+
+- Live host concurrency and graceful draining, safe settings PATCH and worker status,
+  and evidence-based OOM diagnostics. Full pre-publish validation passed; drift's rollout
+  uses the companion fleet policy of two jobs within its existing memory ceilings.
+
 ## Live host concurrency and evidence-based OOM reporting (2026-10-04)
 
 - Implements the first-release scope of the fleet memory scheduling change request. Persisted
