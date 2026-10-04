@@ -1,5 +1,24 @@
 # Qalatra — Evolution Notes
 
+## Live host concurrency and evidence-based OOM reporting (2026-10-04)
+
+- Implements the first-release scope of the fleet memory scheduling change request. Persisted
+  `maxConcurrentJobs` defaults to 3; 0 drains, and changes apply without restarting or killing
+  current runs. Validation rejects invalid writes; invalid disk values log and fall back to 3.
+- Serialized admission reserves slots before async claims/worktree preparation, preserving DB
+  key exclusion and queue order. Idempotent release handles claim/setup/terminal failures.
+  `GET /api/v1/settings/worker` exposes policy and admitted count; new settings PATCH merges
+  properties so fleet can manage just its own key. PUT/import retain replacement semantics.
+- OOM diagnostics retain scope/slice limits and local counter deltas while scopes exist. A
+  scoped victim counter confirms OOM but not the limiting cgroup; only correlated unprivileged
+  kernel evidence attributes scope/shared-slice limits. Collected scopes, missing journals and
+  sibling kills remain explicitly uncertain. Removed the unconditional advice to raise the cap.
+  Confirmed OOM status, integration mapping, resumable sessions and partial output are retained.
+- Added scheduler/settings, real process-lifecycle and cgroup-evidence regressions. Fleet has a
+  drift-only policy (2) and running-server capability verification; release/deployment, Linux
+  live checks and 24-hour observation remain rollout work. Memory reservations are deferred.
+  Operator contract and validation details: `docs/agent-memory-scheduling.md`.
+
 ## Release 1.9.55 (2026-10-03)
 
 - Opt-in per-task worktrees, configurable per-agent memory limits with explicit OOM reporting,

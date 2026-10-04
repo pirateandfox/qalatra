@@ -124,6 +124,27 @@ async function main() {
     })
     if (badSettings.status !== 400) throw new Error(`POST settings/import bad json expected 400, got ${badSettings.status}`)
 
+    // The worker policy is authenticated, persisted, validated, and PATCH preserves other keys.
+    const settingsUrl = `http://127.0.0.1:${apiPort}/api/v1/settings`
+    const unauthorizedPolicy = await fetch(settingsUrl, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{"maxConcurrentJobs":0}',
+    })
+    if (unauthorizedPolicy.status !== 401) throw new Error('worker policy write must require authentication')
+    for (const body of [{ smokeKeep: 'preserved' }, { maxConcurrentJobs: 0 }]) {
+      const saved = await fetch(settingsUrl, { method: 'PATCH', headers: authJson, body: JSON.stringify(body) })
+      if (!saved.ok) throw new Error(`settings PATCH failed: ${saved.status}`)
+    }
+    const policy = await fetch(`${settingsUrl}/worker`, { headers: authJson }).then(r => r.json())
+    if (!policy.worker?.paused || policy.worker.maxConcurrentJobs !== 0 || policy.worker.admittedJobs !== 0) {
+      throw new Error('worker status does not reflect the live drain setting')
+    }
+    const persisted = JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'))
+    if (persisted.maxConcurrentJobs !== 0 || persisted.smokeKeep !== 'preserved') throw new Error('settings PATCH lost persisted properties')
+    for (const value of [-1, 0.5, '2', null, true]) {
+      const invalid = await fetch(settingsUrl, { method: 'PUT', headers: authJson, body: JSON.stringify({ maxConcurrentJobs: value }) })
+      if (invalid.status !== 400) throw new Error(`invalid worker limit accepted: ${JSON.stringify(value)}`)
+    }
+
     // Sanity: a valid create still returns 200, and DELETE of a real task is 200 — the latter
     // exercises deleteTask's sync_log path with MCP disabled (bug C19: db-worker must create
     // sync_log itself, else this throws 'no such table').

@@ -228,7 +228,7 @@ buffering (`raw`, `stream: false`) at 5 MB.
 ### Timeouts
 
 - `timeout_minutes` — wall-clock, default **60**. A hung job holds one of only
-  `MAX_CONCURRENT_JOBS` (3) slots for the full window, so raise it deliberately.
+  `maxConcurrentJobs` (default 3) slots for the full window, so raise it deliberately.
 - `idle_timeout_minutes` — **opt-in**, off by default. Kills the job after N minutes with no output
   at all. A wall clock can't tell a productive 50-minute run from one wedged after 90 seconds, but
   streamed output can. Off by default because one long tool call (a full test suite, a big build)
@@ -271,15 +271,17 @@ than leaving siblings behind. A folder that needs more (a pnpm install plus an N
 Qalatra settings once for every folder. Values must be systemd sizes (`^\d+(\.\d+)?[KMGT]?$`, max ≥
 high) — anything else is logged and the next layer down is used, so no unvalidated string reaches
 `systemd-run`. Launch diagnostics print the effective pair. **The fleet's slice sizing follows these
-numbers:** slice `MemoryHigh` ≥ 3 × the largest per-scope high, or three parallel runs throttle at
+numbers:** slice `MemoryHigh` ≥ configured concurrency × the largest per-scope high, or three parallel runs throttle at
 the slice before any one reaches its own limit.
 
-**An OOM kill is its own reason.** With `memory.oom.group` the kernel takes the agent and every tool
-down together, which used to look like an ordinary `failed` with no error text. At close Qalatra
-reads the scope's `memory.events` (definitive while the cgroup exists) or, if `--collect` already
-removed it, a rise in the slice's hierarchical `oom_kill` counter plus a SIGKILL exit. The job stays
-`failed` but gets `terminated_by = 'oom'`, `failureKind: 'oom'` for orchestrators, and a result line
-naming the limits; like `timed_out`, its session is included in the resume lookup.
+**An OOM kill is its own reason.** Scope `oom_kill` counters or a correlated kernel record
+confirm a victim; they do not by themselves establish which limit constrained the run. The worker
+captures scope/slice limits and local counter deltas before collection. An unprivileged, bounded
+kernel-journal query can match this run's `task_memcg` to `oom_memcg` for scope/shared-slice
+attribution; missing or conflicting evidence leaves the constraint unknown. A slice hierarchical
+kill-counter rise plus SIGKILL is only possible OOM, never confirmation. Confirmed OOMs remain
+`failed`, `terminated_by = 'oom'`, `failureKind: 'oom'`, with evidence and partial output retained;
+the session remains resumable. See `docs/agent-memory-scheduling.md`.
 
 **The slice needs limits from the fleet, and the code refuses to run without them.** An unknown
 `--slice=` is auto-created with *no* limits, so using the launcher before the fleet has installed the
@@ -311,7 +313,13 @@ standalone Qalatra runs with none.
 
 ### Concurrency
 
-`MAX_CONCURRENT_JOBS` (3) is the box-wide ceiling. Within it, **at most one job runs per
+The persisted `maxConcurrentJobs` setting (default 3) is the box-wide ceiling. It accepts
+nonnegative safe integers; 0 pauses new admissions while current runs drain. Invalid persisted
+values log and fall back to 3. A serialized admission loop reserves slots before asynchronous
+claims/worktree setup and rereads settings each pass (30 seconds) and between admissions.
+`GET /api/v1/settings/worker` exposes the limit, admitted count (including preparation), and
+paused state. `PATCH /api/v1/settings` merges properties; PUT/import still replace the document.
+Lowering the limit never kills existing runs. See `docs/agent-memory-scheduling.md`. Within it, **at most one job runs per
 concurrency key** — `agent.config` `concurrency_key`, defaulting to the agent folder. Every job
 in a folder shares that folder's working tree, so two at once fight over one checkout; a repo
 that splits `plan/`, `execute/`, `pipeline/` over one checkout gives them the same key.
@@ -323,7 +331,7 @@ therefore drains one per key at a time. Covered by `npm run test:job-concurrency
 a repo's whole FlightDesk workload behind itself (on drift, four dispatches queued together started
 90–303 minutes later). With the opt-in, a job carrying a task identity (`external_meta.task_ref`)
 runs in its own checkout at `<repo-root>/.qalatra-worktrees/<task_ref>/<same subfolder>` and is keyed
-`<folder key>#<task_ref>`: different tasks run in parallel up to `MAX_CONCURRENT_JOBS`, one task's
+`<folder key>#<task_ref>`: different tasks run in parallel up to the configured `maxConcurrentJobs`, one task's
 jobs still serialize. `server/worktrees.js` owns it:
 
 - Created on the task's first job with `git fetch origin <base>` + `git worktree add --detach …

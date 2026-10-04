@@ -3,8 +3,6 @@ import {
   argvCommandError,
   buildSystemdAgentLauncher,
   resolveAgentMemoryLimits,
-  parseOomKills,
-  scopeWasOomKilled,
   commandDiagnosticLines,
   commandHasPlaceholder,
   isArgvCommand,
@@ -154,14 +152,6 @@ assert.deepEqual(limits({}, { memory_max: '2gb' }), { high: '1G', max: '2G' })
 assert.deepEqual(limits({ agentMemoryHigh: '2G', agentMemoryMax: '3G' }, { memory_high: '4G' }), { high: '2G', max: '3G' })
 assert.deepEqual(limits({}, { memory_high: '3G', memory_max: '2048M' }), { high: '1G', max: '2G' })
 assert.equal(memoryWarnings.length, 4)
-
-assert.equal(parseOomKills('low 0\nhigh 12\nmax 3\noom 1\noom_kill 2\noom_group_kill 1\n'), 2)
-assert.equal(parseOomKills('low 0\n'), null)
-assert.equal(scopeWasOomKilled({ scopeKills: 1, sliceBefore: null, sliceAfter: null, signal: null }), true)
-assert.equal(scopeWasOomKilled({ scopeKills: 0, sliceBefore: 0, sliceAfter: 5, signal: 'SIGKILL' }), false, 'a readable scope counter is definitive')
-assert.equal(scopeWasOomKilled({ scopeKills: null, sliceBefore: 3, sliceAfter: 4, signal: 'SIGKILL' }), true)
-assert.equal(scopeWasOomKilled({ scopeKills: null, sliceBefore: 3, sliceAfter: 4, signal: null }), false, 'a clean exit is never an OOM')
-assert.equal(scopeWasOomKilled({ scopeKills: null, sliceBefore: 3, sliceAfter: 3, signal: 'SIGKILL' }), false)
 
 const accumulatedPrompt = `original task\n${'old agent output\n'.repeat(20_000)}`
 assert.equal(

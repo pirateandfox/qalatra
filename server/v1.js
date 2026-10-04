@@ -3,7 +3,8 @@ import { scanAgents } from './agents.js'
 import { backupStatus, listBackups, restoreBackup, runBackup } from './backups.js'
 import { syncPendingAttachments } from './attachments.js'
 import { exportKey, generateKey, importKey, keyStatus } from './keys.js'
-import { runAgentScan } from './workers.js'
+import { runAgentScan, agentWorkerStatus } from './workers.js'
+import { validateSettings } from './settings.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -340,8 +341,12 @@ export async function handleV1(req, url, ctx, { parseBody }) {
 
   if (resource === 'settings') {
     if (!id && method === 'GET') return data('settings', ctx.loadSettings())
-    if (!id && method === 'PUT') {
-      ctx.saveSettings(await parseBody(req))
+    if (id === 'worker' && method === 'GET') return data('worker', agentWorkerStatus(ctx.loadSettings()))
+    if (!id && (method === 'PUT' || method === 'PATCH')) {
+      const body = await parseBody(req)
+      validateSettings(body)
+      // Merge synchronously after parsing, preserving other settings even across parallel PATCHes.
+      ctx.saveSettings(method === 'PATCH' ? { ...ctx.loadSettings(), ...body } : body)
       return ok()
     }
     if (id === 'export' && method === 'GET') return ok({ json: JSON.stringify(ctx.loadSettings(), null, 2) })
@@ -349,7 +354,7 @@ export async function handleV1(req, url, ctx, { parseBody }) {
       const body = await parseBody(req)
       let parsed
       try { parsed = JSON.parse(body.json) } catch { throw badRequest('Invalid settings JSON') }
-      if (typeof parsed !== 'object' || Array.isArray(parsed)) throw badRequest('Invalid settings JSON')
+      validateSettings(parsed)
       ctx.saveSettings(parsed)
       return ok()
     }
