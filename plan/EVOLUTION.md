@@ -43,6 +43,12 @@
 - Removed the unused `qalatra-box-web:refresh` postMessage listener and its `__qalatra_refresh`
   URL cleanup from proxied Box Web pages; both clients reconnect by creating a new session.
 
+## Release 1.9.58 (2026-10-05)
+
+- Feature release: complete/skip controls with completion notes, habits year view and range
+  history, daily-note @mentions, more keyboard shortcuts, and a Tools tab that keeps your place
+  on Reconnect. Full pre-publish passed; features checked by hand in the desktop app.
+
 ## Release 1.9.57 (2026-10-05)
 
 - Bug-fix release: Claude Bridge errors routed by code with page text withheld from FlightDesk,
