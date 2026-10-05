@@ -124,6 +124,26 @@ async function main() {
     })
     if (badSettings.status !== 400) throw new Error(`POST settings/import bad json expected 400, got ${badSettings.status}`)
 
+    // Habit range history (year view): authenticated, validated, 404 for a missing habit.
+    const habitsUrl = `http://127.0.0.1:${apiPort}/api/v1/habits`
+    const habit = await fetch(habitsUrl, {
+      method: 'POST', headers: authJson, body: JSON.stringify({ title: 'Smoke habit', recurrence: 'daily' }),
+    }).then(res => res.json())
+    const habitId = habit.habit?.id
+    if (!habitId) throw new Error('Habit creation failed')
+    await fetch(`${habitsUrl}/${habitId}/log`, { method: 'POST', headers: authJson, body: JSON.stringify({ date: '2026-03-04', status: 'done', notes: 'smoke' }) })
+    const history = await fetch(`${habitsUrl}/${habitId}/history?start=2026-01-01&end=2026-12-31`, { headers: authJson })
+      .then(async res => ({ res, data: await res.json().catch(() => ({})) }))
+    const h = history.data.history
+    if (!history.res.ok || h?.days?.length !== 365 || h.days_done !== 1) throw new Error(`Habit history expected 365 days with 1 done, got ${history.res.status}`)
+    if (h.days.find(d => d.date === '2026-03-04')?.notes !== 'smoke') throw new Error('Habit history dropped log notes')
+    const historyUnauth = await fetch(`${habitsUrl}/${habitId}/history?start=2026-01-01&end=2026-12-31`)
+    if (historyUnauth.status !== 401) throw new Error(`Unauthenticated habit history expected 401, got ${historyUnauth.status}`)
+    const historyBad = await fetch(`${habitsUrl}/${habitId}/history?start=2026-12-31&end=2026-01-01`, { headers: authJson })
+    if (historyBad.status !== 400) throw new Error(`Reversed habit history range expected 400, got ${historyBad.status}`)
+    const historyMissing = await fetch(`${habitsUrl}/does-not-exist/history?start=2026-01-01&end=2026-01-31`, { headers: authJson })
+    if (historyMissing.status !== 404) throw new Error(`Missing habit history expected 404, got ${historyMissing.status}`)
+
     // The worker policy is authenticated, persisted, validated, and PATCH preserves other keys.
     const settingsUrl = `http://127.0.0.1:${apiPort}/api/v1/settings`
     const unauthorizedPolicy = await fetch(settingsUrl, {

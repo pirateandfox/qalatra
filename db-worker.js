@@ -22,7 +22,7 @@ import { autoAttachMentionedFiles } from './server/mentioned-files.js'
 // also asserts this copy === the shared copy, so it is an automated guard against drift.
 import {
   today, nowIso, utcNowIso, offsetDate, daysBetween, appendAiContext, isHabitDueOn, nextRunAt,
-  withTimestampZones,
+  withTimestampZones, buildHabitHistory, habitRangeError,
 } from './server/task-logic.js'
 const { rrulestr } = pkg
 
@@ -1063,6 +1063,16 @@ function listHabits(date) {
     week: days.map(day => ({ date: day, due: isHabitDueOn(h, day), log: logMap[`${h.id}:${day}`] ?? null })),
   }))
 }
+// Day-by-day history for one habit over [start, end] (year view + drill-down). Archived habits
+// are included so their history stays auditable.
+function getHabitHistory(habitId, start, end) {
+  const err = habitRangeError(start, end)
+  if (err) throw validationError(err)
+  const habit = db.prepare('SELECT * FROM habits WHERE id = ?').get(habitId)
+  if (!habit) { const e = new Error('Habit not found'); e.status = 404; throw e }
+  const logs = db.prepare('SELECT date, status, notes FROM habit_logs WHERE habit_id = ? AND date >= ? AND date <= ?').all(habitId, start, end)
+  return { ...buildHabitHistory(habit, logs, start, end, { days: true, notes: true }), created_at: habit.created_at }
+}
 function createHabit(body) {
   if (!body.title) throw validationError('title required')
   const id = crypto.randomUUID(); const now = nowIso()
@@ -1528,7 +1538,7 @@ const METHODS = {
   listProjects, createProjectExplicit, updateProject, renameProject, setProjectContext, archiveProject, unarchiveProject, deleteProject,
   upsertAgents, listAgentsDb,
   listCapabilitiesDb, getCapabilityDb, searchCapabilitiesDb,
-  listHabits, createHabit, updateHabit, logHabit, unlogHabit,
+  listHabits, getHabitHistory, createHabit, updateHabit, logHabit, unlogHabit,
   listAttachments, insertAttachment, getAttachment, deleteAttachment,
   getPendingAttachments, updateAttachmentStorage,
   listAgentJobs, getAgentJob, createAgentJob,

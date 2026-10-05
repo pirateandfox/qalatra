@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { openDb, nowIso, today as todayStr, offsetDate, isHabitDueOn } from '../db.js';
+import { buildHabitHistory, habitRangeError } from '../../server/task-logic.js';
 
 export const toolDefs = [
   {
@@ -42,12 +43,16 @@ export const toolDefs = [
   },
   {
     name: 'get_habit_history',
-    description: 'Get completion history for one habit or all habits over the past N days. Returns logs with notes — use this for weekly AI analysis.',
+    description: 'Get completion history for one habit or all habits over the past N days. Returns logs with notes — use this for weekly AI analysis. For long-range audits pass start/end (YYYY-MM-DD, up to ~10 years) and summary="week"|"month": that returns completion rate, current/longest streak, and per-period counts instead of one row per day (logs are then omitted unless include_logs=true).',
     inputSchema: {
       type: 'object',
       properties: {
-        habit_id: { type: 'string', description: 'Habit ID (omit for all habits)' },
-        days:     { type: 'number', description: 'Number of days to look back (default 7)' },
+        habit_id:     { type: 'string', description: 'Habit ID (omit for all active habits)' },
+        days:         { type: 'number', description: 'Number of days to look back (default 7). Ignored when start is given.' },
+        start:        { type: 'string', description: 'Range start YYYY-MM-DD (inclusive). Enables range mode.' },
+        end:          { type: 'string', description: 'Range end YYYY-MM-DD (inclusive, default today). Enables range mode.' },
+        summary:      { type: 'string', enum: ['week', 'month'], description: 'Roll up counts per Monday-start week or per calendar month. Enables range mode.' },
+        include_logs: { type: 'boolean', description: 'Range mode: include logged days with notes. Defaults to true without summary, false with it.' },
       },
     },
   },
@@ -118,7 +123,8 @@ export const handlers = {
     return { ok: true, habit_id, date: d, status: status ?? 'done' };
   },
 
-  get_habit_history({ habit_id, days } = {}) {
+  get_habit_history({ habit_id, days, start, end, summary, include_logs } = {}) {
+    if (start || end || summary) return habitHistoryRange({ habit_id, days, start, end, summary, include_logs });
     const db = openDb();
     const n = days ?? 7;
     const since = offsetDate(todayStr(), -(n - 1));
@@ -164,3 +170,29 @@ export const handlers = {
     return { ok: true };
   },
 };
+
+// Range mode for get_habit_history. Stats come from buildHabitHistory (server/task-logic.js), the
+// same function behind the UI year view, so an agent's audit and the heatmap agree. Per-day rows
+// are never returned here — a year is 365 rows per habit; the rollup carries the shape instead.
+function habitHistoryRange({ habit_id, days, start, end, summary, include_logs }) {
+  const e = end ?? todayStr();
+  const s = start ?? offsetDate(e, -((days ?? 7) - 1));
+  const err = habitRangeError(s, e);
+  if (err) return { error: err };
+  if (summary && summary !== 'week' && summary !== 'month') return { error: 'summary must be "week" or "month"' };
+  const withLogs = include_logs ?? !summary;
+  const db = openDb();
+  const habits = habit_id
+    ? db.prepare('SELECT * FROM habits WHERE id = ?').all(habit_id)
+    : db.prepare('SELECT * FROM habits WHERE active = 1 ORDER BY created_at ASC').all();
+  if (habit_id && habits.length === 0) return { error: 'habit not found' };
+  const logs = habit_id
+    ? db.prepare('SELECT habit_id, date, status, notes FROM habit_logs WHERE habit_id = ? AND date >= ? AND date <= ? ORDER BY date DESC').all(habit_id, s, e)
+    : db.prepare('SELECT habit_id, date, status, notes FROM habit_logs WHERE date >= ? AND date <= ? ORDER BY date DESC').all(s, e);
+  return habits.map(h => {
+    const hLogs = logs.filter(l => l.habit_id === h.id);
+    const out = buildHabitHistory(h, hLogs, s, e, { rollup: summary ?? null });
+    if (withLogs) out.logs = hLogs.map(l => ({ date: l.date, status: l.status, notes: l.notes }));
+    return out;
+  });
+}
