@@ -43,6 +43,12 @@
 - Removed the unused `qalatra-box-web:refresh` postMessage listener and its `__qalatra_refresh`
   URL cleanup from proxied Box Web pages; both clients reconnect by creating a new session.
 
+## Release 1.9.57 (2026-10-05)
+
+- Bug-fix release: Claude Bridge errors routed by code with page text withheld from FlightDesk,
+  runtime inference for non-Claude agent commands, logged agent.config read errors, and one
+  transactional agent-scan write path that prunes removed folders. Full pre-publish passed.
+
 ## Release 1.9.56 (2026-10-04)
 
 - Live host concurrency and graceful draining, safe settings PATCH and worker status,
