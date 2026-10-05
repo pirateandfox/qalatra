@@ -3,6 +3,7 @@ import { fetchTask, fetchSubtasks, fetchAttachments, openAttachmentFile, api } f
 import type { Task, Attachment } from '../types/task'
 import { fmtTime } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
+import CompletionControls from './CompletionControls'
 import './MeetingView.css'
 
 interface Props {
@@ -95,6 +96,7 @@ export default function MeetingView({ taskId, onBack }: Props) {
             <span className="meeting-progress-label">{done}/{subtasks.length}</span>
           </div>
         )}
+        <CompletionControls task={event} onChanged={load} childNoun="agenda item" align="right" />
       </div>
 
       <div className="meeting-body">

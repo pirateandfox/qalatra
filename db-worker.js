@@ -721,13 +721,35 @@ function deleteTask(id) {
   return { ok: true }
 }
 
-function completeTask(id) {
+// Optional completion note from the UI ("Complete with note…"). Mirrors MCP complete_task's
+// `notes` arg: the outcome goes into ai_context as `Completed: …` (the agent-facing record), and
+// is also posted as a user note so it shows in the task's notes thread for the human.
+const COMPLETION_NOTE_MAX = 4000
+function normalizeCompletionNote(note) {
+  if (note == null) return null
+  if (typeof note !== 'string') throw validationError('note must be a string')
+  const trimmed = note.trim()
+  if (!trimmed) return null
+  if (trimmed.length > COMPLETION_NOTE_MAX) throw validationError(`note must be at most ${COMPLETION_NOTE_MAX} characters`)
+  return trimmed
+}
+function completionContext(note, fallback) {
+  return note ? `Completed via UI: ${note}` : fallback
+}
+function postCompletionNote(taskId, note) {
+  if (!note) return
+  db.prepare(`INSERT INTO notes (id, task_id, body, author) VALUES (?, ?, ?, 'user')`).run(crypto.randomUUID(), taskId, `Completed — ${note}`)
+}
+
+function completeTask(id, note) {
+  const completionNote = normalizeCompletionNote(note)
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
   if (!task) return { ok: false, reason: 'not_found' }
   const { n } = db.prepare(`SELECT count(*) as n FROM tasks WHERE parent_id = ? AND status != 'done'`).get(id)
   if (n > 0) return { ok: false, reason: 'subtasks_incomplete', count: n }
   const now = nowIso()
-  db.prepare(`UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, 'Marked complete via UI.'), id)
+  db.prepare(`UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, completionContext(completionNote, 'Marked complete via UI.')), id)
+  postCompletionNote(id, completionNote)
   if (task.recurrence) {
     const nextDate = nextRecurrenceDate(task.due_date ?? task.start_date ?? today(), task.recurrence)
     if (nextDate) spawnRecurrence(task, nextDate, now, `Recurred from task ${id}`)
@@ -735,12 +757,14 @@ function completeTask(id) {
   return { ok: true }
 }
 
-function completeTaskWithSubtasks(id) {
+function completeTaskWithSubtasks(id, note) {
+  const completionNote = normalizeCompletionNote(note)
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
   if (!task) return { ok: false, reason: 'not_found' }
   const now = nowIso()
   db.prepare(`UPDATE tasks SET status = 'done', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE parent_id = ? AND status != 'done'`).run(now, now, appendAiContext(null, 'Bulk-completed with parent via UI.'), id)
-  db.prepare(`UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, 'Marked complete via UI (with subtasks).'), id)
+  db.prepare(`UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, completionContext(completionNote, 'Marked complete via UI (with subtasks).')), id)
+  postCompletionNote(id, completionNote)
   // Preserve the recurrence chain (bug C9). The UI forces THIS path for any parent that has
   // incomplete subtasks (completeTask rejects it), so without spawning here a recurring task
   // that acquired a subtask would silently end its series. Mirror completeTask's spawn.

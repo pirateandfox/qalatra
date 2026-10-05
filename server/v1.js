@@ -191,8 +191,8 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     if (action === 'actions' && method === 'POST') {
       const body = await parseBody(req)
       const verb = parts[3]
-      if (verb === 'complete') return result(await ctx.dbCall('completeTask', id))
-      if (verb === 'complete-with-subtasks') return result(await ctx.dbCall('completeTaskWithSubtasks', id))
+      if (verb === 'complete') return result(await ctx.dbCall('completeTask', id, body.note ?? null))
+      if (verb === 'complete-with-subtasks') return result(await ctx.dbCall('completeTaskWithSubtasks', id, body.note ?? null))
       if (verb === 'uncomplete') return result(await ctx.dbCall('uncompleteTask', id))
       if (verb === 'skip') return result(await ctx.dbCall('skipTask', id))
       if (verb === 'activate') return result(await ctx.dbCall('activateTask', id))
