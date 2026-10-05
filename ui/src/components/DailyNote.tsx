@@ -28,6 +28,8 @@ import {
   toolbarPlugin,
 } from '@mdxeditor/editor'
 import '@mdxeditor/editor/style.css'
+import { mentionsPlugin } from './editor/mentionsPlugin'
+import { qalatraMentionProvider } from './editor/qalatraMentions'
 import './DailyNote.css'
 
 interface Props {
@@ -79,6 +81,7 @@ export default function DailyNote({ date, refreshToken = 0 }: Props) {
     codeMirrorPlugin({ codeBlockLanguages: CODE_BLOCK_LANGUAGES, autoLoadLanguageSupport: false }),
     diffSourcePlugin({ viewMode: 'rich-text' }),
     markdownShortcutPlugin(),
+    mentionsPlugin({ provider: qalatraMentionProvider }),
     toolbarPlugin({
       toolbarContents: () => (
         <DiffSourceToggleWrapper options={['rich-text', 'source']}>

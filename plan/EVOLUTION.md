@@ -1,5 +1,19 @@
 # Qalatra — Evolution Notes
 
+## Daily notes: @mention autocomplete (2026-10-05)
+
+- Typing `@` in the daily note opens a caret-anchored typeahead of tasks (debounced
+  `searchTasks`, open tasks only, active first, title matches only), projects and contexts
+  (cached 60s, filtered locally), grouped by kind. Arrows + Enter/Tab select, Esc closes,
+  click works. Selection inserts plain `@Task title` / `@project` / `@context-slug` text —
+  no link scheme exists for tasks yet, so notes stay ordinary markdown (PIR-84).
+- Built as a reusable MDXEditor `realmPlugin` (`ui/src/components/editor/mentionsPlugin.tsx`)
+  over `@lexical/react`'s `LexicalTypeaheadMenuPlugin`, fed by a provider
+  (`qalatraMentions.ts`); only DailyNote enables it. `@lexical/react` + `lexical` are now
+  direct UI deps on MDXEditor's range and Vite dedupes them — a second Lexical copy breaks
+  the composer context. No trailing space is inserted (MDXEditor would serialise a
+  line-final space as `&#x20;`); the menu doesn't reopen while typing after an insert.
+
 ## Release 1.9.56 (2026-10-04)
 
 - Live host concurrency and graceful draining, safe settings PATCH and worker status,
