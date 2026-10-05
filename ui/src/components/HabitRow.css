@@ -89,6 +89,9 @@
 .habit-btn:hover { background: var(--surface2); color: var(--text); }
 .habit-done-btn.active  { background: var(--accent, #22c55e); border-color: var(--accent, #22c55e); color: #fff; }
 .habit-skip-btn.active  { background: var(--muted); border-color: var(--muted); color: #fff; }
+.habit-year-btn.active  { color: var(--accent, #22c55e); border-color: var(--accent, #22c55e); }
+.habit-title-link { cursor: pointer; }
+.habit-title-link:hover { text-decoration: underline; text-decoration-color: var(--border); }
 
 .habit-notes-row {
   margin-top: 8px;

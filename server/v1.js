@@ -319,6 +319,12 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     if (!id && method === 'GET') return data('habits', await ctx.dbCall('listHabits', dateParam(url.searchParams.get('date'))))
     if (!id && method === 'POST') return data('habit', await ctx.dbCall('createHabit', await parseBody(req)))
     if (id && !action && method === 'PATCH') return result(await ctx.dbCall('updateHabit', requireBodyId(id, await parseBody(req))))
+    if (id && action === 'history' && method === 'GET') {
+      const start = url.searchParams.get('start')
+      const end = url.searchParams.get('end')
+      if (!start || !end) throw badRequest('start and end (YYYY-MM-DD) are required')
+      return data('history', await ctx.dbCall('getHabitHistory', id, start, end))
+    }
     if (id && action === 'log' && method === 'POST') {
       const body = await parseBody(req)
       return result(await ctx.dbCall('logHabit', id, body.date, body.status, body.notes ?? null))

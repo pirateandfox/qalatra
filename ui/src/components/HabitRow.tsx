@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { logHabit, unlogHabit, updateHabit } from '../api'
+import HabitYearView from './HabitYearView'
 import './HabitRow.css'
 
 const DAY_LABELS: Record<string, string> = { mon: 'Mo', tue: 'Tu', wed: 'We', thu: 'Th', fri: 'Fr', sat: 'Sa', sun: 'Su' }
@@ -39,6 +40,7 @@ export default function HabitRow({ habit, today, onMutate }: Props) {
   const [notesOpen, setNotesOpen] = useState(false)
   const [notes, setNotes] = useState(log?.notes ?? '')
   const [editing, setEditing] = useState(false)
+  const [yearOpen, setYearOpen] = useState(false)
 
   // Edit state
   const [editTitle, setEditTitle] = useState(habit.title)
@@ -161,7 +163,7 @@ export default function HabitRow({ habit, today, onMutate }: Props) {
       <div className="habit-main">
         <div className="habit-title-row">
           <div className="habit-title-group">
-            <span className="habit-title">{habit.title}</span>
+            <span className="habit-title habit-title-link" onClick={() => setYearOpen(o => !o)} title="Show year view">{habit.title}</span>
             {habit.recurrence_days && (
               <span className="habit-days-label">
                 {habit.recurrence_days.split(',').map(d => DAY_LABELS[d.trim()] ?? d).join(' ')}
@@ -179,6 +181,11 @@ export default function HabitRow({ habit, today, onMutate }: Props) {
               onClick={handleSkip}
               title={isSkipped ? 'Undo skip' : 'Skip'}
             >–</button>
+            <button
+              className={`habit-btn habit-year-btn ${yearOpen ? 'active' : ''}`}
+              onClick={() => setYearOpen(o => !o)}
+              title={yearOpen ? 'Hide year view' : 'Year view'}
+            >▦</button>
             <button
               className="habit-btn habit-edit-btn"
               onClick={() => setEditing(true)}
@@ -203,6 +210,7 @@ export default function HabitRow({ habit, today, onMutate }: Props) {
         )}
         </div>
       </div>
+      {yearOpen && <HabitYearView habitId={habit.id} today={today} refreshKey={`${log?.status ?? ''}:${log?.notes ?? ''}`} />}
       {notesOpen && (
         <div className="habit-notes-row">
           <textarea

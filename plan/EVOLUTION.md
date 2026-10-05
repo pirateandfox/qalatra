@@ -1,5 +1,23 @@
 # Qalatra — Evolution Notes
 
+## Habits: year view and audit tools (2026-10-05)
+
+- Habit history over any range (PIR-85). `buildHabitHistory` in `server/task-logic.js` is the
+  single counting source for the UI and MCP: due days start at the habit's creation (backfilled
+  logs still count), future days and today-while-unlogged are not tallied, skips excuse without
+  extending a streak, off-schedule sessions count as done but never push the rate past 100%.
+- `GET /api/v1/habits/:id/history?start=&end=` (db-worker `getHabitHistory`, shared client
+  `getHabitHistory`) returns stats plus per-day rows with notes; ranges are capped at 3,660 days,
+  bad ranges are 400, a missing habit 404. Archived habits stay auditable.
+- Desktop: a ▦ button (or clicking the habit title) opens a GitHub-style year heatmap under the
+  row — Monday-start weeks × Mo..Su, year navigation, year %, current/best streak. Clicking a
+  week column or a month label drills into that range's days with notes. Colours use the theme
+  variables only. Mobile's `HabitsScreen` is unchanged (still the 7-day strip).
+- MCP `get_habit_history` keeps its default output; `start`/`end` and `summary: week|month`
+  switch to range mode, which returns stats and a per-period rollup instead of 365 rows (logs
+  only with `include_logs`). Range-mode `completion_rate` is a number, not the legacy `"57%"`.
+- Tests: `npm run test:habit-history` (in `ci:server`) and habit-history checks in the server smoke.
+
 ## Release 1.9.56 (2026-10-04)
 
 - Live host concurrency and graceful draining, safe settings PATCH and worker status,

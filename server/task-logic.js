@@ -316,3 +316,119 @@ export function isHabitDueOn(habit, dateStr) {
     default: return true
   }
 }
+
+// ── Habit history over a date range ──────────────────────────────────────────────
+// Single source for the year view (db-worker → GET /api/v1/habits/:id/history) and the MCP
+// get_habit_history range mode, so the UI's year % and an agent's audit cannot disagree.
+//
+// Counting rules:
+// - A day counts toward `days_due` when the habit is due that day, the day is not in the future
+//   (> asOf), and either the habit already existed (>= created_at date) or a log exists for it
+//   (backfilled history still counts). A habit created in September therefore doesn't show a 9%
+//   year.
+// - A skipped day is an explicit excuse: not a miss and it does not break a streak, but it does
+//   not extend one either. Days the habit isn't due are ignored for streaks.
+// - A `done` log on a day the habit wasn't due (an extra session) counts toward days_done and
+//   extends the run, but completion_rate is done-on-due-days / due-days, so it never exceeds 100.
+// - asOf (today) unlogged is still open: it isn't tallied as due yet and doesn't break the current
+//   streak. Its per-day row still says due: true so the UI can mark it as open.
+
+export const HABIT_HISTORY_MAX_DAYS = 3660
+const HABIT_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+export function isValidHabitDate(value) {
+  if (typeof value !== 'string' || !HABIT_DATE_RE.test(value)) return false
+  const d = new Date(value + 'T12:00:00Z')
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
+}
+
+// Validate a [start, end] pair. Returns an error message, or null when valid.
+export function habitRangeError(start, end) {
+  if (!isValidHabitDate(start)) return 'start must be YYYY-MM-DD'
+  if (!isValidHabitDate(end)) return 'end must be YYYY-MM-DD'
+  if (start > end) return 'start must be on or before end'
+  if (daysBetween(start, end) + 1 > HABIT_HISTORY_MAX_DAYS) return `range is limited to ${HABIT_HISTORY_MAX_DAYS} days`
+  return null
+}
+
+// Monday on or before dateStr — the app's weeks (habit strip, year heatmap) start on Monday.
+export function mondayOf(dateStr) {
+  const dow = new Date(dateStr + 'T12:00:00Z').getUTCDay()
+  return offsetDate(dateStr, -(dow === 0 ? 6 : dow - 1))
+}
+
+const habitRate = (doneDue, due) => (due > 0 ? Math.round((doneDue / due) * 100) : null)
+
+/**
+ * Per-habit stats for [start, end] inclusive.
+ * @param habit  habits row
+ * @param logs   habit_logs rows for this habit (rows outside the range are ignored)
+ * @param opts   { asOf?: YYYY-MM-DD (default today()), days?: include per-day rows,
+ *                 notes?: per-day rows carry notes, rollup?: 'week' | 'month' }
+ */
+export function buildHabitHistory(habit, logs, start, end, opts = {}) {
+  const asOf = opts.asOf ?? today()
+  const created = habit.created_at ? String(habit.created_at).substring(0, 10) : null
+  const rollup = opts.rollup === 'week' || opts.rollup === 'month' ? opts.rollup : null
+  const logByDate = new Map()
+  for (const l of logs) if (l.date >= start && l.date <= end) logByDate.set(l.date, l)
+
+  const days = []
+  const buckets = new Map()
+  let due = 0, done = 0, doneDue = 0, skipped = 0, run = 0, longest = 0
+
+  const n = daysBetween(start, end) + 1
+  for (let i = 0; i < n; i++) {
+    const date = offsetDate(start, i)
+    const log = logByDate.get(date) ?? null
+    const status = log?.status ?? null
+    const future = date > asOf
+    const counts = !future && isHabitDueOn(habit, date) && (!created || date >= created || !!log)
+    const isDone = status === 'done' && !future
+    const tallied = counts && !(date === asOf && !log)
+
+    if (isDone) { done++; run++; if (run > longest) longest = run }
+    if (tallied) {
+      due++
+      if (isDone) doneDue++
+      else if (status === 'skipped') skipped++
+      else run = 0
+    }
+
+    if (opts.days) {
+      const row = { date, due: counts, status }
+      if (future) row.future = true
+      if (opts.notes && log?.notes) row.notes = log.notes
+      days.push(row)
+    }
+
+    if (rollup) {
+      const key = rollup === 'week' ? mondayOf(date) : date.slice(0, 7)
+      let b = buckets.get(key)
+      if (!b) { b = { period: key, due: 0, done: 0, skipped: 0, doneDue: 0 }; buckets.set(key, b) }
+      if (tallied) b.due++
+      if (isDone) b.done++
+      if (tallied && isDone) b.doneDue++
+      if (tallied && status === 'skipped') b.skipped++
+    }
+  }
+
+  const out = {
+    id: habit.id,
+    title: habit.title,
+    recurrence: habit.recurrence,
+    recurrence_days: habit.recurrence_days ?? null,
+    start,
+    end,
+    days_due: due,
+    days_done: done,
+    days_skipped: skipped,
+    days_missed: due - doneDue - skipped,
+    completion_rate: habitRate(doneDue, due),
+    current_streak: run,
+    longest_streak: longest,
+  }
+  if (rollup) out.rollup = [...buckets.values()].map(({ doneDue: bd, ...b }) => ({ ...b, rate: habitRate(bd, b.due) }))
+  if (opts.days) out.days = days
+  return out
+}

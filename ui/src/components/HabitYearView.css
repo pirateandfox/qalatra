@@ -1,0 +1,189 @@
+.habit-year {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hy-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hy-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hy-year {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+  min-width: 36px;
+  text-align: center;
+}
+.hy-nav-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hy-nav-btn:hover:not(:disabled) { background: var(--surface2); color: var(--text); }
+.hy-nav-btn:disabled { opacity: 0.35; cursor: default; }
+
+.hy-stats {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.hy-stat-main {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent, #22c55e);
+}
+
+.hy-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px 0;
+}
+
+/* ── Heatmap ──────────────────────────────────────────────────────────────── */
+/* Cells scale with the row width (1fr columns + square aspect ratio), so the grid fits the
+   600px habits column and narrows cleanly on small windows instead of scrolling sideways. */
+
+.hy-grid-wrap {
+  --hy-gap: 2px;
+  --hy-label-w: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hy-months {
+  display: grid;
+  grid-template-columns: repeat(var(--hy-cols), 1fr);
+  column-gap: var(--hy-gap);
+  margin-left: calc(var(--hy-label-w) + var(--hy-gap));
+}
+.hy-month {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 10px;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.hy-month:hover, .hy-month.selected { color: var(--text); }
+
+.hy-body {
+  display: flex;
+  gap: var(--hy-gap);
+}
+
+.hy-weekdays {
+  width: var(--hy-label-w);
+  flex-shrink: 0;
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  row-gap: var(--hy-gap);
+  font-size: 9px;
+  color: var(--muted);
+  line-height: 1;
+}
+.hy-weekdays span { display: flex; align-items: center; }
+
+.hy-grid {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--hy-cols), 1fr);
+  column-gap: var(--hy-gap);
+}
+
+.hy-week {
+  display: grid;
+  grid-template-rows: repeat(7, auto);
+  row-gap: var(--hy-gap);
+  cursor: pointer;
+  border-radius: 2px;
+}
+.hy-week:hover .hy-cell:not(.hy-outside) { filter: brightness(1.25); }
+.hy-week.selected { outline: 1px solid var(--text); outline-offset: 1px; }
+
+.hy-cell {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: var(--surface2);
+  box-sizing: border-box;
+}
+.hy-cell.hy-done      { background: var(--accent, #22c55e); }
+.hy-cell.hy-extra     { background: color-mix(in srgb, var(--accent, #22c55e) 55%, transparent); }
+.hy-cell.hy-skipped   { background: color-mix(in srgb, var(--muted) 45%, transparent); }
+.hy-cell.hy-missed    { background: var(--surface2); border: 1px solid var(--border); }
+.hy-cell.hy-open      { background: var(--surface2); border: 1px solid var(--accent, #22c55e); }
+.hy-cell.hy-not-due   { background: color-mix(in srgb, var(--surface2) 40%, transparent); }
+.hy-cell.hy-future    { background: transparent; border: 1px dashed color-mix(in srgb, var(--border) 60%, transparent); }
+.hy-cell.hy-outside   { visibility: hidden; }
+
+.hy-legend {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.hy-legend span { display: flex; align-items: center; gap: 4px; }
+.hy-legend .hy-cell { width: 9px; height: 9px; aspect-ratio: auto; }
+
+/* ── Drill-down ───────────────────────────────────────────────────────────── */
+
+.hy-drill {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.hy-drill-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+.hy-drill-title { font-size: 13px; color: var(--text); font-weight: 500; }
+.hy-drill-stat  { font-size: 12px; color: var(--muted); flex: 1; }
+
+.hy-drill-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.hy-drill-row .hy-cell { width: 9px; height: 9px; aspect-ratio: auto; flex-shrink: 0; align-self: center; }
+.hy-drill-date   { color: var(--text); min-width: 92px; }
+.hy-drill-status { color: var(--muted); min-width: 70px; }
+.hy-drill-notes  { color: var(--muted); font-style: italic; min-width: 0; overflow-wrap: anywhere; }

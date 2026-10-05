@@ -16,6 +16,7 @@ import type {
   Context,
   DirectoryEntry,
   Habit,
+  HabitHistory,
   Heartbeat,
   HeartbeatJob,
   Note,
@@ -309,6 +310,11 @@ export async function fetchAgents(): Promise<Agent[]> {
 export async function listHabits(date: string): Promise<Habit[]> {
   const data = await v1(`/habits?date=${enc(date)}`, { method: 'GET' })
   return data.habits ?? []
+}
+
+export async function getHabitHistory(habitId: string, start: string, end: string): Promise<HabitHistory> {
+  const data = await v1(`/habits/${enc(habitId)}/history?start=${enc(start)}&end=${enc(end)}`, { method: 'GET' })
+  return data.history
 }
 
 export async function createHabit(body: Record<string, unknown>): Promise<void> {
