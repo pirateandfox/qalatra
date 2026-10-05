@@ -1,5 +1,19 @@
 # Qalatra — Evolution Notes
 
+## Runtime inference, visible agent.config errors, dead Box Web refresh hook (2026-10-05)
+
+- Prompt-mode runtime is inferred from the command's binary when agent.config sets none:
+  `claude`/`codex` get their adapters, anything else runs `raw` with a warning. Previously a
+  `defaultAgentCommand` of `codex --yolo` was always given Claude's `-p … --output-format
+  stream-json --verbose` and codex rejected every job (FlightDesk 6ff720ba). Explicit `runtime`
+  still wins; the missing-config fallback command is unchanged. Settings → General shows an inline
+  hint when the default agent command's binary is neither CLI.
+- Unreadable or invalid agent.config files (and unreadable directories in the agent scan) are now
+  logged with their path instead of being swallowed; the job still runs with defaults and ENOENT
+  stays silent (FlightDesk 54c0cadf).
+- Removed the unused `qalatra-box-web:refresh` postMessage listener and its `__qalatra_refresh`
+  URL cleanup from proxied Box Web pages; both clients reconnect by creating a new session.
+
 ## Release 1.9.56 (2026-10-04)
 
 - Live host concurrency and graceful draining, safe settings PATCH and worker status,

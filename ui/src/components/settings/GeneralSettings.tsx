@@ -11,6 +11,20 @@ interface GeneralSettingsProps {
   onSave: () => Promise<void>
 }
 
+/**
+ * Mirrors the server's runtime inference (server/agent-runtimes.js commandBinary/inferRuntime): with
+ * no explicit runtime, a prompt-mode command whose binary is neither `claude` nor `codex` runs raw.
+ * Empty (the built-in default) and template commands ({description}/{title}/{spec_file}) never warn.
+ */
+function isUnknownRuntimeCommand(command: string | undefined): boolean {
+  const text = (command ?? '').trim()
+  if (!text || /\{(spec_file|description|title)\}/.test(text)) return false
+  const word = text.split(/\s+/).find(w => !/^[A-Za-z_]\w*=/.test(w))
+  if (!word) return false
+  const binary = word.replace(/^(['"])(.*)\1$/, '$2').split(/[\\/]/).pop()!.replace(/\.(exe|cmd|bat)$/i, '').toLowerCase()
+  return binary !== 'claude' && binary !== 'codex'
+}
+
 export function GeneralSettings({ settings, setSetting, saved, onSave }: GeneralSettingsProps) {
   const { mode: themeMode, effectiveMode, tokens, setMode: setThemeMode, setToken, resetOverrides } = useTheme()
   const [mcpPort, setMcpPort] = useState('3457')
@@ -200,6 +214,11 @@ export function GeneralSettings({ settings, setSetting, saved, onSave }: General
           spellCheck={false}
         />
         <span className="settings-hint">Used when launching agents from task queue and the Chat button in file previewers. Per-agent agent.config overrides this.</span>
+        {isUnknownRuntimeCommand(settings.defaultAgentCommand) && (
+          <span className="settings-hint" style={{ color: '#f59e0b' }}>
+            Not a known runtime — Qalatra will run it as-is (raw mode) and won't add prompt flags.
+          </span>
+        )}
       </div>
 
       <div className="settings-section-header">MCP Server</div>

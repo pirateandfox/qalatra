@@ -9,8 +9,9 @@
  * Template-mode commands — those containing {spec_file}, {description}, or {title} — bypass this
  * entirely: Qalatra runs them verbatim and never injects flags.
  *
- * Select one with `"runtime": "claude" | "codex" | "raw"` in agent.config. Absent runtime means
- * `claude`, which is what every pre-existing config was implicitly getting.
+ * Select one with `"runtime": "claude" | "codex" | "raw"` in agent.config. With no explicit runtime it
+ * is inferred from the command's binary (see inferRuntime): `claude` → claude, `codex` → codex, any
+ * other binary → raw, so a non-Claude CLI is never handed Claude's prompt flags.
  *
  * Output is consumed incrementally rather than buffered and parsed at exit. That is what lets a
  * killed job (timeout, idle kill) still report a session id and whatever the agent had said so far,
@@ -277,6 +278,45 @@ export function isKnownRuntime(name) {
 
 export function runtimeNames() {
   return Object.keys(RUNTIMES)
+}
+
+/** Runtimes that can be inferred from a command's binary name. `raw` is never inferred by name. */
+const INFERABLE_BINARIES = { claude: 'claude', codex: 'codex' }
+
+/**
+ * The executable a command will run: the first argv element, or the first word of a shell string
+ * after any leading `NAME=value` environment assignments. Returned as a basename with surrounding
+ * quotes and a Windows executable extension removed, so `/usr/local/bin/claude`, `"claude"` and
+ * `codex.cmd` all name their CLI. Null when the command has no usable first word.
+ */
+export function commandBinary(command) {
+  let token
+  if (Array.isArray(command)) {
+    token = command[0]
+  } else if (typeof command === 'string') {
+    token = command.trim().split(/\s+/).find(word => word && !/^[A-Za-z_]\w*=/.test(word))
+  }
+  if (typeof token !== 'string') return null
+  const unquoted = token.trim().replace(/^(['"])(.*)\1$/, '$2')
+  const base = unquoted.split(/[\\/]/).pop().replace(/\.(exe|cmd|bat)$/i, '')
+  return base || null
+}
+
+/**
+ * Picks the runtime for a prompt-mode command that declares none. Before this, an absent runtime
+ * always meant `claude`, so `defaultAgentCommand: "codex --yolo"` was spawned with Claude's
+ * `-p … --output-format stream-json --verbose` appended and codex rejected every job. A binary that
+ * is neither CLI falls to `raw` (run untouched, stdout as the result) with a warning, because
+ * appending one vendor's flags to an unknown program is never right. An explicit `runtime` in
+ * agent.config always wins over this; template-mode commands never reach it.
+ */
+export function inferRuntime(command, { onWarn = console.warn } = {}) {
+  const binary = commandBinary(command)
+  const name = binary ? INFERABLE_BINARIES[binary.toLowerCase()] : undefined
+  if (name) return name
+  const shown = Array.isArray(command) ? JSON.stringify(command) : String(command ?? '')
+  onWarn(`command ${shown} is not a known runtime (binary "${binary ?? ''}"; known: ${Object.keys(INFERABLE_BINARIES).join(', ')}) — running it as-is in raw mode without prompt flags. Set "runtime" in agent.config to override.`)
+  return 'raw'
 }
 
 /** Unknown or absent names resolve to the default so a typo degrades to today's behavior. */

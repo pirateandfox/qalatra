@@ -10,13 +10,16 @@ export async function scanAgents(root, excludeFolders = []) {
     let entries
     try {
       entries = await fs.promises.readdir(dir, { withFileTypes: true })
-    } catch {
+    } catch (err) {
+      // ENOENT is a directory removed mid-scan (or an agents root that doesn't exist yet); anything
+      // else (EACCES, ELOOP, ...) silently dropped every agent beneath it from the registry.
+      if (err?.code !== 'ENOENT') console.error(`[agents] could not read directory ${dir}: ${err.message} — agents under it are skipped`)
       return
     }
 
     if (entries.some(e => e.isFile() && e.name === 'agent.config')) {
+      const configPath = path.join(dir, 'agent.config')
       try {
-        const configPath = path.join(dir, 'agent.config')
         const configText = await fs.promises.readFile(configPath, 'utf8')
         const cfg = JSON.parse(configText)
         const rel = path.relative(root, dir)
@@ -42,7 +45,11 @@ export async function scanAgents(root, excludeFolders = []) {
           folder: topFolder,
         })
         results.push(agent)
-      } catch {}
+      } catch (err) {
+        // The file was listed a moment ago, so ENOENT only means it was removed mid-scan. Invalid
+        // JSON or an unreadable file used to drop the agent from the registry without a trace.
+        if (err?.code !== 'ENOENT') console.error(`[agents] skipping agent at ${dir}: could not load ${configPath}: ${err.message}`)
+      }
     }
 
     for (const entry of entries) {

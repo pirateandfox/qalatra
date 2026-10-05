@@ -151,15 +151,6 @@ function boxWebRuntimeScript(base) {
   return `<script>
 (() => {
   const boxWebBase = ${JSON.stringify(base)};
-  const refreshParam = '__qalatra_refresh';
-
-  try {
-    const current = new URL(window.location.href);
-    if (current.searchParams.has(refreshParam)) {
-      current.searchParams.delete(refreshParam);
-      window.history.replaceState(window.history.state, '', current.pathname + current.search + current.hash);
-    }
-  } catch {}
 
   function rewriteBoxWebUrl(value) {
     if (typeof value !== 'string') return value;
@@ -206,18 +197,6 @@ function boxWebRuntimeScript(base) {
     const originalSendBeacon = navigator.sendBeacon.bind(navigator);
     navigator.sendBeacon = (url, data) => originalSendBeacon(rewriteBoxWebUrl(url), data);
   }
-
-  window.addEventListener('message', event => {
-    if (event.source !== window.parent) return;
-    if (!event.data || event.data.type !== 'qalatra-box-web:refresh') return;
-    try {
-      const next = new URL(window.location.href);
-      next.searchParams.set(refreshParam, String(Date.now()));
-      window.location.replace(next.toString());
-    } catch {
-      window.location.reload();
-    }
-  });
 })();
 </script>`
 }
