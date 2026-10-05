@@ -1,0 +1,132 @@
+.completion-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.completion-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.completion-split {
+  display: inline-flex;
+}
+
+.completion-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.completion-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.completion-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.completion-primary:hover:not(:disabled) {
+  color: #22c55e;
+  border-color: #22c55e;
+}
+
+.completion-split .completion-btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.completion-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+  padding: 4px 6px;
+  font-size: 10px;
+}
+
+.completion-caret.open {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.completion-state {
+  color: #22c55e;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.completion-state.skipped {
+  color: var(--muted);
+}
+
+.completion-error {
+  color: #f87171;
+  font-size: 11px;
+}
+
+/* The note opens as a small popover so it never reflows the header it sits in. */
+.completion-note {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: min(340px, 80vw);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.completion-wrap.align-right .completion-note {
+  left: auto;
+  right: 0;
+}
+
+.completion-note-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 56px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.completion-note-input:focus {
+  border-color: var(--accent);
+}
+
+.completion-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.completion-note-hint {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 11px;
+}

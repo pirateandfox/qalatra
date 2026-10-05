@@ -9,8 +9,8 @@
 .box-web-toolbar {
   height: 44px;
   flex-shrink: 0;
-  display: grid;
-  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto;
+  display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 12px;
   padding: 0 12px;
@@ -35,26 +35,58 @@
   flex-shrink: 0;
 }
 
-.box-web-meta {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--muted);
-  font-size: 11px;
-  overflow: hidden;
-}
-
-.box-web-meta code {
+.box-web-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.box-web-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--muted);
-  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.box-web-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.box-web-status-connected .box-web-status-dot {
+  background: #4ade80;
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.15);
+}
+
+.box-web-status-connecting .box-web-status-dot {
+  background: var(--accent);
+  animation: box-web-pulse 1.2s ease-in-out infinite;
+}
+
+.box-web-status-unavailable .box-web-status-dot {
+  background: #f87171;
+}
+
+.box-web-status-unavailable {
+  color: #f87171;
+}
+
+@keyframes box-web-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 .box-web-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--muted);
@@ -64,10 +96,16 @@
   font-size: 12px;
 }
 
+.box-web-button-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
 .box-web-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .box-web-button:hover:not(:disabled) {
@@ -122,4 +160,68 @@
   max-width: 640px;
   font-family: Menlo, Monaco, "Courier New", monospace;
   font-size: 12px;
+}
+
+.box-web-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+/* Over an already-loaded page (Reconnect, or a session handed to the iframe
+   but not yet loaded): dim the frame instead of blanking it. */
+.box-web-loading-overlay {
+  background: rgba(15, 17, 23, 0.55);
+  color: var(--text);
+}
+
+.box-web-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: box-web-spin 0.8s linear infinite;
+}
+
+@keyframes box-web-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Narrow widths: status collapses to its dot, Reconnect to its icon. */
+@media (max-width: 640px) {
+  .box-web-toolbar {
+    height: 38px;
+    gap: 8px;
+    padding: 0 8px;
+  }
+
+  .box-web-actions {
+    gap: 8px;
+  }
+
+  .box-web-status-text,
+  .box-web-button-text {
+    display: none;
+  }
+
+  .box-web-button {
+    padding: 4px 8px;
+  }
+
+  .box-web-state {
+    padding: 20px 16px;
+  }
+}
+
+@media (max-width: 360px) {
+  .box-web-icon {
+    display: none;
+  }
 }

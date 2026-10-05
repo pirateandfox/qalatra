@@ -204,6 +204,36 @@ async function main() {
     })
     if (badSnooze.status !== 400) throw new Error(`snooze with no until expected 400, got ${badSnooze.status}`)
 
+    // Manual completion controls: /complete takes an optional `note` (ai_context + notes thread),
+    // still works with no body, rejects a non-string note, and a recurring event can be skipped.
+    const api = (route, method = 'GET', body) => fetch(`http://127.0.0.1:${apiPort}/api/v1${route}`, {
+      method, headers: authJson, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }).then(async r => ({ res: r, data: await r.json().catch(() => ({})) }))
+    const recurring = await api('/tasks', 'POST', { title: 'smoke weekly sync', task_type: 'event', recurrence: 'weekly', due_date: '2026-01-05' })
+    const recurringId = recurring.data.task?.id
+    if (!recurringId) throw new Error('recurring event create failed')
+    const badNote = await api(`/tasks/${recurringId}/actions/complete`, 'POST', { note: 42 })
+    if (badNote.res.status !== 400) throw new Error(`complete with non-string note expected 400, got ${badNote.res.status}`)
+    const completed = await api(`/tasks/${recurringId}/actions/complete`, 'POST', { note: '  Agreed to ship Friday  ' })
+    if (!completed.res.ok || completed.data.result?.ok !== true) throw new Error(`complete with note failed: ${JSON.stringify(completed.data)}`)
+    const doneTask = (await api(`/tasks/${recurringId}?fields=*`)).data.task
+    if (doneTask?.status !== 'done' || !String(doneTask.ai_context ?? '').includes('Completed via UI: Agreed to ship Friday')) {
+      throw new Error(`completion note missing from ai_context: ${JSON.stringify(doneTask?.ai_context)}`)
+    }
+    const doneNotes = (await api(`/tasks/${recurringId}/notes`)).data.notes ?? []
+    if (!doneNotes.some(n => n.body === 'Completed — Agreed to ship Friday' && n.author === 'user')) {
+      throw new Error(`completion note missing from notes thread: ${JSON.stringify(doneNotes)}`)
+    }
+    const nextOccurrence = (await api(`/tasks/search?query=${encodeURIComponent('smoke weekly sync')}&scope=open`)).data.tasks ?? []
+    const next = nextOccurrence.find(t => t.id !== recurringId && t.status === 'active')
+    if (!next) throw new Error('completing a recurring event did not spawn the next occurrence')
+    const skipped = await api(`/tasks/${next.id}/actions/skip`, 'POST', {})
+    if (skipped.data.result?.ok !== true) throw new Error(`skip of recurring event failed: ${JSON.stringify(skipped.data)}`)
+    const plain = await api('/tasks', 'POST', { title: 'smoke plain complete' })
+    const plainDone = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/${plain.data.task.id}/actions/complete`, { method: 'POST', headers: { Authorization: authJson.Authorization } })
+      .then(r => r.json())
+    if (plainDone.result?.ok !== true) throw new Error(`complete with no body failed: ${JSON.stringify(plainDone)}`)
+
     const delReal = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/${goodCreate.data.task.id}`, {
       method: 'DELETE', headers: authJson,
     })

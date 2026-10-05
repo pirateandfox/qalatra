@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import type { RelatedTask, Task, Subtask } from '../types/task'
 import RecurrencePicker from './RecurrencePicker'
 import PlatformIcon from './PlatformIcon'
+import CompletionControls from './CompletionControls'
 import { api, updateTask, fetchTask, fetchSubtasks, fetchAttachments, fetchAgents, deleteAttachment, uploadAttachment, openAttachmentFile, subscribeServerEvents, queueAgentJob, fetchAgentJobs, fetchNotes, addNote, fetchProjects, createProjectExplicit, markReviewed, type Agent, type AgentJob, type Note, type Project } from '../api'
 import type { Attachment } from '../types/task'
 import { PRIORITY_COLORS } from '../lib/constants'
@@ -397,6 +398,14 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, onSel
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); titleRef.current?.blur() } }}
             >
               {task.title}
+            </div>
+
+            {/* Manual complete / skip (recurring) / complete with note */}
+            <div className="detail-completion-row">
+              <CompletionControls
+                task={task}
+                onChanged={() => { load(task.id); onMutate?.() }}
+              />
             </div>
 
             {/* Context */}

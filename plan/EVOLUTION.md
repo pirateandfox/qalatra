@@ -92,6 +92,26 @@
   only with `include_logs`). Range-mode `completion_rate` is a number, not the legacy `"57%"`.
 - Tests: `npm run test:habit-history` (in `ci:server`) and habit-history checks in the server smoke.
 
+## Manual complete/skip controls and Tools tab polish (2026-10-05)
+
+- Manual completion without MCP (FlightDesk bfa9f114 / PIR-128). New `CompletionControls` sits under
+  the title in the task detail panel and in the meeting view header: one-click **Complete**, a ▾
+  opening an optional outcome note ("Complete with note"), and **Skip** for recurring items. It uses
+  the same `completeTask`/`completeTaskWithSubtasks`/`skipTask` paths as the list, so recurring items
+  still spawn their next occurrence. Open subtasks or agenda items prompt before bulk-completing. Done
+  tasks show Done/Skipped with Reopen; events get no Reopen, since they never transition back.
+  Recurring event cards on the list also get a Skip button next to "Mark done".
+- `POST /tasks/:id/actions/complete` (and `complete-with-subtasks`) accept an optional `{ note }`
+  (a string, at most 4,000 chars, otherwise 400). The note is appended to ai_context as
+  `Completed via UI: …`, through `appendAiContext`, which matches MCP `complete_task`'s `Completed: …`.
+  It is also posted as a user note (`Completed — …`), so it shows in the task's notes thread. A call
+  with no body behaves exactly as before. Covered in `smoke:server`.
+- Embedded Tools tab (FlightDesk 71bfe03b / PIR-190), `BoxWebView` only. The toolbar no longer shows
+  the raw proxy target or the session expiry; both are now in the tooltip of a new
+  Connected/Connecting/Unavailable status dot. Loading lasts until the iframe fires `onLoad`. On
+  Reconnect, the current page stays mounted under a dimmed overlay and is no longer blanked; Reconnect
+  still preserves the current path. Under 640px the status shrinks to its dot and Reconnect to its icon.
+
 ## Release 1.9.56 (2026-10-04)
 
 - Live host concurrency and graceful draining, safe settings PATCH and worker status,

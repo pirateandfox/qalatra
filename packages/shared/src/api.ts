@@ -491,12 +491,13 @@ export const exportSettings = (): Promise<{ ok: boolean; json?: string }> => v1(
 export const importSettings = (json: string): Promise<{ ok: boolean; error?: string }> => v1('/settings/import', jsonRequest('POST', { json }))
 
 export const api = {
-  complete: async (taskId: string) => {
-    const data = await v1(`/tasks/${enc(taskId)}/actions/complete`, { method: 'POST' })
+  // `note` is optional: an outcome note recorded in ai_context and posted to the task's notes thread.
+  complete: async (taskId: string, note?: string) => {
+    const data = await v1(`/tasks/${enc(taskId)}/actions/complete`, note ? jsonRequest('POST', { note }) : { method: 'POST' })
     return data.result
   },
-  completeWithSubtasks: async (taskId: string) => {
-    const data = await v1(`/tasks/${enc(taskId)}/actions/complete-with-subtasks`, { method: 'POST' })
+  completeWithSubtasks: async (taskId: string, note?: string) => {
+    const data = await v1(`/tasks/${enc(taskId)}/actions/complete-with-subtasks`, note ? jsonRequest('POST', { note }) : { method: 'POST' })
     return data.result
   },
   uncomplete: async (taskId: string) => {

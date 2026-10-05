@@ -1,7 +1,7 @@
 import type { Task } from '../types/task'
 import { fmtTime } from '../lib/constants'
 import { useContexts } from '../lib/ContextsProvider'
-import { updateTask } from '../api'
+import { api, updateTask } from '../api'
 import './EventCard.css'
 
 interface Props {
@@ -44,6 +44,9 @@ export default function EventCard({ event, onSelect, onMeetingOpen, onMutate }: 
           ? <span className="event-done-check" title="Done">✓</span>
           : <button className="event-done-btn" title="Mark done" onClick={async () => { await updateTask(event.id, { status: 'done' }); onMutate() }}>✓</button>
         }
+        {!isDone && event.recurrence && (
+          <button className="event-done-btn" title="Skip this occurrence (recurring)" onClick={async () => { await api.skip(event.id); onMutate() }}>⊟</button>
+        )}
         <button className="meeting-btn" onClick={() => onMeetingOpen(event.id)}>▶ Meeting</button>
       </div>
       {subtasks.length > 0 && (

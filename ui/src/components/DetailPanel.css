@@ -68,6 +68,8 @@
   cursor: text;
   outline: none;
 }
+.detail-completion-row { margin-bottom: 14px; }
+
 .detail-title:hover { background: var(--surface2); }
 .detail-title:focus { background: var(--surface2); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent); }
 
