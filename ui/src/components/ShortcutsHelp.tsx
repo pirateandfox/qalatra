@@ -7,6 +7,7 @@ const SECTIONS = [
       ['1 – 9', 'Jump to sidebar section (Priority → Heartbeats)'],
       ['d', 'Open Daily Note'],
       [', (comma)', 'Toggle Settings'],
+      ['⌘[ / ⌘←', 'Back — close panel, else previous section (Ctrl on Windows/Linux)'],
       ['t', 'Toggle terminal'],
       ['Ctrl+`', 'Toggle terminal (alternative)'],
     ],
@@ -16,7 +17,9 @@ const SECTIONS = [
     rows: [
       ['j / k', 'Select next / previous task'],
       ['n', 'New task'],
+      ['e', 'Edit selected task (focus its title)'],
       ['c', 'Complete selected task'],
+      ['⌘⌫', 'Archive selected task (Ctrl+Backspace on Windows/Linux)'],
       ['b', 'Move selected task to backlog'],
       ['r', 'Refresh current view'],
       ['/', 'Focus task search'],

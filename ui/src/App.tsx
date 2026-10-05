@@ -99,6 +99,19 @@ function AppInner() {
   // page) and coming back lands you where you left off rather than on Priority.
   useEffect(() => { saveLastNav(nav) }, [nav])
 
+  // Section history for the ⌘[ / ⌘← "back" shortcut. Every nav change pushes the
+  // section being left; going back pops it and skips the push for that one change.
+  const navHistoryRef = useRef<NavSection[]>([])
+  const prevNavRef = useRef<NavSection>(nav)
+  const navigatingBackRef = useRef(false)
+  useEffect(() => {
+    const prev = prevNavRef.current
+    prevNavRef.current = nav
+    if (prev === nav) return
+    if (navigatingBackRef.current) { navigatingBackRef.current = false; return }
+    navHistoryRef.current = [...navHistoryRef.current, prev].slice(-20)
+  }, [nav])
+
   // Sidebar visibility is per-backend, so re-resolve it whenever the active
   // backend changes (e.g. switching instances in Settings). A user-initiated
   // switch reloads the page (so the remembered tab is restored on boot); this
@@ -247,7 +260,42 @@ function AppInner() {
         return
       }
 
-      if (isInInput || e.metaKey || e.ctrlKey || e.altKey) return
+      if (isInInput) return
+
+      // ⌘ / Ctrl combos. Only these exact combos are claimed — everything else
+      // with a modifier held still falls through untouched (menu accelerators,
+      // copy/paste, devtools). They never fire inside inputs, where ⌘⌫ and ⌘←
+      // are text-editing keys.
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && !e.altKey && !e.shiftKey) {
+        if (e.key === 'Backspace') {
+          // Archive the selected task (same effect as the MCP archive_task tool, no resurface date).
+          if (!selectedId) return
+          e.preventDefault()
+          const id = selectedId
+          setSelectedId(null)
+          await updateTask(id, { status: 'archived', surface_after: null })
+          if (nav === 'backlog') setBacklogRefresh(n => n + 1)
+          else if (nav === 'code') setCodeRefresh(n => n + 1)
+          else if (nav === 'reading') setReadingRefresh(n => n + 1)
+          else load(date, true)
+          return
+        }
+        if (e.key === '[' || e.key === 'ArrowLeft') {
+          // Back: close the innermost open surface, else return to the previous section.
+          e.preventDefault()
+          if (meetingId) { setMeetingId(null); return }
+          if (selectedId) { setSelectedId(null); return }
+          const prev = navHistoryRef.current.pop()
+          if (prev && prev !== nav) {
+            navigatingBackRef.current = true
+            setNav(prev)
+          }
+          return
+        }
+      }
+
+      if (e.metaKey || e.ctrlKey || e.altKey) return
 
       // Navigation: number keys 1–7
       if (NAV_KEYS[e.key]) {
@@ -300,6 +348,28 @@ function AppInner() {
             setSelectedId(nextId)
             rows[nextIdx].scrollIntoView({ block: 'nearest' })
           }
+          break
+        }
+        case 'e': {
+          // Edit: the selected task's detail panel is already open; put the caret at the
+          // end of its (contentEditable) title. Retry briefly while the panel is loading.
+          if (!selectedId) break
+          e.preventDefault()
+          const focusTitle = (attempt: number) => {
+            const el = document.querySelector<HTMLElement>('.detail-title')
+            if (!el) {
+              if (attempt < 20) setTimeout(() => focusTitle(attempt + 1), 50)
+              return
+            }
+            el.focus()
+            const range = document.createRange()
+            range.selectNodeContents(el)
+            range.collapse(false)
+            const sel = window.getSelection()
+            sel?.removeAllRanges()
+            sel?.addRange(range)
+          }
+          focusTitle(0)
           break
         }
         case 'c':
