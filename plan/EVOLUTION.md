@@ -2,12 +2,13 @@
 
 ## Runtime inference, visible agent.config errors, dead Box Web refresh hook (2026-10-05)
 
-- Prompt-mode runtime is inferred from the command's binary when agent.config sets none:
-  `claude`/`codex` get their adapters, anything else runs `raw` with a warning. Previously a
-  `defaultAgentCommand` of `codex --yolo` was always given Claude's `-p … --output-format
-  stream-json --verbose` and codex rejected every job (FlightDesk 6ff720ba). Explicit `runtime`
-  still wins; the missing-config fallback command is unchanged. Settings → General shows an inline
-  hint when the default agent command's binary is neither CLI.
+- Prompt-mode runtime is inferred from the command's binary when agent.config sets none: `codex`
+  → codex; `claude` and anything else → claude, the latter with a warning suggesting
+  `"runtime": "raw"`/`"codex"`. Unknown binaries stay on claude so wrapper scripts that forward to
+  claude keep their prompt and resume. Previously a `defaultAgentCommand` of `codex --yolo` was
+  always given Claude's `-p … --output-format stream-json --verbose` and codex rejected every job
+  (FlightDesk 6ff720ba). Explicit `runtime` still wins; the missing-config fallback command is
+  unchanged. Settings → General shows an inline hint when the default command's binary is neither CLI.
 - Unreadable or invalid agent.config files (and unreadable directories in the agent scan) are now
   logged with their path instead of being swallowed; the job still runs with defaults and ENOENT
   stays silent (FlightDesk 54c0cadf).

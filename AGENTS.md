@@ -204,15 +204,17 @@ with `"runtime"` in `agent.config`:
 |---|---|---|---|
 | `claude` | `claude <flags> -p <prompt> --output-format stream-json --verbose` | `--resume <session_id>` | Every event carries `session_id`. |
 | `codex` | `codex exec <flags> --json <prompt>` | `codex exec resume <id> <prompt>` | `--json` is JSONL; session id arrives in the first `thread.started` event. |
-| `raw` | the command untouched | none | Template-mode semantics in a non-placeholder command; also what an unrecognised binary gets. |
+| `raw` | the command untouched | none | Explicit opt-in to template-mode semantics in a non-placeholder command. |
 
 An explicit `runtime` always wins. Omitting it **infers the runtime from the command's binary** —
 the first argv element, or the first word of a shell string after any leading `NAME=value`
-assignments, as a basename (`inferRuntime` in `server/agent-runtimes.js`): `claude` → `claude`,
-`codex` → `codex`, anything else → `raw` with a `console.warn` naming the command. This applies to
-`settings.defaultAgentCommand` too, so `codex --yolo` there no longer gets Claude's `-p … --output-format
-stream-json` appended. Configs whose command starts with `claude` are unaffected; a wrapper script
-that wraps Claude must now say `"runtime": "claude"`. An unknown explicit value logs a warning and
+assignments, as a basename (`inferRuntime` in `server/agent-runtimes.js`): `codex` → `codex`,
+`claude` → `claude`, anything else → `claude` (the previous behaviour) plus a `console.warn` naming
+the command and pointing at `"runtime": "raw"`/`"codex"`. Unknown binaries stay on claude because
+prompt mode spawns the binary directly with Claude's flags, and a wrapper script (or `node
+wrapper.js`) that forwards to claude depends on them; raw would silently drop the prompt and
+resume. This applies to `settings.defaultAgentCommand` too, so `codex --yolo` there no longer gets
+Claude's `-p … --output-format stream-json` appended. An unknown explicit value logs a warning and
 falls back to `claude`. The missing-config/missing-command fallback to `defaultAgentCommand ||
 'claude --dangerously-skip-permissions'` is intentional and unchanged.
 

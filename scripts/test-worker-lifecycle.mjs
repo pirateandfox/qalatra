@@ -35,9 +35,7 @@ const ctx = {
 const add = (title, config = {}, folder = title) => {
   const agentPath = path.join(dir, folder)
   fs.mkdirSync(agentPath, { recursive: true })
-  // The fixture speaks Claude's stream-json, so it names the runtime: a bare `node` binary would
-  // otherwise be inferred as raw.
-  fs.writeFileSync(path.join(agentPath, 'agent.config'), JSON.stringify({ command: [process.execPath, fixture], runtime: 'claude', ...config }))
+  fs.writeFileSync(path.join(agentPath, 'agent.config'), JSON.stringify({ command: [process.execPath, fixture], ...config }))
   const job = { id: `lifecycle-${jobs.length}-${process.pid}`, task_id: `task-${jobs.length}`, title, agent_path: agentPath, prompt: 'test', state: 'queued' }
   jobs.push(job)
   return job
@@ -79,8 +77,8 @@ try {
   assert.equal(hooks.find(h => h.job.id === bad.id).diagnostics.kind, 'launch_failed')
   assert.equal(agentWorkerStatus(settings).admittedJobs, 0)
 
-  // No runtime + a binary that is neither claude nor codex: inferred raw, so no Claude prompt
-  // flags are appended and stdout is the result verbatim.
+  // No runtime + a binary that is neither claude nor codex: stays claude (wrappers forward to it),
+  // so Claude's prompt flags are appended, with a warning. An explicit raw runtime appends nothing.
   const argvFixture = path.join(dir, 'argv.cjs')
   fs.writeFileSync(argvFixture, 'console.log(JSON.stringify(process.argv.slice(2)))\n')
   const origWarn = console.warn
@@ -90,12 +88,18 @@ try {
   console.warn = (...a) => warned.push(a.join(' '))
   console.error = (...a) => errored.push(a.join(' '))
   try {
-    const inferred = add('inferred-raw', { command: [process.execPath, argvFixture, '--own-flag'], runtime: undefined })
+    const inferred = add('inferred-claude', { command: [process.execPath, argvFixture, '--own-flag'] })
     await processAgentJobs(ctx)
     await waitFor(() => completed.has(inferred.id))
     assert.equal(completed.get(inferred.id).status, 'done')
-    assert.equal(completed.get(inferred.id).result, '["--own-flag"]', 'raw inference must not append -p/--output-format')
-    assert.ok(warned.some(w => w.includes('raw mode') && w.includes(argvFixture)), 'raw inference warns naming the command')
+    // stdout isn't stream-json, so the claude consumer falls back to the raw tail.
+    assert.deepEqual(JSON.parse(completed.get(inferred.id).result), ['--own-flag', '-p', 'test', '--output-format', 'stream-json', '--verbose'])
+    assert.ok(warned.some(w => w.includes('not a recognised runtime') && w.includes(argvFixture)), 'an unrecognised binary warns naming the command')
+
+    const explicitRaw = add('explicit-raw', { command: [process.execPath, argvFixture, '--own-flag'], runtime: 'raw' })
+    await processAgentJobs(ctx)
+    await waitFor(() => completed.has(explicitRaw.id))
+    assert.equal(completed.get(explicitRaw.id).result, '["--own-flag"]', 'explicit raw must not append prompt flags')
 
     // Invalid agent.config: logged with its path, and the job still runs on the default command.
     const broken = add('broken-config')
@@ -104,7 +108,7 @@ try {
     await processAgentJobs(ctx)
     await waitFor(() => completed.has(broken.id))
     assert.equal(completed.get(broken.id).status, 'done', 'an unreadable agent.config falls back to defaults')
-    assert.equal(completed.get(broken.id).result, '[]')
+    assert.equal(JSON.parse(completed.get(broken.id).result)[0], '-p', 'the default command ran in prompt mode')
     assert.ok(errored.some(e => e.includes(path.join(broken.agent_path, 'agent.config')) && e.includes('continuing with defaults')))
   } finally {
     console.warn = origWarn

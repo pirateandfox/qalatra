@@ -13,7 +13,8 @@ interface GeneralSettingsProps {
 
 /**
  * Mirrors the server's runtime inference (server/agent-runtimes.js commandBinary/inferRuntime): with
- * no explicit runtime, a prompt-mode command whose binary is neither `claude` nor `codex` runs raw.
+ * no explicit runtime, a prompt-mode command whose binary is neither `claude` nor `codex` still gets
+ * Claude's prompt flags, which is wrong for a non-Claude CLI.
  * Empty (the built-in default) and template commands ({description}/{title}/{spec_file}) never warn.
  */
 function isUnknownRuntimeCommand(command: string | undefined): boolean {
@@ -216,7 +217,7 @@ export function GeneralSettings({ settings, setSetting, saved, onSave }: General
         <span className="settings-hint">Used when launching agents from task queue and the Chat button in file previewers. Per-agent agent.config overrides this.</span>
         {isUnknownRuntimeCommand(settings.defaultAgentCommand) && (
           <span className="settings-hint" style={{ color: '#f59e0b' }}>
-            Not a known runtime — Qalatra will run it as-is (raw mode) and won't add prompt flags.
+            Not a recognised runtime. Qalatra will append Claude's prompt flags. For a non-Claude CLI, set runtime in the agent's agent.config.
           </span>
         )}
       </div>
