@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'child_process'
 import { v4 as uuidv4 } from 'uuid'
 import { scanAgents } from './agents.js'
 import { syncPendingAttachments } from './attachments.js'
-import { getRuntime, isKnownRuntime, DEFAULT_RUNTIME, runtimeNames } from './agent-runtimes.js'
+import { getRuntime, isKnownRuntime, inferRuntime, DEFAULT_RUNTIME, runtimeNames } from './agent-runtimes.js'
 import { createAgentWatchdog } from './agent-watchdog.js'
 import { loadFolderRc } from './integrations/flightdesk/rc.js'
 import { ensureTaskWorktree, sweepIdleWorktrees } from './worktrees.js'
@@ -733,10 +733,18 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
 
   let agentCommand = settings.defaultAgentCommand || 'claude --dangerously-skip-permissions'
   let cfg = null
+  const configPath = path.join(job.agent_path, 'agent.config')
   try {
-    cfg = JSON.parse(fs.readFileSync(path.join(job.agent_path, 'agent.config'), 'utf8'))
-    if (cfg.command) agentCommand = cfg.command
-  } catch {}
+    cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+    if (cfg?.command) agentCommand = cfg.command
+  } catch (err) {
+    // A folder without agent.config is supported and runs on the default command. Anything else
+    // (invalid JSON, EACCES) used to vanish silently while every setting in the file was ignored.
+    cfg = null
+    if (err?.code !== 'ENOENT') {
+      console.error(`[workers] could not read ${configPath} for job ${job.id}: ${err.message} — continuing with defaults; all agent.config settings (command, runtime, timeouts, memory, worktrees, concurrency_key) are ignored for this run`)
+    }
+  }
 
   if (cfg?.coding && job.task_id) {
     // Non-fatal + guarded (bug C21): a rejection here must not escape the loop and leak the
@@ -789,7 +797,13 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
   // Template commands run verbatim, so no runtime owns their argv. Their output still goes through
   // the claude adapter's non-streaming parser, which is the lenient one (structured result if the
   // command happens to emit Claude JSON, raw stdout otherwise) — exactly what they relied on before.
-  const runtimeName = isTemplateCommand ? DEFAULT_RUNTIME : cfg?.runtime
+  // An explicit agent.config runtime always wins (an unknown value falls back to claude, above);
+  // without one, the command's binary decides, so `codex …` never gets Claude's prompt flags.
+  const runtimeName = isTemplateCommand
+    ? DEFAULT_RUNTIME
+    : (cfg?.runtime != null
+      ? cfg.runtime
+      : inferRuntime(agentCommand, { onWarn: message => console.warn(`[workers] agent ${job.agent_path}: ${message}`) }))
   const runtime = getRuntime(runtimeName)
   // Recorded for display. A template command isn't driven by a CLI adapter at all, so it reports
   // 'raw' rather than claiming to be a Claude job just because it borrows that parser.

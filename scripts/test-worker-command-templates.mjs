@@ -11,6 +11,7 @@ import {
   resumeMessageForJob,
   templateEnv,
 } from '../server/workers.js'
+import { commandBinary, getRuntime, inferRuntime } from '../server/agent-runtimes.js'
 
 const warnings = []
 const onWarn = message => warnings.push(message)
@@ -174,3 +175,33 @@ assert.ok(Buffer.byteLength(scheduledResume) < 512, 'a resumed run without feedb
 assert.ok(!scheduledResume.includes('old agent output'), 'accumulated task history must not be replayed')
 
 console.log('worker command-template tests passed')
+
+// ── Runtime inference (no explicit agent.config runtime) ──────────────────────────────────────────
+// Before inference, an absent runtime always meant claude, so `codex --yolo` was spawned with
+// `-p … --output-format stream-json --verbose` appended and codex rejected it.
+const runtimeWarnings = []
+const infer = command => inferRuntime(command, { onWarn: m => runtimeWarnings.push(m) })
+assert.equal(infer('claude --dangerously-skip-permissions'), 'claude')
+assert.equal(infer('codex --yolo'), 'codex')
+assert.equal(infer('codex exec --full-auto'), 'codex')
+assert.equal(infer('/usr/local/bin/claude -c'), 'claude', 'a path resolves by basename')
+assert.equal(infer('  FOO=1 BAR=two codex --yolo'), 'codex', 'leading env assignments are skipped')
+assert.equal(infer('"claude" --verbose'), 'claude', 'surrounding quotes are ignored')
+assert.equal(infer(['/opt/bin/codex', '--yolo']), 'codex', 'argv form uses the first element')
+assert.equal(infer(['C:\\tools\\claude.exe']), 'claude', 'Windows paths and extensions resolve')
+assert.equal(runtimeWarnings.length, 0, 'known binaries never warn')
+// Unknown binaries keep claude: wrapper scripts that forward to claude depend on its flags.
+assert.equal(infer('aider --yes'), 'claude')
+assert.equal(infer(['node', 'agent.js']), 'claude')
+assert.equal(infer('claude-wrapper.sh'), 'claude', 'only an exact binary name is recognised')
+assert.equal(runtimeWarnings.length, 3, 'every unrecognised binary warns')
+assert.match(runtimeWarnings[0], /aider --yes/, 'the warning names the command')
+assert.match(runtimeWarnings[0], /not a recognised runtime/)
+assert.match(runtimeWarnings[0], /"runtime": "raw"/, 'the warning says how to opt out')
+assert.equal(commandBinary('A=1'), null)
+assert.equal(commandBinary(''), null)
+// The adapters inference picks never append another vendor's flags.
+assert.deepEqual(getRuntime(infer('codex --yolo')).buildArgs({ baseArgs: ['--yolo'], prompt: 'p' }), ['exec', '--yolo', '--json', 'p'])
+assert.deepEqual(getRuntime('raw').buildArgs({ baseArgs: ['--yes'], prompt: 'p' }), ['--yes'])
+
+console.log('runtime inference tests passed')

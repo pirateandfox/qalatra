@@ -105,6 +105,12 @@ Every agent run — both forms, and prompt-mode agents too — also receives the
 
 Title and description are capped at 64 KiB in the environment. These names are reserved; an `env` entry with the same name is overridden.
 
+### Runtime selection
+
+A command without placeholders runs in prompt mode, where Qalatra appends the prompt and output flags for a specific CLI. Set `"runtime": "claude" | "codex" | "raw"` to choose the adapter explicitly; that always wins. Without it, Qalatra infers the runtime from the command's binary (first argv element, or the first word of a shell string after any `NAME=value` assignments, compared by basename): `codex` gets the Codex adapter, and `claude` or any other binary gets the Claude adapter. An unrecognised binary also logs a warning, because Claude's prompt flags are appended to it — correct for a wrapper script that forwards to claude, wrong for another CLI. For a non-Claude CLI set `"runtime": "raw"` (run untouched, stdout as the result, no resume) or `"codex"`. The same inference applies to the server's `defaultAgentCommand` when a folder has no `agent.config` or no `command`.
+
+If `agent.config` exists but cannot be read or is not valid JSON, the server logs the path and error; the agent scan skips the folder, and a queued job runs with the default command and none of the file's settings.
+
 Qalatra infers a default capability from that:
 
 - `kind = "agent"`
