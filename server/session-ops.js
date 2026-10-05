@@ -17,26 +17,108 @@ export const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:7878/mcp'
 export const SESSION_OPS = ['inject', 'state', 'archive', 'create_pr']
 
 export class BridgeUnavailableError extends Error {
-  constructor(message) { super(message); this.name = 'BridgeUnavailableError' }
+  constructor(message, { code = null, details = null } = {}) { super(message); this.name = 'BridgeUnavailableError'; this.code = code; this.details = details }
 }
 export class UnknownSessionError extends Error {
-  constructor(message) { super(message); this.name = 'UnknownSessionError' }
+  constructor(message, { code = null, details = null } = {}) { super(message); this.name = 'UnknownSessionError'; this.code = code; this.details = details }
+}
+
+// Claude Bridge 0.1.19 classifies its own failures: `Error: [CODE] message`, then optionally
+// `\n\nDetails: {json}` with what the sessions API answered and what the page showed. Routing on
+// the code is the point — the prose (and especially the Details, which quote page text) is what
+// made a pop-up or a crashed tab look like a missing session.
+const GONE_CODES = new Set(['SESSION_NOT_FOUND', 'INVALID_SESSION_ID'])
+// PAGE_UNREADABLE reasons that are about the tab, not this session — the ones the bridge itself
+// tries to recover by opening/reloading the tab or pressing Escape. row_not_rendered,
+// off_code_page and a failed API lookup stay per-op errors.
+const PAGE_DOWN_REASONS = new Set(['no_tab', 'tab_crashed', 'content_unreachable', 'error_screen', 'sidebar_empty', 'dialog_open'])
+
+/** Split a bridge error text into { code, message, details }. Uncoded (pre-0.1.19) text gives code null. */
+export function parseBridgeError(text) {
+  const raw = String(text ?? '')
+  const at = raw.search(/\n\s*Details:\s*/)
+  let head = raw, details = null
+  if (at !== -1) {
+    head = raw.slice(0, at)
+    try { details = JSON.parse(raw.slice(at).replace(/^\s*Details:\s*/, '')) } catch { details = null }
+  }
+  const m = head.match(/^Error: \[([A-Z_]+)\]\s*/)
+  const message = (m ? head.slice(m[0].length) : head.replace(/^Error:\s*/, '')).trim()
+  return { code: m ? m[1] : null, message, details: details && typeof details === 'object' ? details : null }
+}
+
+/**
+ * The bridge's PAGE_UNREADABLE prose quotes the page — a pop-up's label or text, an error screen's
+ * body — in double quotes (describePage). Withhold every quoted run, and any scraped string the
+ * details name, so an error message can be forwarded without carrying page content.
+ */
+export function redactPageText(message, details = null) {
+  let out = String(message ?? '')
+  const page = details?.page ?? null
+  const scraped = [page?.bodyText, ...(Array.isArray(page?.dialogs) ? page.dialogs.flatMap(d => [d?.label, d?.text]) : [])]
+    .filter(s => typeof s === 'string' && s.trim().length >= 4)
+  for (const s of scraped) out = out.split(s).join('[page text withheld]')
+  return out.replace(/"[^"\n]*"/g, '"[page text withheld]"')
+}
+
+/** The error to throw for a parsed bridge failure. Exported for tests. */
+export function classifyBridgeError({ code, message: rawMessage, details }) {
+  const meta = { code, details }
+  const message = redactPageText(rawMessage, details)
+  if (code) {
+    if (GONE_CODES.has(code)) return new UnknownSessionError(message, meta)
+    if (code === 'NOT_AUTHENTICATED') return new BridgeUnavailableError(message, meta)
+    if (code === 'PAGE_UNREADABLE') {
+      // details.recovery: the bridge already tried to fix the page and it is still failing.
+      const reason = details?.reason ?? details?.page?.reason ?? null
+      if (details?.recovery || PAGE_DOWN_REASONS.has(reason)) return new BridgeUnavailableError(message, meta)
+    }
+    // TIMEOUT, SESSION_ARCHIVED, the rest of PAGE_UNREADABLE, any code added later: this op failed;
+    // nothing says the session is gone or the box is down.
+    return Object.assign(new Error(message), meta)
+  }
+  // Uncoded: an older bridge, or the daemon's own errors ("Chrome not connected — is the extension
+  // loaded and a claude.ai tab open?"). Matched on the message only — never on Details — and
+  // without a bare "not found", which is how "Create PR button not found" read as a missing session.
+  if (/chrome not connected|chrome disconnected|is the extension loaded|tab open|not connected/i.test(message)) return new BridgeUnavailableError(message, meta)
+  if (/unknown session|no such session|no session\b|session not found/i.test(message)) return new UnknownSessionError(message, meta)
+  return Object.assign(new Error(message), meta)
 }
 
 function parseToolResult(res, name) {
   const text = (res?.content ?? []).filter(c => c?.type === 'text').map(c => c.text).join('\n')
+  if (res?.isError) {
+    let json = null
+    try { json = JSON.parse(text) } catch {}
+    const jsonMessage = json && typeof json === 'object' ? (json.error || json.message) : null
+    throw classifyBridgeError(jsonMessage ? { code: json.code ?? null, message: String(jsonMessage), details: json.details ?? null }
+      : text ? parseBridgeError(text)
+      : { code: null, message: `${name} failed`, details: null })
+  }
   let parsed
   try { parsed = JSON.parse(text) } catch { parsed = text ? { text } : {} }
-  if (res?.isError) {
-    const message = parsed?.error || parsed?.message || text || `${name} failed`
-    // The daemon answers but its Chrome side is gone ("Chrome not connected — is the extension
-    // loaded and a claude.ai tab open?"). That is the box's dependency being down, not this op
-    // failing, and an orchestrator should hold further ops rather than mark sessions broken.
-    if (/chrome not connected|extension|tab open|not connected/i.test(message)) throw new BridgeUnavailableError(message)
-    if (/not found|unknown session|no such session|no session/i.test(message)) throw new UnknownSessionError(message)
-    throw new Error(message)
-  }
   return parsed
+}
+
+/**
+ * The parts of get_state's `pageIssue` that may leave this box. The bridge's page diagnostics quote
+ * the page (bodyText, dialog labels and text); none of that is passed on.
+ */
+export function safePageIssue(issue) {
+  if (!issue || typeof issue !== 'object') return null
+  return {
+    reason: typeof issue.reason === 'string' ? issue.reason.slice(0, 40) : null,
+    errorScreen: issue.errorScreen === true,
+    dialogs: Array.isArray(issue.dialogs) ? issue.dialogs.length : 0,
+    sidebarRows: Number.isFinite(issue.sidebarRows) ? issue.sidebarRows : null,
+    composer: typeof issue.composer === 'boolean' ? issue.composer : null,
+  }
+}
+/** `recovered` / `recovery` is { action, reason, outcome } — bridge enums, copied field by field anyway. */
+export function safeRecovery(r) {
+  if (!r || typeof r !== 'object') return null
+  const pick = v => (typeof v === 'string' && /^[a-z_]{1,40}$/.test(v) ? v : null)
+  return { action: pick(r.action), reason: pick(r.reason), outcome: pick(r.outcome) }
 }
 
 /**
@@ -103,7 +185,7 @@ export function createSessionOps({ bridgeUrl = process.env.CLAUDE_BRIDGE_URL || 
       if (!sessionId) throw new Error('sessionId required')
       if (!String(prompt ?? '').trim()) throw new Error('prompt required')
       const r = await withClient(c => call(c, 'claude_session_inject', { session_id: sessionId, prompt }))
-      return { injected: Boolean(r?.injected), verified: r?.verified === true, turnId: r?.turnId ?? null }
+      return { injected: Boolean(r?.injected), verified: r?.verified === true, turnId: r?.turnId ?? null, recovered: safeRecovery(r?.recovered) }
     },
     /** State plus what the last turn looked like, so "ended asking a question" is visible without an agent. */
     async state({ sessionId }) {
@@ -140,8 +222,12 @@ export function createSessionOps({ bridgeUrl = process.env.CLAUDE_BRIDGE_URL || 
           resolvedApprovalsCursor: s?.resolvedApprovalsCursor ?? null,
           resolvedApprovalsTruncated: s?.resolvedApprovalsTruncated ?? null,
           statusBucket: s?.statusBucket ?? null,
+          // With a pageIssue the page could not be scraped, so a null prUrl/branch means "not
+          // read", not "no PR". The state itself then comes from the sessions API.
           prUrl: s?.prUrl ?? null,
           branch: s?.branchBar ?? s?.branch ?? null,
+          pageIssue: safePageIssue(s?.pageIssue),
+          recovered: safeRecovery(s?.recovered),
           sessionIdle,
           lastTurnAt, lastTurnRole,
           // A stopped session whose last turn asks for something — question mark or not.
@@ -151,8 +237,14 @@ export function createSessionOps({ bridgeUrl = process.env.CLAUDE_BRIDGE_URL || 
     },
     async archive({ sessionId }) {
       if (!sessionId) throw new Error('sessionId required')
-      const r = await withClient(c => call(c, 'claude_session_archive', { session_id: sessionId }))
-      return { archived: r?.archived ?? r?.ok ?? true }
+      let r
+      try { r = await withClient(c => call(c, 'claude_session_archive', { session_id: sessionId })) }
+      catch (err) {
+        // Archiving a session that is already archived is the goal, not a failure.
+        if (err.code === 'SESSION_ARCHIVED') return { archived: true, alreadyArchived: true, recovered: null }
+        throw err
+      }
+      return { archived: r?.archived ?? r?.ok ?? true, recovered: safeRecovery(r?.recovered) }
     },
     async createPr({ sessionId }) {
       if (!sessionId) throw new Error('sessionId required')

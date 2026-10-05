@@ -16,7 +16,7 @@ import os from 'os'
 import fs from 'fs'
 import path from 'path'
 import { isTransitionRejection, FlightDeskAuthError } from './client.js'
-import { SESSION_OPS, BridgeUnavailableError, UnknownSessionError } from '../../session-ops.js'
+import { SESSION_OPS, BridgeUnavailableError, UnknownSessionError, safeRecovery } from '../../session-ops.js'
 import { removeTaskWorktree } from '../../worktrees.js'
 
 export const ORCHESTRATOR = 'flightdesk'
@@ -178,6 +178,50 @@ function moveToFailed(dir, name, reason) {
     fs.renameSync(path.join(dir, name), path.join(failedDir, name))
     fs.writeFileSync(path.join(failedDir, `${name}.reason.txt`), `${new Date().toISOString()} ${reason}\n`)
   } catch {}
+}
+
+const SAFE_TOKEN = /^[A-Za-z0-9_.-]{1,60}$/
+const safeToken = v => (typeof v === 'number' && Number.isFinite(v)) || (typeof v === 'string' && SAFE_TOKEN.test(v)) ? v : null
+
+/**
+ * The allow-listed part of a bridge error's Details. The rest — page.bodyText, dialog labels and
+ * text, the API's own error string, Chrome's error message — can quote page or account content and
+ * never leaves this box.
+ */
+export function safeBridgeDetails(details) {
+  if (!details || typeof details !== 'object') return null
+  const out = {}
+  const lookup = details.lookup
+  if (lookup && typeof lookup === 'object') {
+    const l = { status: safeToken(lookup.status), apiStatus: safeToken(lookup.apiStatus) }
+    if (l.status != null || l.apiStatus != null) out.lookup = l
+  }
+  const pageReason = safeToken(details.page?.reason ?? details.reason)
+  if (pageReason != null) out.pageReason = pageReason
+  const recovery = safeRecovery(details.recovery)
+  if (recovery) out.recovery = recovery
+  return Object.keys(out).length ? out : null
+}
+
+/**
+ * A failed SESSION_OP as FlightDesk sees it. The bridge code leads the text so truncation can only
+ * cut the end; an unknown session keeps the words "unknown session", which FlightDesk matches to
+ * treat archiving an already-gone session as done.
+ */
+export function sessionOpFailure(err, sessionId) {
+  const kind = err instanceof BridgeUnavailableError ? 'dependency_down' : 'error'
+  const code = typeof err?.code === 'string' && /^[A-Z_]{1,60}$/.test(err.code) ? err.code : null
+  const details = code ? safeBridgeDetails(err.details) : null
+  const parts = []
+  if (code) parts.push(`[${code}]`)
+  if (err instanceof UnknownSessionError) parts.push(`unknown session ${sessionId}:`)
+  parts.push(String(err?.message ?? err))
+  let text = parts.join(' ')
+  if (details) text += `\nDetails: ${JSON.stringify(details)}`
+  const result = { diagnostics: { kind, text: text.slice(0, DIAGNOSTICS_CHARS) } }
+  // Additive: FlightDesk strips keys it does not know yet; the ledger keeps them.
+  if (code) result.bridgeError = { code, ...(details ? { details } : {}) }
+  return result
 }
 
 /**
@@ -415,7 +459,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
       if (spec.op === 'inject') {
         const r = await sessionOps.inject({ sessionId: spec.sessionId, prompt: spec.prompt })
         outcome = r.verified
-          ? { status: 'done', result: { injected: true, verified: true, turnId: r.turnId } }
+          ? { status: 'done', result: { injected: true, verified: true, turnId: r.turnId, recovered: r.recovered ?? null } }
           : { status: 'failed', result: { injected: r.injected, verified: false, diagnostics: { kind: 'error', text: 'inject unverified: delivery to the intended session could not be proven; read the transcript before retrying' } } }
       } else if (spec.op === 'state') {
         outcome = { status: 'done', result: await sessionOps.state({ sessionId: spec.sessionId }) }
@@ -425,9 +469,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
         outcome = { status: 'done', result: await sessionOps.createPr({ sessionId: spec.sessionId }) }
       }
     } catch (err) {
-      const kind = err instanceof BridgeUnavailableError ? 'dependency_down' : 'error'
-      const text = err instanceof UnknownSessionError ? `unknown session ${spec.sessionId}` : err.message
-      outcome = { status: 'failed', result: { diagnostics: { kind, text: tail(text, DIAGNOSTICS_CHARS) } } }
+      outcome = { status: 'failed', result: sessionOpFailure(err, spec.sessionId) }
     }
     await dbCall('recordExternalOp', { external_ref: request.id, orchestrator: ORCHESTRATOR, op: spec.op, status: outcome.status, result: outcome.result })
     status.sessionOpsTotal++

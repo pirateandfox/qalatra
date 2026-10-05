@@ -31,7 +31,7 @@ const dbCall = (method, ...args) => new Promise((resolve, reject) => {
 await new Promise(resolve => worker.once('message', m => m.ready && resolve()))
 
 const { createFlightDeskDispatcher, formatAnswersBlock, orderRequests, buildPrompt, sessionOpSpec, flushOutbox, OUTBOX_DIR } = await import('../server/integrations/flightdesk/dispatch.js')
-const { BridgeUnavailableError, turnEndsWithQuestion } = await import('../server/session-ops.js')
+const { BridgeUnavailableError, turnEndsWithQuestion, createSessionOps } = await import('../server/session-ops.js')
 const { isTransitionRejection, FlightDeskAuthError } = await import('../server/integrations/flightdesk/client.js')
 const { externalEnv, diagnosticsKindFor, flightdeskRcEnv, buildAgentEnv } = await import('../server/workers.js')
 
@@ -248,6 +248,40 @@ try {
   check('bridge unreachable → FAILED/dependency_down', [fd2.requests.get('s6').status, fd2.requests.get('s6').extras.diagnostics.kind], ['FAILED', 'dependency_down'])
   bridgeDown = false
   check('no dispatcher errors from the SESSION_OP run', opsLogs, [])
+
+  // Claude Bridge 0.1.19 coded errors, through the real session-ops parser to the outbound report.
+  // The Details quote the page; none of it may reach FlightDesk.
+  {
+    const PAGE = 'SECRET-PAGE-TEXT from a pop-up'
+    let errorText = ''
+    const codedBridge = createSessionOps({ connectImpl: async () => ({ async callTool() { return { isError: true, content: [{ type: 'text', text: errorText }] } } }) })
+    const fd3 = fakeFlightDesk()
+    const codedDispatcher = createFlightDeskDispatcher({ dbCall, clientFor: () => fd3.client, sessionOps: codedBridge, log: { error() {} }, hostname: 'testbox' })
+    const agentC = { path: '/agents/coded', name: 'coded', context: 'internal', project: 'ops' }
+    await dbCall('upsertAgents', [agentC])
+    const details = reason => ({ sessionId: 'sess-c', lookup: { status: reason ? 'found' : 'not_found', apiStatus: reason ? 200 : 404, error: 'api said not found' },
+      page: { reason: reason ?? 'row_not_rendered', dialogs: [{ role: 'dialog', label: 'No sessions', text: PAGE }], bodyText: PAGE, sidebarRows: 0 } })
+    const cases = [
+      ['c1', 'state', `Error: [SESSION_NOT_FOUND] Session not found: sess-c\n\nDetails: ${JSON.stringify(details(null))}`, 'error', /^\[SESSION_NOT_FOUND\] unknown session sess-c: /],
+      ['c2', 'state', `Error: [PAGE_UNREADABLE] Session sess-c exists, but the page shows "${PAGE}". The session is NOT missing.\n\nDetails: ${JSON.stringify({ ...details('dialog_open'), recovery: { action: 'dismiss_dialog', reason: 'dialog_open', outcome: 'still_failing' } })}`, 'dependency_down', /^\[PAGE_UNREADABLE\] Session sess-c exists/],
+      ['c3', 'state', `Error: [NOT_AUTHENTICATED] Not signed in to claude.ai in the bridge browser.\n\nDetails: ${JSON.stringify(details('sidebar_empty'))}`, 'dependency_down', /^\[NOT_AUTHENTICATED\] /],
+      ['c4', 'create_pr', 'Error: Create PR button not found', 'error', /^Create PR button not found$/],
+      ['c5', 'state', `Error: [TIMEOUT] Timed out waiting for Chrome response (get_state)`, 'error', /^\[TIMEOUT\] Timed out/],
+    ]
+    for (const [id, op, text, kind, pattern] of cases) {
+      errorText = text
+      fd3.add({ id, taskId: 'fd-task-c', kind: 'SESSION_OP', prompt: null, sessionOp: { op, sessionId: 'sess-c' } })
+      await codedDispatcher.pollFolder(agentC)
+      const r = fd3.requests.get(id)
+      const outbound = JSON.stringify(fd3.calls.filter(c => c[0] === 'update' && c[1]?.id === id))
+      check(`bridge error ${id} (${text.slice(0, 40)}…) → FAILED/${kind}`, [r.status, r.extras.diagnostics.kind, pattern.test(r.extras.diagnostics.text)], ['FAILED', kind, true])
+      check(`bridge error ${id}: no page text, no raw Details in the outbound payload`, [outbound.includes('SECRET-PAGE-TEXT'), outbound.includes('No sessions'), outbound.includes('api said')], [false, false, false])
+    }
+    errorText = 'Error: [SESSION_ARCHIVED] Session sess-c is archived — it has no sidebar row to act on'
+    fd3.add({ id: 'c6', taskId: 'fd-task-c', kind: 'SESSION_OP', prompt: null, sessionOp: { op: 'archive', sessionId: 'sess-c' } })
+    await codedDispatcher.pollFolder(agentC)
+    check('archive of an already-archived session → DONE', [fd3.requests.get('c6').status, fd3.requests.get('c6').extras.alreadyArchived], ['DONE', true])
+  }
   check('sessionOpSpec accepts a nested sessionOp object', sessionOpSpec({ sessionOp: { op: 'state', sessionId: 'a' } }).op, 'state')
   check('turnEndsWithQuestion heuristic', [
     turnEndsWithQuestion('Done.\n\nShould I also update the docs?'),
