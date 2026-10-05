@@ -124,6 +124,19 @@ as fields on the request, under `sessionOp`, or as JSON in `prompt` until Flight
 - Deferred, unacked, while any job holds the folder — that agent may be mid-inject itself.
 - Bridge unreachable, or the daemon reporting "Chrome not connected", is `FAILED /
   dependency_down`, which FlightDesk's per-box circuit breaker is meant to act on.
+- Claude Bridge 0.1.19 errors are routed by their `[CODE]`, never by prose or Details:
+  `SESSION_NOT_FOUND` / `INVALID_SESSION_ID` are an unknown session (text keeps the words
+  "unknown session", which FlightDesk matches for archive); `NOT_AUTHENTICATED` and a
+  `PAGE_UNREADABLE` about the tab (`no_tab`, `tab_crashed`, `content_unreachable`, `error_screen`,
+  `sidebar_empty`, `dialog_open`, or any with `details.recovery`) are `dependency_down`;
+  `TIMEOUT`, `SESSION_ARCHIVED`, other `PAGE_UNREADABLE` and uncoded UI failures ("Create PR button
+  not found") are plain `error`. Archiving an already-archived session is `DONE`. Diagnostics text
+  leads with the code; only `lookup.status/apiStatus`, the page reason and `recovery` travel from
+  Details (also as an additive `bridgeError`). Page text — `bodyText`, dialog labels/text, quoted
+  runs in the bridge's message — never leaves the box.
+- `state` also returns `pageIssue` (`{ reason, errorScreen, dialogs: <count>, sidebarRows,
+  composer }`) and `recovered`; with a `pageIssue`, a null `prUrl`/`branch` means "not read", not
+  "none". `inject`/`archive` return `recovered`. These are additive; FlightDesk strips them today.
 
 ## Outbox replay
 

@@ -1,5 +1,17 @@
 # Qalatra — Evolution Notes
 
+## Route Claude Bridge errors by code (2026-10-05, FlightDesk 651fdd69)
+
+- Session ops matched `/not found|…/` over the whole bridge error text, Details included, so a
+  pop-up (`PAGE_UNREADABLE`) or "Create PR button not found" became "unknown session"; a crashed
+  tab's "Extension manifest" text matched the unavailable regex. The parser now reads Claude
+  Bridge 0.1.19's `Error: [CODE] message` + `Details: {json}` and routes on the code; legacy
+  regexes apply only to uncoded errors and lost the bare "not found".
+- FlightDesk diagnostics lead with `[CODE]`, keep "unknown session" for gone sessions, and carry
+  only allow-listed details — page text (bodyText, dialog text, quoted runs) is withheld. Archive of
+  an archived session is DONE. `state` passes a sanitized `pageIssue` and `recovered`;
+  `inject`/`archive` pass `recovered`. Details: `docs/flightdesk-integration.md`.
+
 ## Release 1.9.56 (2026-10-04)
 
 - Live host concurrency and graceful draining, safe settings PATCH and worker status,
