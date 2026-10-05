@@ -1,5 +1,16 @@
 # Qalatra — Evolution Notes
 
+## Edit, archive and back keyboard shortcuts (2026-10-05)
+
+- `e` focuses the selected task's title in the detail panel (caret at end). `⌘⌫` / Ctrl+Backspace
+  archives the selected task (`status = 'archived'`, no resurface date, same as MCP `archive_task`).
+  `⌘[` / `⌘←` (Ctrl on Windows/Linux) goes back: closes the meeting view or detail panel, else
+  returns to the previous sidebar section from a 20-entry in-memory history.
+- The handler still ignores every other modifier combo; only these exact combos (no Shift/Alt) are
+  claimed, and never while focus is in an input, textarea, contentEditable or terminal, where ⌘⌫/⌘←
+  edit text. No Electron menu accelerator uses these keys. `?` overlay lists them.
+- Deferred pending a decision: `⌘K` command palette, `⌘1–4` view switching, `⌘Enter` complete.
+
 ## Release 1.9.56 (2026-10-04)
 
 - Live host concurrency and graceful draining, safe settings PATCH and worker status,
