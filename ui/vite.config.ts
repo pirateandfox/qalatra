@@ -15,6 +15,9 @@ export default defineConfig(({ mode }) => ({
       // unchanged.
       '@qalatra/shared': fileURLToPath(new URL('../packages/shared/src/index.ts', import.meta.url)),
     },
+    // @mdxeditor/editor and our mentions plugin must share one Lexical
+    // instance; a second copy breaks the composer context at runtime.
+    dedupe: ['lexical', '@lexical/react', '@lexical/utils', '@lexical/selection'],
   },
   server: {
     port: 5173,
