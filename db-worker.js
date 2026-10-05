@@ -6,11 +6,12 @@ import Database from 'better-sqlite3'
 import crypto from 'crypto'
 import pkg from 'rrule'
 import {
+  ensureAgentSchema,
   ensureCapabilitySchema,
   getCapability,
   listCapabilities,
   searchCapabilities,
-  upsertScannedCapabilities,
+  syncScannedAgents,
 } from './server/capability-registry.js'
 import { ensureDailyNoteSearchSchema, searchDailyNotes } from './server/daily-note-search.js'
 import { autoAttachMentionedFiles } from './server/mentioned-files.js'
@@ -169,18 +170,6 @@ function migrate() {
       archived   INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    CREATE TABLE IF NOT EXISTS agents (
-      path         TEXT PRIMARY KEY,
-      name         TEXT NOT NULL,
-      context      TEXT,
-      project      TEXT,
-      description  TEXT,
-      command      TEXT,
-      coding       INTEGER NOT NULL DEFAULT 0,
-      relative_path TEXT,
-      folder       TEXT,
-      last_seen    TEXT NOT NULL DEFAULT (datetime('now'))
-    );
     CREATE TABLE IF NOT EXISTS notes (
       id           TEXT PRIMARY KEY,
       task_id      TEXT NOT NULL REFERENCES tasks(id),
@@ -208,6 +197,9 @@ function migrate() {
       UNIQUE(habit_id, date)
     );
   `)
+  // agents (and its concurrency_key / worktrees columns) is defined once in capability-registry.js
+  // and shared with mcp/db.js, since both processes write it.
+  ensureAgentSchema(db)
   ensureCapabilitySchema(db)
   ensureDailyNoteSearchSchema(db)
   // sync_log is otherwise created only by mcp/db.js, so with MCP disabled (QALATRA_START_MCP=0)
@@ -282,12 +274,7 @@ function migrate() {
   tryAlter('ALTER TABLE heartbeats ADD COLUMN minute_offset INTEGER')
   tryAlter('ALTER TABLE tasks ADD COLUMN assigned_agent TEXT')
   tryAlter('ALTER TABLE projects ADD COLUMN is_repo INTEGER NOT NULL DEFAULT 0')
-  // Jobs that share a concurrency key never run at the same time (see getQueuedJobs). NULL means
-  // the agent folder itself is the key, so an agent with no config opt-in is serialized per folder.
-  tryAlter('ALTER TABLE agents ADD COLUMN concurrency_key TEXT')
-  // agent.config `worktrees: true`: a job carrying a task identity (external_meta.task_ref) runs in
-  // its own per-task git worktree, so its concurrency key gains the task (see jobConcurrencyKeySql).
-  tryAlter('ALTER TABLE agents ADD COLUMN worktrees INTEGER NOT NULL DEFAULT 0')
+  // agents.concurrency_key / agents.worktrees: added by ensureAgentSchema (server/capability-registry.js).
   // The directory a job was actually spawned in. agent_path stays the bound folder (identity, rc,
   // scans); run_cwd differs from it only for a worktree job. NULL on jobs from before this column.
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN run_cwd TEXT')
@@ -1021,26 +1008,10 @@ function updateProject(name, fields) {
   db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE name = @name`).run(params)
   return { ok: true }
 }
-function upsertAgents(agents) {
-  const upsert = db.prepare(`
-    INSERT INTO agents (path, name, context, project, description, command, coding, relative_path, folder, concurrency_key, worktrees, last_seen)
-    VALUES (@path, @name, @context, @project, @description, @command, @coding, @relative_path, @folder, @concurrency_key, @worktrees, datetime('now'))
-    ON CONFLICT(path) DO UPDATE SET
-      name = excluded.name, context = excluded.context, project = excluded.project,
-      description = excluded.description, command = excluded.command, coding = excluded.coding,
-      relative_path = excluded.relative_path, folder = excluded.folder,
-      concurrency_key = excluded.concurrency_key, worktrees = excluded.worktrees, last_seen = excluded.last_seen
-  `)
-  const run = db.transaction(list => { for (const a of list) upsert.run(a) })
-  run(agents.map(a => ({
-    path: a.path, name: a.name, context: a.context ?? null, project: a.project ?? null,
-    description: a.description ?? null, command: a.command ?? null,
-    coding: a.coding ? 1 : 0, relative_path: a.relativePath ?? null, folder: a.folder ?? null,
-    concurrency_key: a.concurrencyKey ?? null,
-    worktrees: a.worktrees ? 1 : 0,
-  })))
-  upsertScannedCapabilities(db, agents)
-  return { ok: true, count: agents.length }
+// One implementation with the MCP rescan_capabilities tool (syncScannedAgents): agents + capabilities
+// upserted, and rows under `opts.root` whose folder is gone pruned, in one transaction.
+function upsertAgents(agents, opts = {}) {
+  return syncScannedAgents(db, agents, { root: opts.root ?? null })
 }
 function listAgentsDb(filter = {}) {
   const conds = []; const params = {}

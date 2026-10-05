@@ -661,7 +661,7 @@ export async function runAgentScan({ dbCall, loadSettings }) {
   const root = settings.agentsRoot || settings.terminalCwd || process.env.HOME
   if (!root) return []
   const agents = await scanAgents(root, excludeFolders)
-  await dbCall('upsertAgents', agents)
+  await dbCall('upsertAgents', agents, { root })
   return agents
 }
 

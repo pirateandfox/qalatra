@@ -405,6 +405,26 @@ Capabilities are exposed through MCP:
 - `search_capabilities`: keyword search over name, description, aliases, triggers, context, project, and path
 - `rescan_capabilities`: rerun the filesystem scan and refresh registry rows
 
+### Scans, removed folders and `active`
+
+Qalatra Server's scan (startup, `POST /api/v1/agents/rescan`, `GET /api/v1/agents`) and
+`rescan_capabilities` share one write path (`syncScannedAgents` in
+`server/capability-registry.js`): the `agents` row (including `concurrency_key` and `worktrees`),
+the `capabilities` row and its `capability_files` are written in one transaction, so a failure
+part-way leaves both tables as they were.
+
+A scan also prunes. A row is pruned when its folder is under the scanned root, the scan did not
+find it, and its `agent.config` is no longer on disk. Its `agents` row is deleted and its
+capability is kept with `active = false`. A folder whose `agent.config` failed to parse, or that
+was newly excluded, keeps its rows. `rescan_capabilities` accepts any `root`. A narrow rescan
+prunes only under that root, and a root that does not exist prunes nothing. When the folder
+comes back, the next scan recreates the agents row and sets `active` from its `agent.config`
+again, so a config that declares `"capability": { "active": false }` stays inactive.
+
+`active` controls visibility: `search_capabilities` returns active capabilities only, and
+`list_capabilities` can filter on it. It does not block queueing or launching a job. A job for
+a folder that is gone fails at launch anyway.
+
 Example flow:
 
 ```text

@@ -11,6 +11,21 @@
   only allow-listed details — page text (bodyText, dialog text, quoted runs) is withheld. Archive of
   an archived session is DONE. `state` passes a sanitized `pageIssue` and `recovered`;
   `inject`/`archive` pass `recovered`. Details: `docs/flightdesk-integration.md`.
+## Agent scans: one write path, and removed folders pruned (2026-10-05)
+
+- FlightDesk 21f46114: db-worker `upsertAgents` and the MCP `rescan_capabilities` path had drifted
+  apart. The MCP path dropped `concurrency_key` and `worktrees` and ran without a transaction.
+  Both now call `syncScannedAgents` (`server/capability-registry.js`). It upserts agents and
+  capabilities in one outer transaction, so a failure part-way rolls back both tables. The agents
+  schema, including both columns, now lives in `ensureAgentSchema`, which db-worker and
+  mcp/db.js both call.
+- FlightDesk 6d914752: scans only upserted, so rows for deleted folders stayed forever. A scan
+  now prunes folders that are under the scanned root, missing from the scan, and missing their
+  agent.config on disk. Their agents row is deleted and their capability is set `active = 0`. A
+  narrow rescan never touches rows outside its root, and a missing root prunes nothing. A folder
+  that comes back gets its `active` value from its agent.config again. `active` is
+  documented as visibility only, not a launch gate.
+- Covered in `npm run test:job-concurrency` (scan section).
 
 ## Release 1.9.56 (2026-10-04)
 
