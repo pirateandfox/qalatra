@@ -8,8 +8,7 @@ import {
   getCapability,
   listCapabilities,
   searchCapabilities,
-  upsertScannedAgents,
-  upsertScannedCapabilities,
+  syncScannedAgents,
 } from '../../server/capability-registry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,12 +29,15 @@ async function scanAndUpsert(args = {}) {
 
   const agents = await scanAgents(root, excludeFolders);
   const db = openDb();
-  upsertScannedAgents(db, agents);
-  upsertScannedCapabilities(db, agents);
+  // Same write path as Qalatra Server's scan (db-worker upsertAgents): one transaction, and only
+  // rows under `root` are pruned, so a narrow rescan leaves the rest of the registry alone.
+  const synced = syncScannedAgents(db, agents, { root });
   return {
     ok: true,
     root,
     count: agents.length,
+    removed_agents: synced.removedAgents,
+    deactivated_capabilities: synced.deactivatedCapabilities,
     capabilities: agents.map(agent => ({
       id: agent.capability?.id,
       name: agent.name,
@@ -49,14 +51,14 @@ async function scanAndUpsert(args = {}) {
 export const toolDefs = [
   {
     name: 'list_capabilities',
-    description: 'List registered Qalatra capabilities derived from local agent folders and capability metadata.',
+    description: 'List registered Qalatra capabilities derived from local agent folders and capability metadata. A capability whose folder disappeared is kept with active=false. `active` only controls visibility in search and listing; it does not block queueing or launching a job (a launch fails anyway when the folder is gone).',
     inputSchema: {
       type: 'object',
       properties: {
         context: { type: 'string', description: 'Optional context slug filter' },
         project: { type: 'string', description: 'Optional project filter' },
         kind:    { type: 'string', description: 'agent | skill | workflow | knowledge | external_tool' },
-        active:  { type: 'boolean', description: 'Filter active/inactive capabilities. Omit to include both.' },
+        active:  { type: 'boolean', description: 'Filter active/inactive capabilities. Omit to include both. Inactive = agent.config declares active:false, or the folder is gone.' },
       },
     },
   },
@@ -73,7 +75,7 @@ export const toolDefs = [
   },
   {
     name: 'search_capabilities',
-    description: 'Search capability name, description, aliases, triggers, context, project, and folder path.',
+    description: 'Search capability name, description, aliases, triggers, context, project, and folder path. Returns active capabilities only. `active` only controls visibility in search and listing; it does not block queueing or launching a job (a launch fails anyway when the folder is gone).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -88,11 +90,11 @@ export const toolDefs = [
   },
   {
     name: 'rescan_capabilities',
-    description: 'Scan the configured agents root for agent.config files and refresh the capability registry. Existing agent.config files remain valid.',
+    description: 'Scan the configured agents root for agent.config files and refresh the capability registry. Existing agent.config files remain valid. Folders under the scanned root whose agent.config is gone have their agents row removed and their capability set inactive (reactivated when the folder returns); rows outside the root are untouched.',
     inputSchema: {
       type: 'object',
       properties: {
-        root: { type: 'string', description: 'Optional override root to scan. Defaults to Qalatra agentsRoot/terminalCwd/home.' },
+        root: { type: 'string', description: 'Optional override root to scan. Defaults to Qalatra agentsRoot/terminalCwd/home. Only rows under this root are pruned.' },
         exclude_folders: {
           type: 'array',
           items: { type: 'string' },

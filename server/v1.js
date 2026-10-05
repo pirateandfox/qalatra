@@ -81,7 +81,7 @@ async function agentsForSettings(ctx) {
   const root = settings.agentsRoot || settings.terminalCwd || process.env.HOME
   if (!root) return []
   const agents = await scanAgents(root, excludeFolders)
-  await ctx.dbCall('upsertAgents', agents)
+  await ctx.dbCall('upsertAgents', agents, { root })
   return agents.map(({ capability, ...agent }) => agent)
 }
 

@@ -8,6 +8,10 @@
 // concurrently. The rule now: at most one job per concurrency key at a time, where the key is
 // agent.config `concurrency_key` and defaults to the agent folder.
 //
+// Also covers the agent scan that fills the agents table those keys come from: Qalatra Server's
+// upsertAgents and the MCP rescan_capabilities tool share one transactional write path, and a
+// folder gone from under the scanned root is pruned (agents row deleted, capability inactive).
+//
 // Drives db-worker.js as a real worker thread against a throwaway DB. Run:
 //   node scripts/test-job-concurrency.mjs
 
@@ -18,7 +22,11 @@ import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qalatra-jobs-'))
+const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'qalatra-jobs-')))
+// The agent-scan section drives the MCP rescan_capabilities tool against the same DB file;
+// mcp/db.js reads these at import time, so they are set before its dynamic import below.
+process.env.TASKOS_DB_DIR = dir
+process.env.TASKOS_SETTINGS_FILE = path.join(dir, 'settings.json')
 const worker = new Worker(path.join(ROOT, 'db-worker.js'), { workerData: { dbPath: path.join(dir, 'tasks.db') } })
 
 let seq = 0
@@ -188,6 +196,81 @@ try {
   check('worktrees: …and runs in the folder, not a worktree', legacyRow?.worktreeTaskRef, null)
   check('worktrees: folder-session tasks serialize with each other on the folder key',
     only(batch, '/agents/wt').filter(id => id === legacy2.id || id === preColumn2.id).length, 1)
+
+  // ── Agent scan: one write path for Qalatra Server and MCP rescan_capabilities ────────────────
+  // Both go through syncScannedAgents (server/capability-registry.js): the same columns, agents +
+  // capabilities in one transaction, and folders gone from under the scanned root pruned.
+  const { scanAgents } = await import('../server/agents.js')
+  const { openDb } = await import('../mcp/db.js')
+  const { handlers: capHandlers } = await import('../mcp/tools/capabilities.js')
+  const { getCapability, syncScannedAgents } = await import('../server/capability-registry.js')
+  const mdb = openDb()
+  const writeConfig = (folder, cfg) => {
+    fs.mkdirSync(folder, { recursive: true })
+    fs.writeFileSync(path.join(folder, 'agent.config'), JSON.stringify(cfg))
+  }
+  const scanRoot = path.join(dir, 'agents-root')
+  const pipelineDir = path.join(scanRoot, 'repo', 'pipeline')
+  const otherDir = path.join(scanRoot, 'other')
+  const offDir = path.join(scanRoot, 'off')
+  const outsideDir = path.join(dir, 'outside', 'agent')
+  writeConfig(pipelineDir, { name: 'pipeline', worktrees: true, concurrency_key: 'repo-key' })
+  writeConfig(otherDir, { name: 'other' })
+  writeConfig(offDir, { name: 'off', capability: { active: false } })
+  writeConfig(outsideDir, { name: 'outside' })
+  const agentRow = async p => {
+    const row = (await call('listAgentsDb')).find(a => a.path === p)
+    if (!row) return null
+    const { last_seen, ...rest } = row
+    void last_seen
+    return rest
+  }
+  const capActive = p => getCapability(mdb, { path: p })?.active ?? null
+  const mcpRescan = root => capHandlers.rescan_capabilities({ root, exclude_folders: [] })
+
+  await call('upsertAgents', await scanAgents(scanRoot), { root: scanRoot })
+  await call('upsertAgents', await scanAgents(path.dirname(outsideDir)), { root: path.dirname(outsideDir) })
+  const serverRow = await agentRow(pipelineDir)
+  check('scan: server path writes concurrency_key and worktrees', [serverRow?.concurrency_key, serverRow?.worktrees], ['repo-key', 1])
+  mdb.prepare('DELETE FROM agents WHERE path = ?').run(pipelineDir)
+  await mcpRescan(scanRoot)
+  check('scan: MCP rescan yields the same agents row as the server scan', await agentRow(pipelineDir), serverRow)
+  check('scan: agent.config active:false is respected', capActive(offDir), false)
+
+  fs.rmSync(otherDir, { recursive: true, force: true })
+  fs.rmSync(outsideDir, { recursive: true, force: true })
+  let res = await mcpRescan(path.join(scanRoot, 'repo'))
+  check('scan: narrow rescan leaves rows outside its root alone',
+    [Boolean(await agentRow(otherDir)), capActive(otherDir), Boolean(await agentRow(outsideDir)), res.removed_agents], [true, true, true, []])
+  res = await mcpRescan(scanRoot)
+  check('scan: removed folder → agents row gone, capability inactive', [await agentRow(otherDir), capActive(otherDir)], [null, false])
+  check('scan: …and only it', res.removed_agents, [otherDir])
+  check('scan: a folder outside the scanned root is untouched even when gone', [Boolean(await agentRow(outsideDir)), capActive(outsideDir)], [true, true])
+  check('scan: surviving folders untouched', [Boolean(await agentRow(pipelineDir)), capActive(pipelineDir)], [true, true])
+  const missingRoot = await call('upsertAgents', [], { root: path.join(dir, 'no-such-root') })
+  check('scan: a missing root prunes nothing', missingRoot.removedAgents, [])
+
+  writeConfig(otherDir, { name: 'other' })
+  await call('upsertAgents', await scanAgents(scanRoot), { root: scanRoot })
+  check('scan: folder reappears → agents row back, capability active', [Boolean(await agentRow(otherDir)), capActive(otherDir)], [true, true])
+  check('scan: reappearance does not override agent.config active:false', capActive(offDir), false)
+
+  // A failure part-way (the capabilities upsert rejects a row after the agents upsert succeeded)
+  // rolls back both tables, on both paths.
+  const good = (await scanAgents(scanRoot)).map(a => a.path === pipelineDir ? { ...a, name: 'renamed', concurrencyKey: 'other-key' } : a)
+  const bad = { path: path.join(scanRoot, 'bad'), name: 'bad', capability: { id: 'cap_bad', path: path.join(scanRoot, 'bad'), name: null } }
+  let threw = false
+  try { syncScannedAgents(mdb, [...good, bad], { root: scanRoot }) } catch { threw = true }
+  const pipeAfterMcp = await agentRow(pipelineDir)
+  check('scan: MCP path failure rolls back agents and capabilities',
+    [threw, pipeAfterMcp?.name, pipeAfterMcp?.concurrency_key, Boolean(await agentRow(bad.path)), getCapability(mdb, { path: pipelineDir })?.name],
+    [true, 'pipeline', 'repo-key', false, 'pipeline'])
+  threw = false
+  try { await call('upsertAgents', [...good, bad], { root: scanRoot }) } catch { threw = true }
+  const pipeAfterServer = await agentRow(pipelineDir)
+  check('scan: server path failure rolls back agents and capabilities',
+    [threw, pipeAfterServer?.name, Boolean(await agentRow(bad.path)), getCapability(mdb, { path: pipelineDir })?.name],
+    [true, 'pipeline', false, 'pipeline'])
 } catch (err) {
   failures++
   console.log(`FAIL  ${err.stack || err}`)

@@ -240,6 +240,18 @@ export function ensureCapabilitySchema(db) {
   `)
 }
 
+// The agents table is written by two processes — Qalatra Server's db-worker and the MCP child
+// (rescan_capabilities) — so its schema and its upsert live here, once. db-worker.js and mcp/db.js
+// both call ensureAgentSchema; a column added here reaches both.
+const AGENT_COLUMN_MIGRATIONS = [
+  // Jobs that share a concurrency key never run at the same time (see getQueuedJobs). NULL means
+  // the agent folder itself is the key, so an agent with no config opt-in is serialized per folder.
+  ['concurrency_key', 'ALTER TABLE agents ADD COLUMN concurrency_key TEXT'],
+  // agent.config `worktrees: true`: a job carrying a task identity (external_meta.task_ref) runs in
+  // its own per-task git worktree, so its concurrency key gains the task (see jobConcurrencyKeySql).
+  ['worktrees', 'ALTER TABLE agents ADD COLUMN worktrees INTEGER NOT NULL DEFAULT 0'],
+]
+
 export function ensureAgentSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS agents (
@@ -255,32 +267,96 @@ export function ensureAgentSchema(db) {
       last_seen    TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `)
+  const have = new Set(db.prepare('PRAGMA table_info(agents)').all().map(c => c.name))
+  for (const [column, sql] of AGENT_COLUMN_MIGRATIONS) {
+    if (have.has(column)) continue
+    try { db.exec(sql) } catch {} // another process added it first
+  }
 }
 
 export function upsertScannedAgents(db, agents) {
   ensureAgentSchema(db)
   const upsert = db.prepare(`
-    INSERT INTO agents (path, name, context, project, description, command, coding, relative_path, folder, last_seen)
-    VALUES (@path, @name, @context, @project, @description, @command, @coding, @relative_path, @folder, datetime('now'))
+    INSERT INTO agents (path, name, context, project, description, command, coding, relative_path, folder, concurrency_key, worktrees, last_seen)
+    VALUES (@path, @name, @context, @project, @description, @command, @coding, @relative_path, @folder, @concurrency_key, @worktrees, datetime('now'))
     ON CONFLICT(path) DO UPDATE SET
       name = excluded.name, context = excluded.context, project = excluded.project,
       description = excluded.description, command = excluded.command, coding = excluded.coding,
-      relative_path = excluded.relative_path, folder = excluded.folder, last_seen = excluded.last_seen
+      relative_path = excluded.relative_path, folder = excluded.folder,
+      concurrency_key = excluded.concurrency_key, worktrees = excluded.worktrees, last_seen = excluded.last_seen
   `)
-  for (const agent of agents) {
-    upsert.run({
-      path: agent.path,
-      name: agent.name,
-      context: agent.context ?? null,
-      project: agent.project ?? null,
-      description: agent.description ?? null,
-      command: agent.command ?? null,
-      coding: agent.coding ? 1 : 0,
-      relative_path: agent.relativePath ?? null,
-      folder: agent.folder ?? null,
-    })
-  }
+  db.transaction(list => {
+    for (const agent of list) {
+      upsert.run({
+        path: agent.path,
+        name: agent.name,
+        context: agent.context ?? null,
+        project: agent.project ?? null,
+        description: agent.description ?? null,
+        command: agent.command ?? null,
+        coding: agent.coding ? 1 : 0,
+        relative_path: agent.relativePath ?? null,
+        folder: agent.folder ?? null,
+        concurrency_key: agent.concurrencyKey ?? null,
+        worktrees: agent.worktrees ? 1 : 0,
+      })
+    }
+  })(agents)
   return { ok: true, count: agents.length }
+}
+
+function isUnderRoot(candidate, root) {
+  const r = path.resolve(root)
+  const c = path.resolve(candidate)
+  return c === r || c.startsWith(r.endsWith(path.sep) ? r : r + path.sep)
+}
+
+/**
+ * Forget folders a scan of `root` no longer finds. Only rows under `root` are considered (a narrow
+ * rescan must not touch anything outside it), and only when the folder's agent.config is really
+ * gone from disk — a config that failed to parse, or a folder newly excluded from the scan, keeps
+ * its rows. The agents row is deleted: it is a cache of agent.config, and nothing reads its
+ * history (jobs and tasks hold the path as text, and a job's concurrency key falls back to that
+ * path). The capability is kept but set inactive; the next scan that finds the folder again
+ * rewrites `active` from its agent.config, so a config that declares `active: false` stays off.
+ */
+export function pruneMissingAgents(db, agents, root) {
+  const summary = { removedAgents: [], deactivatedCapabilities: [] }
+  // An unreadable or missing root scans as empty; pruning on that would wipe every row under it.
+  try { if (!fs.statSync(root).isDirectory()) return summary } catch { return summary }
+  const seen = new Set(agents.map(agent => path.resolve(agent.path)))
+  const gone = p => isUnderRoot(p, root) && !seen.has(path.resolve(p)) && !fs.existsSync(path.join(p, 'agent.config'))
+
+  const deleteAgent = db.prepare('DELETE FROM agents WHERE path = ?')
+  for (const { path: p } of db.prepare('SELECT path FROM agents').all()) {
+    if (!gone(p)) continue
+    deleteAgent.run(p)
+    summary.removedAgents.push(p)
+  }
+  const deactivate = db.prepare(`UPDATE capabilities SET active = 0, updated_at = datetime('now') WHERE id = ?`)
+  for (const row of db.prepare('SELECT id, path FROM capabilities WHERE active = 1 AND path IS NOT NULL').all()) {
+    if (!gone(row.path)) continue
+    deactivate.run(row.id)
+    summary.deactivatedCapabilities.push(row.path)
+  }
+  return summary
+}
+
+/**
+ * The one write path for an agent scan, shared by Qalatra Server (db-worker upsertAgents) and the
+ * MCP rescan_capabilities tool. The agents upsert, the capabilities upsert and the prune commit
+ * together or not at all (better-sqlite3 runs the inner transactions as savepoints). Pass `root` —
+ * the directory that was scanned — to prune; without it the call only upserts.
+ */
+export function syncScannedAgents(db, agents, { root = null } = {}) {
+  ensureAgentSchema(db)
+  ensureCapabilitySchema(db)
+  const pruned = db.transaction(() => {
+    upsertScannedAgents(db, agents)
+    upsertScannedCapabilities(db, agents)
+    return root ? pruneMissingAgents(db, agents, root) : { removedAgents: [], deactivatedCapabilities: [] }
+  })()
+  return { ok: true, count: agents.length, ...pruned }
 }
 
 export function upsertScannedCapabilities(db, agents) {
