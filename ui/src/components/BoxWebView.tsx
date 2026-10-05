@@ -16,10 +16,12 @@ function remapSessionUrl(currentUrl: string | null, nextSession: BoxWebSession) 
     const current = new URL(currentUrl)
     const next = new URL(nextSession.url)
     const match = current.pathname.match(/^\/api\/box-web\/proxy\/[^/]+(\/.*)?$/)
-    if (!match) return nextSession.url
+    // An app router can pushState to a root path (/mail/…) that has left the proxy prefix;
+    // on the same origin that path is still the tool's own route, so carry it over whole.
+    if (!match && current.origin !== next.origin) return nextSession.url
 
     const basePath = next.pathname.replace(/\/$/, '')
-    const suffix = match[1] || '/'
+    const suffix = (match ? match[1] : current.pathname) || '/'
     next.pathname = suffix === '/' ? `${basePath}/` : `${basePath}${suffix}`
     next.search = current.search
     next.hash = current.hash
@@ -49,7 +51,22 @@ export default function BoxWebView({ label }: Props) {
   // not just the status/session round-trip.
   const [frameLoading, setFrameLoading] = useState(false)
 
+  // The proxied tool is served from the Qalatra server's origin, not the UI's, so its location
+  // can't be read across the frame boundary. The proxy's injected runtime posts it instead.
+  const reportedUrlRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== frameRef.current?.contentWindow) return
+      const data = event.data as { type?: unknown; url?: unknown } | null
+      if (data?.type === 'qalatra-box-web:url' && typeof data.url === 'string') reportedUrlRef.current = data.url
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+
   const currentFrameUrl = useCallback(() => {
+    if (reportedUrlRef.current) return reportedUrlRef.current
     const frame = frameRef.current
     if (!frame) return null
     try {

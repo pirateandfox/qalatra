@@ -61,10 +61,12 @@ function remapSessionUrl(currentUrl: string | null, nextSession: BoxWebSession) 
     const current = new URL(currentUrl)
     const next = new URL(nextSession.url)
     const match = current.pathname.match(/^\/api\/box-web\/proxy\/[^/]+(\/.*)?$/)
-    if (!match) return nextSession.url
+    // An app router can pushState to a root path (/mail/…) that has left the proxy prefix;
+    // on the same origin that path is still the tool's own route, so carry it over whole.
+    if (!match && current.origin !== next.origin) return nextSession.url
 
     const basePath = next.pathname.replace(/\/$/, '')
-    const suffix = match[1] || '/'
+    const suffix = (match ? match[1] : current.pathname) || '/'
     next.pathname = suffix === '/' ? `${basePath}/` : `${basePath}${suffix}`
     next.search = current.search
     next.hash = current.hash

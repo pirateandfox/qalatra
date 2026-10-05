@@ -197,6 +197,25 @@ function boxWebRuntimeScript(base) {
     const originalSendBeacon = navigator.sendBeacon.bind(navigator);
     navigator.sendBeacon = (url, data) => originalSendBeacon(rewriteBoxWebUrl(url), data);
   }
+
+  // The desktop UI embeds this page from another origin and can't read its location, so report
+  // it on every in-app navigation; Reconnect uses it to reopen the same route.
+  if (window.parent !== window) {
+    const reportUrl = () => {
+      try { window.parent.postMessage({ type: 'qalatra-box-web:url', url: window.location.href }, '*'); } catch {}
+    };
+    for (const name of ['pushState', 'replaceState']) {
+      const original = window.history[name];
+      window.history[name] = function(...args) {
+        const result = original.apply(this, args);
+        setTimeout(reportUrl, 0);
+        return result;
+      };
+    }
+    window.addEventListener('popstate', reportUrl);
+    window.addEventListener('hashchange', reportUrl);
+    reportUrl();
+  }
 })();
 </script>`
 }
