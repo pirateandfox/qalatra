@@ -1,5 +1,10 @@
 # Qalatra — Evolution Notes
 
+## Release 1.9.59 (2026-10-06)
+
+- Fix release: FlightDesk session ops wait only on the same task's running job, plus dependency
+  advisory updates (MCP SDK 1.32.1). Full pre-publish passed.
+
 ## Session ops wait only on the same task's job (2026-10-06)
 
 - The FlightDesk session-op gate (`folderHasRunningJob`) deferred every op while any job ran under
