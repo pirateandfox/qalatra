@@ -242,6 +242,24 @@ try {
   await opsDispatcher.pollFolder(agentB)
   check('…and executed once the folder is free', [fd2.requests.get('s5').status, bridgeCalls.some(c => c[0] === 'archive')], ['DONE', true])
 
+  // A running job for another task doesn't hold this task's ops; one for the same task still does.
+  const otherTask = await dbCall('createTask', { title: 'codegen for task A', agent_path: agentB.path, context: 'internal' })
+  const otherJob = await dbCall('queueExternalJob', { task_id: otherTask.id, agent_path: agentB.path, prompt: 'run codegen', external_ref: 'job-task-a', external_meta: { task_ref: 'fd-task-A' } })
+  await dbCall('startAgentJob', otherJob.id)
+  const statesBefore = bridgeCalls.filter(c => c[0] === 'state').length
+  fd2.add({ id: 's5b', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: null, sessionOp: { op: 'state', sessionId: 'sess-cloud-1' } })
+  await opsDispatcher.pollFolder(agentB)
+  check('SESSION_OP for task B runs on the same tick while task A has a running job', [fd2.requests.get('s5b').status, bridgeCalls.filter(c => c[0] === 'state').length - statesBefore], ['DONE', 1])
+  fd2.add({ id: 's5c', taskId: 'fd-task-A', kind: 'SESSION_OP', prompt: null, sessionOp: { op: 'state', sessionId: 'sess-cloud-A' } })
+  await opsDispatcher.pollFolder(agentB)
+  check('SESSION_OP for task A is deferred while task A\'s job runs', fd2.requests.get('s5c').status, 'REQUESTED')
+  fd2.add({ id: 's5d', kind: 'SESSION_OP', prompt: null, sessionOp: { op: 'state', sessionId: 'sess-cloud-1' } })
+  await opsDispatcher.pollFolder(agentB)
+  check('SESSION_OP with no taskId is deferred while any job runs in the folder', fd2.requests.get('s5d').status, 'REQUESTED')
+  await dbCall('finishAgentJob', otherJob.id, 'done', 'ok', null)
+  await opsDispatcher.pollFolder(agentB)
+  check('…and both run once task A\'s job ends', [fd2.requests.get('s5c').status, fd2.requests.get('s5d').status], ['DONE', 'DONE'])
+
   bridgeDown = true
   fd2.add({ id: 's6', taskId: 'fd-task-9', kind: 'SESSION_OP', prompt: JSON.stringify({ op: 'inject', sessionId: 'sess-cloud-1', templateId: 'ci_failed', prompt: 'x' }) })
   await opsDispatcher.pollFolder(agentB)

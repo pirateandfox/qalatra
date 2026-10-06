@@ -450,9 +450,11 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
       return 'invalid'
     }
     if (!sessionOps) return 'unsupported'
-    // Term 2 of 6.20: never touch a session while an agent turn holds this folder — it may be
-    // mid-inject itself. Left unacked; it comes back next tick.
-    if (await dbCall('folderHasRunningJob', agent.path)) return 'deferred'
+    // Term 2 of 6.20: never touch a session while an agent turn that could be using it is running —
+    // it may be mid-inject itself. That is a job for the same task, one with no task identity, or
+    // one on this session; another task's job doesn't hold this op. Left unacked; it comes back
+    // next tick.
+    if (await dbCall('folderHasRunningJob', agent.path, { taskRef: request.taskId ?? null, sessionId: spec.sessionId })) return 'deferred'
 
     let outcome
     try {

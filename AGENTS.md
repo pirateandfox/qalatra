@@ -366,8 +366,11 @@ jobs still serialize. `server/worktrees.js` owns it:
 - Removed (`git worktree remove --force` + `prune`) when the FlightDesk integration closes the task,
   and by a 6-hourly sweep after `worktreeIdleDays` (setting, default 7) with no job. Never while a
   job for that task is queued or running; creation and removal share a per-worktree lock.
-- The agent scan skips `.qalatra-worktrees`. `folderHasRunningJob` stays on the base key (a
-  session op names a session, not a task). Folders of one repo that opt in must share a
+- The agent scan skips `.qalatra-worktrees`. `folderHasRunningJob`, the session-op gate, looks at
+  the base key but only counts a running job for the op's own task (`task_ref` = the request's
+  `taskId`), a job with no task identity (heartbeat, manual run), or a job on the op's session. A
+  long job for task A therefore never holds task B's rebase/ci_failed relays, worktrees on or off.
+  Job admission (`getQueuedJobs`) is unchanged. Folders of one repo that opt in must share a
   `concurrency_key`, as they already must when they share the checkout — worktrees are per repo +
   task, not per folder.
 - Each worktree needs its own `node_modules` (first install per task costs minutes and memory), and

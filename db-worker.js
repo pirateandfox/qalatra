@@ -1318,16 +1318,24 @@ function getExternalOp(externalRef) {
   try { result = row.result ? JSON.parse(row.result) : null } catch { result = { text: row.result } }
   return { ...row, result }
 }
-// Whether anything is running under this folder's concurrency key (see getQueuedJobs). A code-
-// shaped session operation must wait while an agent turn holds the folder, since that agent may
-// be mid-inject itself. Deliberately the *base* key: an op names a session, not a task, so with
-// worktrees on a running job for any task in the folder still counts.
-function folderHasRunningJob(agentPath) {
+// Whether a session operation must wait for a running job under this folder's base concurrency
+// key (see getQueuedJobs), since that job's agent may be mid-inject into the same session. Only
+// a job that could be touching the op's session blocks it: one for the same task (task_ref ===
+// taskRef), one with no task identity (a heartbeat or manual run could be doing anything), or one
+// whose own session is the op's session. A long job for another task, in its worktree or the
+// shared checkout, no longer stalls that task's relays. Without a taskRef the op can't be
+// attributed, so any running job in the folder still counts. Job admission is unaffected.
+function folderHasRunningJob(agentPath, { taskRef = null, sessionId = null } = {}) {
   const row = db.prepare(`
     WITH me AS (SELECT COALESCE((SELECT concurrency_key FROM agents WHERE path = @path), @path) AS ckey)
     SELECT 1 AS busy FROM agent_jobs j LEFT JOIN agents a ON a.path = j.agent_path, me
-    WHERE j.status = 'running' AND ${JOB_BASE_KEY_SQL} = me.ckey LIMIT 1
-  `).get({ path: agentPath })
+    WHERE j.status = 'running' AND ${JOB_BASE_KEY_SQL} = me.ckey
+      AND (@taskRef IS NULL
+        OR COALESCE(${JOB_TASK_REF_SQL}, '') = ''
+        OR ${JOB_TASK_REF_SQL} = @taskRef
+        OR (@sessionId IS NOT NULL AND j.session_id = @sessionId))
+    LIMIT 1
+  `).get({ path: agentPath, taskRef: taskRef ? String(taskRef) : null, sessionId: sessionId ? String(sessionId) : null })
   return Boolean(row?.busy)
 }
 function setAgentJobRunCwd(id, cwd) {

@@ -1,5 +1,14 @@
 # Qalatra — Evolution Notes
 
+## Session ops wait only on the same task's job (2026-10-06)
+
+- The FlightDesk session-op gate (`folderHasRunningJob`) deferred every op while any job ran under
+  the folder's base key, so one task's 45-minute codegen held every other task's rebase,
+  ci_failed and verifier relays (worktrees on or off). It now counts only a running job for the
+  op's task (`external_meta.task_ref` = request `taskId`), a job with no task identity, or a job
+  on the op's session. An op without a taskId still waits on any job. Job admission is unchanged.
+- Covered in `npm run test:flightdesk-dispatch`.
+
 ## Route Claude Bridge errors by code (2026-10-05, FlightDesk 651fdd69)
 
 - Session ops matched `/not found|…/` over the whole bridge error text, Details included, so a
