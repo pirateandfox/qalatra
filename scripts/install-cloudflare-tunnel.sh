@@ -89,6 +89,12 @@ systemd_literal "$CONFIG_FILE" >/dev/null
 mkdir -p "$CLOUDFLARED_HOME" "$CONFIG_DIR" "$SERVICE_DIR"
 
 if [ ! -f "$CLOUDFLARED_HOME/cert.pem" ]; then
+  # `tunnel login` prints a URL and polls for ten minutes waiting for someone to open it. With no
+  # terminal (Ansible, cron, a service) nobody will, so fail now instead of after the timeout.
+  # Checks stdout/stderr, not stdin: `curl … | bash` run by a person has a piped stdin.
+  if [ ! -t 1 ] && [ ! -t 2 ] && [ "${QALATRA_TUNNEL_LOGIN:-}" != "1" ]; then
+    fail "cloudflared is not logged in ($CLOUDFLARED_HOME/cert.pem missing) and there is no terminal to complete the browser login. Run 'cloudflared tunnel login' as $(id -un) first, or unset QALATRA_TUNNEL_HOSTNAME to skip the tunnel. Set QALATRA_TUNNEL_LOGIN=1 to attempt the login anyway."
+  fi
   info "Authenticating cloudflared"
   "$CLOUDFLARED_BIN" tunnel login
 fi

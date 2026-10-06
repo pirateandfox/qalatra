@@ -1,5 +1,18 @@
 # Qalatra — Evolution Notes
 
+## Linux installer: upgrades restart the server; no-terminal tunnel login fails fast (2026-10-06)
+
+- `install-linux-server.sh` started the service with `enable --now`, which does nothing to a
+  server that is already running — so every upgrade through the bootstrap left the old process
+  serving the previous version over the new checkout (seen rolling 1.9.59 to shi). It now
+  enables and then restarts.
+- `install-cloudflare-tunnel.sh` ran `cloudflared tunnel login` whenever `cert.pem` was missing,
+  which polls ten minutes for a browser nobody opens under Ansible. With neither stdout nor
+  stderr a terminal it now fails immediately with the fix; `QALATRA_TUNNEL_LOGIN=1` forces the
+  attempt. A person running `curl … | bash` still gets the login (stdin is piped, stdout is not).
+- The fleet side (stale-ref comparison, passing a retired tunnel hostname into the bootstrap) is
+  fixed in qalatra-fleet.
+
 ## Release 1.9.59 (2026-10-06)
 
 - Fix release: FlightDesk session ops wait only on the same task's running job, plus dependency

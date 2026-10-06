@@ -114,7 +114,10 @@ SERVICE
 
 info "Starting systemd user service"
 systemctl --user daemon-reload
-systemctl --user enable --now qalatra-server.service
+# restart, not enable --now: on an upgrade the server is already running, and --now leaves that
+# old process serving the previous code over the freshly installed checkout.
+systemctl --user enable qalatra-server.service
+systemctl --user restart qalatra-server.service
 
 # Auto-updater: systemd timer that checks GitHub releases every 6 hours
 UPDATER_SERVICE="$SERVICE_DIR/qalatra-updater.service"
