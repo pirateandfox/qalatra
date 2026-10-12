@@ -261,9 +261,7 @@ children (a test run, a build, an MCP server it started) get reparented and keep
 directly: killing the pid alone left the tool subprocess alive. A negative-pid signal reaches the
 detached group on non-systemd POSIX hosts (`taskkill /T` on Windows), but it cannot reach a tool that
 starts a new group with `setsid` or double-forks. Linux therefore kills the whole named scope instead.
-Because detaching also escapes the signal the service manager sends to Qalatra's own group,
-`shutdown()` in `server/index.js` calls `killRunningAgentProcesses()` — without that, a service
-restart would strand live agent runs holding files, ports, and API quota.
+Detaching also means a run outlives Qalatra Server, and that is now deliberate (see "Restarts don't kill runs").
 
 **Agents run in their own cgroup slice (Linux).** Qalatra Server, its MCP child, tmux sessions and
 every agent otherwise share one cgroup, and `memory.high` throttles reclaim across the whole group
@@ -314,6 +312,34 @@ Either limit ends the job as status **`timed_out`** with `terminated_by = 'timeo
 terminal status alongside `orphaned`, so Qalatra's own resource limits don't inflate agent failure
 counts. Because the session id survives, `timed_out` jobs are included in the resume lookup
 (`db-worker.js` `getQueuedJobs`), so the next message on the task continues where it left off.
+
+### Restarts don't kill runs
+
+A server restart (updater, deploy, secret rotation, crash) used to kill every live run and orphan it,
+so FlightDesk saw FAILED turns while their cloud sessions carried on. Now runs survive and the next
+instance re-adopts them (`server/agent-runs.js`, `recoverRunningJobs` in `server/workers.js`):
+
+- **Output goes to files, not pipes.** Each run gets `<dataDir>/agent-runs/<job-id>/` with
+  `stdout.log`, `stderr.log`, `run.json` (pid + start time, scope, deadline, runtime, output rules)
+  and `exit`. A `/bin/sh` wrapper inside the scope runs the command and writes its exit status to
+  `exit` atomically. The wrapper is the tracked pid and the process-group leader. The server tails
+  the files; the dir is removed once the terminal state is persisted.
+- **Shutdown leaves adoptable runs running** (`leaveAgentRunsForRestart`). Windows runs are not
+  adoptable and are still killed. Setting `killAgentsOnShutdown: true` restores kill-on-shutdown.
+- **Boot reconciles before anything is reported.** For each `running` job: an `exit` file means it
+  ended unwatched, so it is finished normally (done/failed). If its pid is alive *and* its `ps lstart`
+  start time matches `run.json`, it is re-adopted: it holds an admission slot, its watchdog is
+  re-armed against the **original** deadline (so a run past its limit is timed out at once), and the
+  idle clock starts from the files' last mtime. Otherwise it is orphaned through
+  `resetStuckJobs(boundary, { ids, details })` with the session id and partial output salvaged from
+  its files, and anything left in its scope is killed by unit name, never by a possibly reused pid.
+  Only then does `orphanedAtBoot` resolve, so FlightDesk hears FAILED/`orphaned` only for work that
+  is really gone, and with `resumable: true` when a session survived. Orphans with a session are part
+  of the resume lookup.
+- **While no server is up, nothing enforces timeouts**, and a deliberate
+  `systemctl --user stop qalatra-server` leaves runs going until they finish or the next start
+  re-arms their deadline. Jobs launched by a version from before this change have no run dir and are
+  orphaned as before. Covered by `npm run test:agent-restart`.
 
 ### External orchestration
 

@@ -63,8 +63,11 @@ polled first. Add `.flightdeskrc` to the folder's `.gitignore`.
 `diagnostics.kind` ∈ `error | timed_out | orphaned | launch_failed | dependency_down`. Only `error`
 is the agent's own failure. FlightDesk's ladder cannot step backwards, so reporting always walks
 it to the target and treats "already past that" as success — a lost ack or a restart between
-steps is harmless, and the next poll reconciles anything FlightDesk still holds open. Jobs that
-were running when the server restarted are reported `FAILED / orphaned` at boot.
+steps is harmless, and the next poll reconciles anything FlightDesk still holds open. A server
+restart does not end a running job: the next instance re-adopts it and the dispatch stays RUNNING
+until the job really finishes. A job that ended while the server was down is reported DONE/FAILED
+from its recorded exit. Only a job whose process is gone is reported `FAILED / orphaned`, with
+`resumable: true` when its session id survived, and only after boot reconciliation has run.
 
 Rules the poller follows: dedupe by dispatch id (`agent_jobs.external_ref`, unique); skip requests
 whose task is blocked; consume answers server-side before queuing a `RESUME`; within one batch a

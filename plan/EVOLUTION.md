@@ -1,5 +1,25 @@
 # Qalatra — Evolution Notes
 
+## Restarts re-adopt running agent jobs instead of orphaning them (2026-10-12)
+
+- On shi a `qalatra-server` restart 11 s into two FlightDesk build jobs orphaned both. FlightDesk
+  marked the dispatches FAILED while their cloud sessions kept working, then flagged the sessions'
+  later `end_turn` as stale. The cause was Qalatra itself, not the fleet: `shutdown()` killed every
+  agent scope, and agent output went over pipes that died with the server anyway.
+- Runs now write stdout/stderr/exit status to `<dataDir>/agent-runs/<job-id>/` (new
+  `server/agent-runs.js`), and shutdown leaves them running. On boot, `recoverRunningJobs` handles
+  each `running` job before `orphanedAtBoot` resolves. Live ones (pid + start time match) are
+  re-adopted with their original deadline and an admission slot. Ones that ended unwatched are
+  finished from the recorded exit code. Only ones whose process is gone are orphaned, with the
+  salvaged session id and partial output (`resumable: true` to FlightDesk), and those orphans are
+  part of the resume lookup.
+- `killAgentsOnShutdown: true` (setting) restores the old behaviour. Not enforced while no server
+  is up: timeouts. Windows runs are not adoptable and are still killed.
+- Not done: detecting that a dead local job handed off to a still-active cloud session and
+  reporting that instead of `orphaned`. FlightDesk gets `orphaned` + `resumable`, which it accepts.
+- Covered by `npm run test:agent-restart` (in `ci:server`). Not yet run against systemd scopes on a
+  Linux box.
+
 ## Linux installer: upgrades restart the server; no-terminal tunnel login fails fast (2026-10-06)
 
 - `install-linux-server.sh` started the service with `enable --now`, which does nothing to a

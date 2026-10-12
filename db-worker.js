@@ -1227,7 +1227,7 @@ function getQueuedJobs(limit) {
     const task = job.task_id ? db.prepare('SELECT agent_resume FROM tasks WHERE id = ?').get(job.task_id) : null
     const canResume = task?.agent_resume !== 0 && job.resume_session !== 0
     const prev = canResume && job.task_id
-      ? db.prepare(`SELECT session_id FROM agent_jobs WHERE task_id = ? AND session_id IS NOT NULL AND (status IN ('done', 'timed_out') OR (status = 'failed' AND terminated_by = 'oom')) ORDER BY completed_at DESC, rowid DESC LIMIT 1`).get(job.task_id)
+      ? db.prepare(`SELECT session_id FROM agent_jobs WHERE task_id = ? AND session_id IS NOT NULL AND (status IN ('done', 'timed_out', 'orphaned') OR (status = 'failed' AND terminated_by = 'oom')) ORDER BY completed_at DESC, rowid DESC LIMIT 1`).get(job.task_id)
       : null
     return { ...job, prevSessionId: prev?.session_id ?? null }
   })
@@ -1387,14 +1387,22 @@ function insertAgentNote(id, taskId, result, jobId) {
     return { ok: true, auto_attached: 0, attachments: [], auto_attach_error: err.message }
   }
 }
-function resetStuckJobs(bootBoundary = null) {
+function getRunningAgentJobs() {
+  return db.prepare(`SELECT * FROM agent_jobs WHERE status = 'running'`).all()
+}
+const ORPHANED_RESULT = 'Job orphaned: the app instance running it stopped (restart or crash) before it reported a result. This is an infrastructure event, not an agent failure; partial work may still have landed.'
+function resetStuckJobs(bootBoundary = null, { ids = null, details = {} } = {}) {
   // Runs once at startup, only on the instance that won the single-instance port lock (see
-  // server/index.js). The previous instance is therefore gone, so any job still marked 'running'
-  // was orphaned by that instance stopping mid-job (restart, crash, or clean shutdown).
+  // server/index.js). The previous instance is therefore gone. Boot reconciliation
+  // (recoverRunningJobs in server/workers.js) has already re-adopted the runs that are still alive
+  // and finished the ones that ended while nobody watched; it passes the rest as `ids`. Without
+  // `ids`, every 'running' job is treated as lost.
   //
   // That is an INFRASTRUCTURE event, not an agent failure, so it gets its own terminal status
   // (`orphaned`) and cause (`terminated_by = 'app_restart'`) rather than being labelled `failed` —
   // which would pollute failure counts / infra-error detectors and hide the cause behind a string.
+  // `details[id]` carries the session id and partial output salvaged from the run's files, so the
+  // orphan stays resumable.
   //
   // We deliberately do NOT auto-requeue. Job prompts are built at launch and these jobs are not
   // idempotent, so a blind requeue re-injects already-completed work (a cloud session's reply can
@@ -1403,16 +1411,28 @@ function resetStuckJobs(bootBoundary = null) {
   // to reason about without diffing PR head SHAs.
   // Reported back so an integration can tell its orchestrator which of *its* runs died with the
   // instance, instead of leaving them ACKNOWLEDGED forever on the other side.
-  const orphaned = db.prepare(`SELECT id, task_id, agent_path, session_id, external_ref, external_meta FROM agent_jobs WHERE status = 'running'`).all()
-  db.prepare(`
+  const running = db.prepare(`SELECT id, task_id, agent_path, session_id, external_ref, external_meta FROM agent_jobs WHERE status = 'running'`).all()
+  const wanted = Array.isArray(ids) ? new Set(ids) : null
+  const targets = wanted ? running.filter(job => wanted.has(job.id)) : running
+  const update = db.prepare(`
     UPDATE agent_jobs
     SET status = 'orphaned',
         terminated_by = 'app_restart',
         terminated_boundary = @boundary,
-        result = 'Job orphaned: the app instance running it stopped (restart or crash) before it reported a result. This is an infrastructure event, not an agent failure; partial work may still have landed.',
+        result = @result,
+        session_id = COALESCE(@session, session_id),
         completed_at = datetime('now')
-    WHERE status = 'running'
-  `).run({ boundary: bootBoundary })
+    WHERE id = @id AND status = 'running'
+  `)
+  const orphaned = []
+  db.transaction(() => {
+    for (const job of targets) {
+      const detail = details?.[job.id] ?? {}
+      const session = detail.sessionId ?? null
+      update.run({ id: job.id, boundary: bootBoundary, result: detail.result || ORPHANED_RESULT, session })
+      orphaned.push({ ...job, session_id: session ?? job.session_id })
+    }
+  })()
   return { ok: true, orphaned }
 }
 function getAutorunTasks() {
@@ -1575,7 +1595,7 @@ const METHODS = {
   getPendingAttachments, updateAttachmentStorage,
   listAgentJobs, getAgentJob, createAgentJob,
   getQueuedJobs, startAgentJob, setAgentJobRuntime, finishAgentJob, insertAgentNote,
-  resetStuckJobs, getAutorunTasks, insertAutorunJob,
+  resetStuckJobs, getRunningAgentJobs, getAutorunTasks, insertAutorunJob,
   queueExternalJob, getAgentJobByExternalRef, findTaskByOrchestratorRef, bindTaskOrchestrator, listOpenOrchestratedTasks, closeOrchestratedTask,
   recordExternalOp, getExternalOp, folderHasRunningJob,
   setAgentJobRunCwd, listActiveTaskRefs, lastJobActivityUnder, listWorktreeAgents,

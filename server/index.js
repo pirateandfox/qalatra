@@ -14,7 +14,7 @@ import { applyPendingRestore, runBackup } from './backups.js'
 import { fileExists, findInheritedStyle, listDirectory, listWorkspaceRoots, readTextFile, resolveAllowedPath, writeFolderStyle, writeTextFile, writeUserStyle } from './files.js'
 import { applyCors, parseBody, parseRawBody, sendBinary, sendJson, streamFile } from './http.js'
 import { handleV1 } from './v1.js'
-import { startBackgroundWorkers, killRunningAgentProcesses } from './workers.js'
+import { startBackgroundWorkers, killRunningAgentProcesses, leaveAgentRunsForRestart } from './workers.js'
 import { startIntegrations } from './integrations/index.js'
 import { createTerminalManager } from './terminal-sessions.js'
 import { createBoxWebProxy } from './box-web.js'
@@ -557,10 +557,17 @@ async function main() {
     shuttingDown = true
     shutdownPromise = (async () => {
       if (backupTimer) clearInterval(backupTimer)
-      // Agent runs are spawned detached (so a timeout can kill the agent's whole tool tree), which
-      // also means they escape the signal the service manager sends to this process's group. Take
-      // them down explicitly or a restart strands live agents holding files, ports and API quota.
-      killRunningAgentProcesses()
+      // Agent runs are detached, write to files and record their own exit status, so they outlive
+      // this process: the next instance re-adopts them (recoverRunningJobs) instead of orphaning
+      // live work on every update, deploy or restart. killAgentsOnShutdown restores the old
+      // behaviour of taking them down with the server.
+      let killAgents = false
+      try { killAgents = loadSettings().killAgentsOnShutdown === true } catch {}
+      if (killAgents) killRunningAgentProcesses()
+      else {
+        const left = leaveAgentRunsForRestart()
+        if (left) console.log(`[server] leaving ${left} agent run(s) running for the next instance to re-adopt`)
+      }
       await stopMcpServer()
       if (START_WORKERS && BACKUP_ON_SHUTDOWN) {
         await Promise.race([

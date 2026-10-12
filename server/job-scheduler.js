@@ -18,6 +18,19 @@ export function createJobScheduler({ launchJob, failJob, logger = console }) {
   }
   return {
     status,
+    /**
+     * Count a run re-adopted after a restart against the ceiling. It was admitted by the previous
+     * instance and is still running, so it holds a slot exactly like one this instance launched.
+     */
+    adopt() {
+      admittedJobs++
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        admittedJobs--
+      }
+    },
     async process(ctx) {
       if (admitting) return
       admitting = true

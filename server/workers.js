@@ -11,6 +11,10 @@ import { loadFolderRc } from './integrations/flightdesk/rc.js'
 import { ensureTaskWorktree, sweepIdleWorktrees } from './worktrees.js'
 import { createJobScheduler } from './job-scheduler.js'
 import { createScopeMemoryMonitor, formatOomNotice } from './agent-memory.js'
+import {
+  agentRunDir, prepareRunDir, runFiles, writeRunMeta, readRunMeta, readExitStatus, removeRunDir, sweepRunDirs,
+  withExitRecorder, processStartTime, runProcessAlive, createFileTail, lastOutputAt,
+} from './agent-runs.js'
 
 /** stderr is stored verbatim in job results, so keep it bounded on a long or noisy run. */
 const MAX_STDERR = 256 * 1024
@@ -31,8 +35,10 @@ async function runJobHooks(kind, payload) {
     catch (err) { console.error(`[workers] ${kind} hook failed for job ${payload?.job?.id}: ${err.message}`) }
   }
 }
-// Jobs that were 'running' when the previous instance stopped, resolved once the boot-time sweep
-// (resetStuckJobs) has marked them orphaned. Integrations await this to report them.
+// Jobs that were 'running' when the previous instance stopped and whose work is really gone,
+// resolved once boot-time reconciliation (recoverRunningJobs) has re-adopted the live ones, finished
+// the ones that ended unwatched, and marked only the rest orphaned. Integrations await this to
+// report them, so no orchestrator hears a terminal status for a run that is in fact still going.
 let resolveOrphanedAtBoot
 export const orphanedAtBoot = new Promise(resolve => { resolveOrphanedAtBoot = resolve })
 
@@ -106,13 +112,30 @@ function killProcessTree(run) {
   try { proc.kill('SIGKILL') } catch {}
 }
 
-/**
- * Detached agents outlive the signal the service manager sends to Qalatra's own process group, so
- * shutdown has to take them down explicitly or a service restart strands live agent runs.
- */
+/** Kill every live agent run. Also the explicit opt-out of surviving restarts (killAgentsOnShutdown). */
 export function killRunningAgentProcesses() {
   for (const proc of runningAgentProcs) killProcessTree(proc)
   runningAgentProcs.clear()
+}
+
+/**
+ * Shutdown default: leave adoptable runs running for the next instance to re-adopt
+ * (recoverRunningJobs). They write to files and record their own exit status, so nothing about them
+ * depends on this process; killing them is what used to turn every update, deploy or restart into
+ * failed turns. Runs that cannot be re-adopted (Windows) are still taken down, since nothing would
+ * ever supervise or finish them. Returns how many were left running.
+ *
+ * While no server is up, nothing enforces a run's timeout; the next instance re-arms it against the
+ * original deadline and kills a run that is already past it.
+ */
+export function leaveAgentRunsForRestart() {
+  let left = 0
+  for (const run of runningAgentProcs) {
+    if (run.adoptable) { left++; continue }
+    killProcessTree(run)
+  }
+  runningAgentProcs.clear()
+  return left
 }
 
 function defaultShell() {
@@ -631,12 +654,15 @@ export async function applyOutputRules({ dbCall, jobId, taskId, rules, output, l
 
 export function startBackgroundWorkers(ctx) {
   const { dbCall, loadSettings, notify = () => {}, startedAt = null } = ctx
-  // Pass this instance's start time as the orphan "restart boundary": any job still 'running'
-  // was killed when the previous instance stopped, and the consumer can compare a late cloud
-  // reply's timestamp against this to tell whether the job's work landed before or after death.
-  dbCall('resetStuckJobs', startedAt)
-    .then(r => resolveOrphanedAtBoot(Array.isArray(r?.orphaned) ? r.orphaned : []))
-    .catch(() => resolveOrphanedAtBoot([]))
+  // This instance's start time is the orphan "restart boundary": a job orphaned below died around
+  // the previous instance's stop, and the consumer can compare a late cloud reply's timestamp
+  // against it to tell whether the job's work landed before or after death.
+  recoverRunningJobs(ctx)
+    .then(resolveOrphanedAtBoot)
+    .catch(err => {
+      console.error(`[workers] boot reconciliation failed: ${err.message}`)
+      resolveOrphanedAtBoot([])
+    })
   syncPendingAttachments(ctx).catch(() => {})
   runAgentScan({ dbCall, loadSettings }).catch(() => {})
   setInterval(() => syncPendingAttachments(ctx).catch(() => {}), 5 * 60 * 1000)
@@ -679,7 +705,7 @@ export async function finishAgentJobSafely({ dbCall, notify, job, status, result
     await dbCall('finishAgentJob', job.id, status, result, sessionId, terminatedBy, usage, mcpToolCalls)
   } catch (err) {
     console.error(`[workers] failed to persist agent job ${job.id}: ${err.message}`)
-    return
+    return false
   }
 
   await runJobHooks('finished', {
@@ -712,6 +738,7 @@ export async function finishAgentJobSafely({ dbCall, notify, job, status, result
   } catch (err) {
     console.error(`[workers] failed to publish agent completion for job ${job.id}: ${err.message}`)
   }
+  return true
 }
 
 const jobScheduler = createJobScheduler({
@@ -724,7 +751,7 @@ const jobScheduler = createJobScheduler({
 export const agentWorkerStatus = settings => jobScheduler.status(settings)
 export const processAgentJobs = ctx => jobScheduler.process(ctx)
 
-async function launchAgentJob({ dbCall, notify, job, settings, release }) {
+async function launchAgentJob({ dbCall, notify, job, settings, release, dataDir = null }) {
   if (!fs.existsSync(job.agent_path)) {
     release()
     await finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result: `Agent path does not exist: ${job.agent_path}`, sessionId: null, failureKind: 'launch_failed' })
@@ -813,13 +840,6 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
   catch (err) { console.error(`[workers] failed to record runtime for job ${job.id}: ${err.message}`) }
   // Template commands emit whatever they emit, so they can't be stream-parsed.
   const stream = isTemplateCommand ? false : cfg?.stream !== false
-  const consumer = runtime.createConsumer({ stream })
-  let stderr = ''
-  let watchdog = null
-  let watchdogArmError = null
-  let idleMinutes = 0
-  let bumpIdle = () => {}
-  let settled = false
   let proc
   let scopeUnit = null
   let memoryMonitor = null
@@ -828,8 +848,12 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
   let resolvedCommand = null
   let bin = ''
   let spawnArgs = []
+  let run = null
 
   try {
+    // Output goes to files, not pipes, so the run survives this server process (agent-runs.js).
+    run = prepareRunDir(dataDir, job.id)
+    const stdio = ['ignore', run.stdoutFd, run.stderrFd]
     const onTemplateWarn = message => console.error(`[workers] job ${job.id} template warning: ${message}`)
     const task = job.task_id ? await dbCall('getTask', job.task_id) : null
     const values = {
@@ -850,6 +874,17 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
     Object.assign(agentEnv, templateEnv({ job, values }))
     if (worktree) agentEnv.QALATRA_WORKTREE = worktree.worktree
     Object.assign(agentEnv, externalEnv(job))
+    agentEnv.QALATRA_EXIT_FILE = run.files.exit
+
+    // POSIX spawn shared by every command form: the exit recorder runs inside the per-job scope (so
+    // it is killed with the run and is the tracked pid), and the scope wraps the whole invocation.
+    const spawnPosix = (command, args) => {
+      const recorded = withExitRecorder(command, args)
+      const launched = withLauncher(recorded.command, recorded.args, job.id, memory)
+      scopeUnit = launched.scopeUnit
+      memoryMonitor = monitorScopeMemory(scopeUnit, memory)
+      return spawn(launched.command, launched.args, { cwd: runCwd, stdio, env: agentEnv, detached: true })
+    }
 
     if (isTemplateCommand && argvCommand) {
       // Argv form: every element is one argument, spawned without a shell. Placeholder values
@@ -859,13 +894,8 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
       bin = argv[0]
       spawnArgs = argv.slice(1)
       proc = process.platform === 'win32'
-        ? spawn(bin, spawnArgs, { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
-        : (() => {
-          const launched = withLauncher(shellBin, loginShellArgv(bin, spawnArgs), job.id, memory)
-          scopeUnit = launched.scopeUnit
-          memoryMonitor = monitorScopeMemory(scopeUnit, memory)
-          return spawn(launched.command, launched.args, { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
-        })()
+        ? spawn(bin, spawnArgs, { cwd: runCwd, stdio, env: agentEnv })
+        : spawnPosix(shellBin, loginShellArgv(bin, spawnArgs))
     } else if (isTemplateCommand) {
       resolvedCommand = agentCommand
       if (values.spec_file) resolvedCommand = resolvedCommand.replace(/\{spec_file\}/g, values.spec_file)
@@ -876,13 +906,8 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
       bin = shellBin
       spawnArgs = ['-i', '-l', '-c', resolvedCommand]
       proc = process.platform === 'win32'
-        ? spawn('cmd.exe', ['/c', resolvedCommand], { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv })
-        : (() => {
-          const launched = withLauncher(shellBin, spawnArgs, job.id, memory)
-          scopeUnit = launched.scopeUnit
-          memoryMonitor = monitorScopeMemory(scopeUnit, memory)
-          return spawn(launched.command, launched.args, { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
-        })()
+        ? spawn('cmd.exe', ['/c', resolvedCommand], { cwd: runCwd, stdio, env: agentEnv })
+        : spawnPosix(shellBin, spawnArgs)
     } else {
       const parts = argvCommand ? agentCommand : agentCommand.trim().split(/\s+/)
       bin = parts[0]
@@ -903,22 +928,19 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
         stream,
         onWarn: message => console.error(`[workers] job ${job.id} (${runtimeName || DEFAULT_RUNTIME}): ${message}`),
       })
+      // The -c '"$0" "$@"' bin ...args structure must survive intact — the args are deliberately
+      // not re-parsed by the shell — so the recorder and launcher wrap the whole shell invocation
+      // rather than being folded into the -c payload. bin/spawnArgs stay the agent's own, so
+      // launch diagnostics keep reporting the agent, not systemd-run.
       proc = process.platform === 'win32'
-        ? spawn(bin, spawnArgs, { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], shell: true, env: agentEnv })
-        : (() => {
-          // The -c '"$0" "$@"' bin ...args structure must survive intact — the args are
-          // deliberately not re-parsed by the shell — so the launcher wraps the whole shell
-          // invocation rather than being folded into the -c payload. bin/spawnArgs stay the
-          // agent's own, so launch diagnostics keep reporting the agent, not systemd-run.
-          const launched = withLauncher(shellBin, loginShellArgv(bin, spawnArgs), job.id, memory)
-          scopeUnit = launched.scopeUnit
-          memoryMonitor = monitorScopeMemory(scopeUnit, memory)
-          return spawn(launched.command, launched.args, { cwd: runCwd, stdio: ['ignore', 'pipe', 'pipe'], env: agentEnv, detached: true })
-        })()
+        ? spawn(bin, spawnArgs, { cwd: runCwd, stdio, shell: true, env: agentEnv })
+        : spawnPosix(shellBin, loginShellArgv(bin, spawnArgs))
     }
   } catch (spawnErr) {
     memoryMonitor?.cancel()
     release()
+    closeRunFds(run)
+    if (run) removeRunDir(run.runDir)
     if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
     if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
     const result = appendLaunchDiagnostics(
@@ -928,11 +950,88 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
     await finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null, failureKind: 'launch_failed' })
     return false
   }
+  // The child holds its own copies; the server reads the files back through tails.
+  closeRunFds(run)
 
-  const runHandle = { proc, scopeUnit }
-  runningAgentProcs.add(runHandle)
+  // A hung job holds an admission slot for the whole window, so keep this bounded. 60 sits above the
+  // 45 that every deliberately-configured agent here settled on. Override with timeout_minutes.
+  const timeoutMinutes = cfg?.timeout_minutes ?? 60
+  // Opt-in second limit: a wall clock can't tell a productive 50-minute run from one wedged after
+  // 90 seconds, but streamed output can. Left off by default because a single long tool call
+  // (a full test suite, a big build) legitimately emits nothing for a while.
+  const idleMinutes = Number(cfg?.idle_timeout_minutes) || 0
+  const meta = {
+    version: 1,
+    jobId: job.id,
+    pid: proc.pid ?? null,
+    pidStart: processStartTime(proc.pid),
+    scopeUnit,
+    // Windows has neither the exit recorder nor a process identity check, so its runs still end
+    // with the server that launched them.
+    adoptable: process.platform !== 'win32',
+    launchedAt: Date.now(),
+    deadlineAt: Date.now() + timeoutMinutes * 60 * 1000,
+    timeoutMinutes,
+    idleMinutes,
+    runtimeName,
+    stream,
+    outputRules: Array.isArray(cfg?.output_rules) ? cfg.output_rules : [],
+    runCwd,
+    agentPath: job.agent_path,
+    shellBin,
+    agentCommand,
+    resolvedCommand,
+    commandMode,
+    memory,
+    promptFile,
+    specFile,
+  }
+  if (meta.adoptable && (!meta.pid || !meta.pidStart)) meta.adoptable = false
+  try { writeRunMeta(run.runDir, meta) }
+  catch (err) {
+    meta.adoptable = false
+    console.error(`[workers] could not record run metadata for job ${job.id}: ${err.message} — this run will not survive a server restart`)
+  }
+
+  superviseAgentRun({ dbCall, notify, job, meta, runDir: run.runDir, proc, release, memoryMonitor, diagnosticsEnv: () => agentEnv })
   // The process is up: this is the moment an orchestrator should see RUNNING.
   void runJobHooks('started', { job })
+  return true
+}
+
+function closeRunFds(run) {
+  for (const key of ['stdoutFd', 'stderrFd']) {
+    if (run?.[key] == null) continue
+    try { fs.closeSync(run[key]) } catch {}
+    run[key] = null
+  }
+}
+
+function readAgentConfig(agentPath) {
+  try { return JSON.parse(fs.readFileSync(path.join(agentPath, 'agent.config'), 'utf8')) } catch { return null }
+}
+
+/** Cheap liveness for a run this process did not spawn (no 'exit' event to wait for). */
+function pidExists(pid) {
+  try { process.kill(pid, 0); return true } catch (err) { return err.code === 'EPERM' }
+}
+
+/**
+ * Watch one agent run to its terminal state and persist it. Shared by a run this instance just
+ * launched (`proc` set: its 'close' event is the end) and one re-adopted after a restart (`proc`
+ * null: the exit recorder's file, or the tracked pid disappearing, is the end). `knownExit` is a run
+ * that already ended while no server was watching; it is read back and finished at once.
+ */
+function superviseAgentRun({ dbCall, notify, job, meta, runDir, proc = null, release, memoryMonitor = null, diagnosticsEnv, lastActivityAt = null, knownExit = null }) {
+  const runtime = getRuntime(meta.runtimeName)
+  const consumer = runtime.createConsumer({ stream: meta.stream })
+  const { timeoutMinutes, idleMinutes, scopeUnit } = meta
+  let stderr = ''
+  let watchdog = null
+  let watchdogArmError = null
+  let bumpIdle = () => {}
+  let settled = false
+  let pollTimer = null
 
   // stderr stays whole-buffered (it is small and used verbatim in failure messages) but is
   // capped so a runaway agent logging to stderr for an hour can't exhaust the worker.
@@ -940,34 +1039,35 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
     if (stderr.length >= MAX_STDERR) return
     stderr = (stderr + d).slice(0, MAX_STDERR)
   }
-  proc.stdout.on('data', d => { consumer.push(d); bumpIdle() })
-  proc.stderr.on('data', d => { appendStderr(d); bumpIdle() })
-  // A hung job holds an admission slot for the whole window, so keep this bounded. 60 sits above the
-  // 45 that every deliberately-configured agent here settled on. Override with timeout_minutes.
-  const timeoutMinutes = cfg?.timeout_minutes ?? 60
-  // Opt-in second limit: a wall clock can't tell a productive 50-minute run from one wedged after
-  // 90 seconds, but streamed output can. Left off by default because a single long tool call
-  // (a full test suite, a big build) legitimately emits nothing for a while.
-  idleMinutes = Number(cfg?.idle_timeout_minutes) || 0
-  try {
-    watchdog = createAgentWatchdog({
-      pid: proc.pid,
-      scopeUnit,
-      wallClockMs: timeoutMinutes * 60 * 1000,
-      idleTimeoutMs: idleMinutes * 60 * 1000,
-      label: job.id,
-    })
-  } catch (err) {
-    // Running without the configured safety boundary is worse than failing this one job visibly.
-    watchdogArmError = err.message
-    killProcessTree(runHandle)
-    console.error(`[workers] ${err.message}`)
+  const files = runFiles(runDir)
+  const outTail = createFileTail(files.stdout, d => consumer.push(d))
+  const errTail = createFileTail(files.stderr, d => appendStderr(d))
+  const pump = opts => {
+    if (outTail.read(opts) + errTail.read(opts) > 0) bumpIdle()
   }
-  bumpIdle = () => watchdog?.activity()
+  // A re-adopted run has everything it wrote before the restart waiting in the files.
+  if (!proc) pump({ all: true })
 
-  proc.on('close', async (code, signal) => {
+  const runHandle = { proc: proc ?? { pid: meta.pid }, scopeUnit, adoptable: meta.adoptable }
+  runningAgentProcs.add(runHandle)
+
+  const diagnosticsContext = () => ({
+    cwd: meta.runCwd, agentPath: job.agent_path, shellBin: meta.shellBin, env: diagnosticsEnv(),
+    agentCommand: meta.agentCommand, resolvedCommand: meta.resolvedCommand, commandMode: meta.commandMode,
+    runtimeName: meta.runtimeName, memory: meta.memory,
+  })
+  const cleanupFiles = () => {
+    if (meta.promptFile) { try { fs.unlinkSync(meta.promptFile) } catch {} }
+    if (meta.specFile) { try { fs.unlinkSync(meta.specFile) } catch {} }
+  }
+
+  const complete = async (code, signal) => {
     if (settled) return
     settled = true
+    clearInterval(pollTimer)
+    pump({ all: true })
+    outTail.close()
+    errTail.close()
     const timeoutKind = watchdog?.timeoutKind ?? null
     watchdog?.cancel()
     // Before the reap below: the scope's own memory.events is only readable while it exists.
@@ -985,8 +1085,7 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
     if (scopeUnit) killProcessTree(runHandle)
     runningAgentProcs.delete(runHandle)
     release()
-    if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
-    if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
+    cleanupFiles()
 
     let { result, sessionId, usage, mcpToolCalls } = consumer.finish()
 
@@ -1008,52 +1107,171 @@ async function launchAgentJob({ dbCall, notify, job, settings, release }) {
       const partial = result ? `\n\nPartial output before the kill:\n${result}` : ''
       const resumable = sessionId ? `\n\nSession ${sessionId} is resumable — send a follow-up message on this task to continue it.` : ''
       result = `${timeoutNotice}${resumable}${partial}${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
+    } else if (code == null && !proc) {
+      // Re-adopted, and its process ended without the exit recorder running: it was killed by
+      // something other than Qalatra's watchdog (an OOM outside our scope, a manual kill, reboot).
+      const partial = result ? `\n\nPartial output before it stopped:\n${result}` : ''
+      result = `The agent process ended without recording an exit status (killed while re-adopted after a Qalatra Server restart).${partial}${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
     } else if (!result) {
       result = stderr.trim() || `No output (exit code ${code})`
     } else if (status === 'failed' && stderr.trim()) {
       result += `\n\nStderr:\n${stderr.trim()}`
     }
-    if (status === 'failed') {
-      result = appendLaunchDiagnostics(result, {
-        cwd: runCwd,
-        agentPath: job.agent_path,
-        shellBin,
-        env: agentEnv,
-        agentCommand,
-        resolvedCommand,
-        commandMode,
-        runtimeName,
-        memory,
-      })
-    }
+    if (status === 'failed') result = appendLaunchDiagnostics(result, diagnosticsContext())
 
-    finishAgentJobSafely({
-      dbCall, notify, job, status, result, sessionId,
-      terminatedBy: timeoutKind ? 'timeout' : (oomKilled ? 'oom' : null),
-      usage, mcpToolCalls, outputRules: cfg?.output_rules,
-      failureKind: oomKilled ? 'oom' : null, memoryDiagnostics,
-    })
-      .catch(err => console.error(`[workers] agent completion handler failed for job ${job.id}: ${err.message}`))
-  })
+    try {
+      const persisted = await finishAgentJobSafely({
+        dbCall, notify, job, status, result, sessionId,
+        terminatedBy: timeoutKind ? 'timeout' : (oomKilled ? 'oom' : null),
+        usage, mcpToolCalls, outputRules: meta.outputRules,
+        failureKind: oomKilled ? 'oom' : null, memoryDiagnostics,
+      })
+      // Kept when the terminal state did not land, so the next boot can still finish the job.
+      if (persisted) removeRunDir(runDir)
+    } catch (err) {
+      console.error(`[workers] agent completion handler failed for job ${job.id}: ${err.message}`)
+    }
+  }
+
+  if (knownExit != null) {
+    void complete(knownExit, null)
+    return
+  }
+
+  if (meta.pid) {
+    try {
+      watchdog = createAgentWatchdog({
+        pid: meta.pid,
+        scopeUnit,
+        // Measured from the original launch, so a restart never extends a run's allowance.
+        wallClockMs: Math.max(0, meta.deadlineAt - Date.now()),
+        idleTimeoutMs: idleMinutes * 60 * 1000,
+        label: job.id,
+        lastActivityAt,
+      })
+    } catch (err) {
+      // Running without the configured safety boundary is worse than failing this one job visibly.
+      watchdogArmError = err.message
+      killProcessTree(runHandle)
+      console.error(`[workers] ${err.message}`)
+    }
+  }
+  bumpIdle = () => watchdog?.activity()
+
+  pollTimer = setInterval(() => {
+    pump()
+    if (proc) return
+    // Re-adopted: no 'exit' event will come, so the recorder's file or the pid vanishing is the end.
+    const code = readExitStatus(runDir)
+    if (code != null) { void complete(code, null); return }
+    if (!pidExists(meta.pid)) void complete(readExitStatus(runDir), null)
+  }, proc ? 250 : 1000)
+
+  if (!proc) return
+
+  proc.on('close', (code, signal) => { void complete(code, signal) })
 
   proc.on('error', err => {
     if (settled) return
     settled = true
+    clearInterval(pollTimer)
+    outTail.close()
+    errTail.close()
     memoryMonitor?.cancel()
     watchdog?.cancel()
     if (scopeUnit) killProcessTree(runHandle)
     runningAgentProcs.delete(runHandle)
     release()
-    if (promptFile) { try { fs.unlinkSync(promptFile) } catch {} }
-    if (specFile) { try { fs.unlinkSync(specFile) } catch {} }
+    cleanupFiles()
+    removeRunDir(runDir)
     const result = appendLaunchDiagnostics(
-      `Failed to start agent: ${err.message}\n\nCommand: ${bin} ${spawnArgs.slice(0, 2).join(' ')}`,
-      { cwd: runCwd, agentPath: job.agent_path, shellBin, env: agentEnv, agentCommand, resolvedCommand, commandMode, runtimeName, memory },
+      `Failed to start agent: ${err.message}\n\nCommand: ${sanitizeCommand(meta.agentCommand)}`,
+      diagnosticsContext(),
     )
     finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result, sessionId: null, failureKind: 'launch_failed' })
       .catch(err => console.error(`[workers] agent error handler failed for job ${job.id}: ${err.message}`))
   })
-  return true
+}
+
+/** Kill a run's systemd scope by name only — never by pid, which may belong to someone else by now. */
+function killScopeOnly(scopeUnit) {
+  if (!scopeUnit || process.platform !== 'linux') return
+  spawnSync('systemctl', ['--user', 'kill', '--kill-whom=all', '--signal=SIGKILL', scopeUnit], { stdio: 'ignore', timeout: 5_000 })
+}
+
+/** Session id and partial output from a run whose process is gone, so the orphan stays resumable. */
+function salvageRun(meta, runDir) {
+  const consumer = getRuntime(meta.runtimeName).createConsumer({ stream: meta.stream })
+  let stderr = ''
+  createFileTail(runFiles(runDir).stdout, d => consumer.push(d)).read({ all: true })
+  createFileTail(runFiles(runDir).stderr, d => { if (stderr.length < MAX_STDERR) stderr = (stderr + d).slice(0, MAX_STDERR) }).read({ all: true })
+  let parsed = {}
+  try { parsed = consumer.finish() ?? {} } catch {}
+  const sessionId = parsed.sessionId ?? null
+  const lines = ['Job orphaned: the app instance running it stopped (restart or crash), and its agent process was no longer running when the next instance started. This is an infrastructure event, not an agent failure; partial work may still have landed.']
+  if (sessionId) lines.push(`Session ${sessionId} is resumable — send a follow-up message on this task to continue it.`)
+  if (parsed.result) lines.push(`Partial output before it stopped:\n${parsed.result}`)
+  if (stderr.trim()) lines.push(`Stderr:\n${tail(stderr.trim(), 8192)}`)
+  return { sessionId, result: lines.join('\n\n') }
+}
+
+function tail(text, chars) {
+  return text.length > chars ? text.slice(-chars) : text
+}
+
+/**
+ * Boot-time reconciliation, before anything is reported to an orchestrator. Each job the previous
+ * instance left 'running' is, in order of preference:
+ *   - finished, when its exit recorder wrote a status while no server was watching (done/failed as usual);
+ *   - re-adopted, when its tracked process is still the one that was launched (it keeps its slot,
+ *     its original deadline and its scope, and finishes through the normal path);
+ *   - orphaned, only when the work really is gone — with the session id and partial output its
+ *     files still hold, so the orchestrator sees an infrastructure interruption that is resumable.
+ * Returns the orphaned jobs, which is what `orphanedAtBoot` resolves with.
+ */
+export async function recoverRunningJobs(ctx) {
+  const { dbCall, loadSettings, notify = () => {}, startedAt = null, dataDir } = ctx
+  const running = await dbCall('getRunningAgentJobs')
+  const lost = []
+  const details = {}
+  const kept = []
+  for (const job of running ?? []) {
+    try {
+      const runDir = agentRunDir(dataDir, job.id)
+      const meta = readRunMeta(runDir)
+      if (!meta) { lost.push(job.id); continue }
+      const diagnosticsEnv = () => buildAgentEnv(loadSettings(), readAgentConfig(job.agent_path), meta.shellBin, job.agent_path)
+      const knownExit = readExitStatus(runDir)
+      if (knownExit != null) {
+        kept.push(job.id)
+        console.error(`[workers] job ${job.id} ended (exit ${knownExit}) while no server was watching; finishing it`)
+        superviseAgentRun({ dbCall, notify, job, meta, runDir, release: () => {}, diagnosticsEnv, knownExit })
+        continue
+      }
+      if (meta.adoptable && runProcessAlive(meta)) {
+        kept.push(job.id)
+        console.error(`[workers] re-adopted running job ${job.id} (pid ${meta.pid}${meta.scopeUnit ? `, ${meta.scopeUnit}` : ''})`)
+        superviseAgentRun({
+          dbCall, notify, job, meta, runDir,
+          release: jobScheduler.adopt(),
+          memoryMonitor: monitorScopeMemory(meta.scopeUnit, meta.memory),
+          diagnosticsEnv,
+          lastActivityAt: lastOutputAt(runDir),
+        })
+        continue
+      }
+      // The agent is gone. Reap anything left in its scope, and keep what it said.
+      killScopeOnly(meta.scopeUnit)
+      lost.push(job.id)
+      details[job.id] = salvageRun(meta, runDir)
+    } catch (err) {
+      console.error(`[workers] could not reconcile running job ${job.id}: ${err.message}`)
+      lost.push(job.id)
+    }
+  }
+  const reset = await dbCall('resetStuckJobs', startedAt, { ids: lost, details })
+  try { sweepRunDirs(dataDir, kept) } catch {}
+  return Array.isArray(reset?.orphaned) ? reset.orphaned : []
 }
 
 async function autoRunAgents({ dbCall }) {

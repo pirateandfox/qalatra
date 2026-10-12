@@ -120,10 +120,13 @@ if (!isMainThread) startWatchdog()
  * carries the fired reason back synchronously, so a delayed main loop still persists `timed_out`
  * rather than mistaking the watchdog's SIGKILL for an agent failure.
  */
-export function createAgentWatchdog({ pid, scopeUnit = null, wallClockMs, idleTimeoutMs = 0, label = String(pid), logger = console }) {
+export function createAgentWatchdog({ pid, scopeUnit = null, wallClockMs, idleTimeoutMs = 0, label = String(pid), logger = console, lastActivityAt = null }) {
   const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT))
-  const initialActivityAt = Date.now()
-  const wallClockDeadline = initialActivityAt + wallClockMs
+  const now = Date.now()
+  const wallClockDeadline = now + wallClockMs
+  // A run re-adopted after a server restart brings its last output time, so the idle clock does not
+  // restart from zero just because a new supervisor arrived.
+  const initialActivityAt = Number.isFinite(lastActivityAt) ? Math.min(lastActivityAt, now) : now
   let worker
 
   try {
