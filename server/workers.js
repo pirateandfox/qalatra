@@ -666,7 +666,7 @@ export function startBackgroundWorkers(ctx) {
   syncPendingAttachments(ctx).catch(() => {})
   runAgentScan({ dbCall, loadSettings }).catch(() => {})
   setInterval(() => syncPendingAttachments(ctx).catch(() => {}), 5 * 60 * 1000)
-  setInterval(() => orphanedAtBoot.then(() => processAgentJobs({ dbCall, loadSettings, notify }))
+  setInterval(() => orphanedAtBoot.then(() => processAgentJobs({ dbCall, loadSettings, notify, dataDir: ctx.dataDir }))
     .catch(err => console.error(`[workers] admission pass failed: ${err.message}`)), 30_000)
   setInterval(() => autoRunAgents({ dbCall }).catch(() => {}), 5 * 60_000)
   // Per-task worktrees (agent.config `worktrees: true`) that ran nothing for worktreeIdleDays go,
