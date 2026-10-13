@@ -349,7 +349,10 @@ An outside system can drive a task by queueing jobs through the generic surface 
 `onJobFinished` / `orphanedAtBoot` hooks in `server/workers.js`. FlightDesk is the first consumer
 (`server/integrations/flightdesk/`, opt-in per agent folder via `.flightdeskrc`; see
 `docs/flightdesk-integration.md`). The core never knows which orchestrator is attached, and
-standalone Qalatra runs with none.
+standalone Qalatra runs with none. A job's terminal DB write also records that its orchestrator is
+owed a report (`external_reports`). The integration stores the exact payload there and retries it
+every tick until it is delivered, so a network blip or a restart never leaves a finished turn
+RUNNING on the other side ("Report outbox" in that doc).
 
 ### Concurrency
 

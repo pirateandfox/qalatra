@@ -141,7 +141,28 @@ as fields on the request, under `sessionOp`, or as JSON in `prompt` until Flight
   composer }`) and `recovered`; with a `pageIssue`, a null `prUrl`/`branch` means "not read", not
   "none". `inject`/`archive` return `recovered`. These are additive; FlightDesk strips them today.
 
-## Outbox replay
+## Report outbox
+
+A job's final report (DONE / FAILED, and a session op's result) goes through the
+`external_reports` table instead of straight to the network. The poll's reconcile used to be the
+only retry, and it works only while FlightDesk still lists the dispatch. FlightDesk stops listing a
+RUNNING dispatch, so one failed request could leave a dead turn RUNNING there forever.
+
+- The job's terminal write (`finishAgentJob`, `resetStuckJobs`) records that a report is owed, in
+  the same transaction. A crash before the integration builds the report therefore loses nothing;
+  the report is rebuilt from the job row.
+- The hook (`onJobFinished`, `reportOrphaned`, a session op) stores the exact payload, then sends
+  it. Delivered → the row is deleted. A transport error, a 5xx, a rejected or missing credential
+  → retried on the 30 s tick with backoff (30 s doubling to 15 min), across restarts.
+- "Dispatch not found" is dropped at once. Any other GraphQL rejection is dropped after 10
+  attempts, and anything still owed after a week is dropped. Every drop is logged.
+- The poll's reconcile sends a stored report right away, ignoring the backoff, because FlightDesk
+  just showed it is reachable. The first payload stored wins.
+- `GET /api/v1/integrations` shows `reports.pending`. Covered by section 14 of
+  `npm run test:flightdesk-dispatch`, which tests a network cut, a restart, a crash before the hook
+  runs, an orphan, a missing credential and an unknown dispatch.
+
+## CLI outbox replay
 
 When the FlightDesk CLI cannot reach FlightDesk from inside a job (`questions ask`, `turn end`,
 `task comment`), it writes the GraphQL it failed to send as

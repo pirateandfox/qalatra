@@ -41,6 +41,10 @@ export function startFlightDeskIntegration(ctx, { setIntervalImpl = setInterval,
     if (polling || !enabled()) return
     polling = true
     try {
+      // Owed DONE/FAILED reports first: they are what keeps FlightDesk from showing a dead turn as
+      // RUNNING, and they don't depend on a folder poll succeeding.
+      try { await dispatcher.flushReports() }
+      catch (err) { log.error(`[flightdesk] report flush failed: ${err.message}`) }
       const agents = await dbCall('listAgentsDb')
       for (const agent of agents) {
         if (!loadFolderRc(agent.path)) continue
@@ -92,6 +96,7 @@ export function startFlightDeskIntegration(ctx, { setIntervalImpl = setInterval,
       return {
         enabled: enabled(),
         pollIntervalMs: POLL_INTERVAL_MS,
+        reports: { ...dispatcher.reports },
         folders: [...dispatcher.folders.values()].map(f => ({ ...f, apiUrl: loadFolderRc(f.path)?.apiUrl ?? null })),
       }
     },

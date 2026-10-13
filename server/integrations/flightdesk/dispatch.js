@@ -31,6 +31,18 @@ const KIND_PRIORITY = { RESUME: 0, ANSWER: 0 }
 const INLINE_KINDS = new Set(['SESSION_OP'])
 export const OUTBOX_DIR = '.flightdesk-outbox'
 
+// Retry schedule for a terminal report FlightDesk has not acknowledged yet (external_reports):
+// 30 s doubling to a 15-minute ceiling, given up after a week. A rejection FlightDesk will repeat
+// forever (unknown dispatch) is dropped at once; any other GraphQL error is retried a bounded
+// number of times, since a 200 with an errors array can still be FlightDesk having a bad minute.
+export const REPORT_RETRY_BASE_MS = 30_000
+export const REPORT_RETRY_MAX_MS = 15 * 60_000
+export const REPORT_MAX_AGE_MS = 7 * 24 * 60 * 60_000
+export const REPORT_MAX_REJECTIONS = 10
+export function reportBackoffMs(attempts) {
+  return Math.min(REPORT_RETRY_BASE_MS * 2 ** Math.max(0, attempts), REPORT_RETRY_MAX_MS)
+}
+
 const TERMINAL_JOB = new Set(['done', 'failed', 'timed_out', 'orphaned'])
 const TERMINAL_DISPATCH = new Set(['DONE', 'FAILED', 'CANCELLED'])
 
@@ -243,6 +255,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
   // has already taken; a cold cache just means every step is tried and the rejections ignored.
   const known = new Map()
   const folders = new Map() // agentPath -> status record for the UI
+  const reports = { pending: 0, lastFlushAt: null, sentTotal: 0, droppedTotal: 0 } // the report outbox, for the UI
 
   function folderStatus(agentPath) {
     if (!folders.has(agentPath)) folders.set(agentPath, { path: agentPath, lastPollAt: null, lastOkAt: null, lastError: null, rejectedAt: null, open: 0, queuedTotal: 0, sessionOpsTotal: 0, outbox: { sent: 0, failed: 0, pending: 0 } })
@@ -370,18 +383,97 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
     return extras
   }
 
+  /** The terminal report for a job, rebuilt from its row (poll reconcile, or an outbox row left blank). */
+  function terminalReportForJob(job) {
+    const target = dispatchStatusForJob(job.status)
+    const diagnostics = target === 'FAILED'
+      ? { kind: job.status === 'timed_out' ? 'timed_out' : job.status === 'orphaned' ? 'orphaned' : job.terminated_by === 'oom' ? 'oom' : 'error' }
+      : null
+    return { target, payload: { qalatraJobId: job.id, ...finishExtras({ status: job.status, result: job.result, sessionId: job.session_id, diagnostics }) } }
+  }
+
   /** Bring FlightDesk in line with a job we already hold for this request (lost ack, restart…). */
   async function reconcile(client, request, job) {
     const target = dispatchStatusForJob(job.status)
     if (!target) return
     if (target === 'DONE' || target === 'FAILED') {
-      const diagnostics = target === 'FAILED'
-        ? { kind: job.status === 'timed_out' ? 'timed_out' : job.status === 'orphaned' ? 'orphaned' : job.terminated_by === 'oom' ? 'oom' : 'error' }
-        : null
-      await advance(client, request, target, { qalatraJobId: job.id, ...finishExtras({ status: job.status, result: job.result, sessionId: job.session_id, diagnostics }) })
+      // FlightDesk just listed it, so it is reachable: send now, whatever the outbox backoff says.
+      // An outbox row keeps the report built when the job ended; this only fills one left blank.
+      const { payload } = terminalReportForJob(job)
+      await report({ ref: request.id, agentPath: job.agent_path, target, payload, request })
     } else {
       await advance(client, request, target, { qalatraJobId: job.id })
     }
+  }
+
+  /**
+   * Owe FlightDesk a terminal report: persist it in the outbox, then try to send it now. A report
+   * that does not land stays in the outbox and flushReports retries it every tick, with backoff,
+   * across restarts — so a finished job is never left RUNNING on FlightDesk's side because one
+   * request failed. Never throws.
+   */
+  async function report({ ref, agentPath, target, mode = 'ladder', payload, request = null }) {
+    const entry = await dbCall('enqueueExternalReport', { external_ref: ref, orchestrator: ORCHESTRATOR, agent_path: agentPath, target, mode, payload })
+    return deliver(entry, request)
+  }
+
+  async function deliver(entry, request = null) {
+    const ref = entry.external_ref
+    try {
+      if (!entry.target || !entry.payload) {
+        // Recorded by the job's terminal write before the integration built the report (a crash in
+        // between, or a hook that never ran). Rebuild it from the job.
+        const job = await dbCall('getAgentJobByExternalRef', ref)
+        if (!job || !dispatchStatusForJob(job.status) || !TERMINAL_JOB.has(job.status)) {
+          await dbCall('ackExternalReport', ref)
+          log.error(`[flightdesk] report for dispatch ${ref} dropped: no finished job holds it`)
+          return 'dropped'
+        }
+        Object.assign(entry, terminalReportForJob(job), { agent_path: entry.agent_path ?? job.agent_path })
+        await dbCall('enqueueExternalReport', { external_ref: ref, orchestrator: ORCHESTRATOR, agent_path: entry.agent_path, target: entry.target, mode: entry.mode, payload: entry.payload })
+      }
+      if (Date.now() - Date.parse(entry.created_at) > REPORT_MAX_AGE_MS) {
+        await dbCall('ackExternalReport', ref)
+        log.error(`[flightdesk] report ${entry.target} for dispatch ${ref} dropped after ${entry.attempts} attempts over a week: ${entry.last_error ?? 'never delivered'}`)
+        return 'dropped'
+      }
+      const client = entry.agent_path ? clientFor(entry.agent_path) : null
+      if (!client) throw new Error(`no FlightDesk credential for ${entry.agent_path ?? 'an unknown folder'}`)
+      const req = request ?? { id: ref, status: known.get(ref) ?? 'ACKNOWLEDGED' }
+      if (entry.mode === 'inline') await reportInline(client, req, entry.target, entry.payload)
+      else await advance(client, req, entry.target, entry.payload)
+      await dbCall('ackExternalReport', ref)
+      return 'sent'
+    } catch (err) {
+      const permanent = err?.graphql && /not found/i.test(err.message)
+      const rejectedTooOften = err?.graphql && entry.attempts + 1 >= REPORT_MAX_REJECTIONS
+      if (permanent || rejectedTooOften) {
+        await dbCall('ackExternalReport', ref).catch(() => {})
+        log.error(`[flightdesk] report ${entry.target} for dispatch ${ref} rejected by FlightDesk, dropped: ${err.message}`)
+        return 'rejected'
+      }
+      const next = new Date(Date.now() + reportBackoffMs(entry.attempts)).toISOString()
+      await dbCall('deferExternalReport', ref, next, err?.message ?? String(err)).catch(() => {})
+      log.error(`[flightdesk] report ${entry.target} for dispatch ${ref} not delivered (attempt ${entry.attempts + 1}); retrying at ${next}: ${err?.message ?? err}`)
+      return 'deferred'
+    }
+  }
+
+  /** Retry every owed report whose backoff has passed. Runs on the poll tick, before polling. */
+  async function flushReports() {
+    const summary = { sent: 0, deferred: 0, dropped: 0 }
+    const due = await dbCall('listDueExternalReports', ORCHESTRATOR, new Date().toISOString())
+    for (const entry of due) {
+      const r = await deliver(entry)
+      if (r === 'sent') summary.sent++
+      else if (r === 'deferred') summary.deferred++
+      else summary.dropped++
+    }
+    reports.pending = await dbCall('countExternalReports', ORCHESTRATOR)
+    reports.lastFlushAt = new Date().toISOString()
+    reports.sentTotal += summary.sent
+    reports.droppedTotal += summary.dropped
+    return summary
   }
 
   async function handleRequest(agent, client, request, status) {
@@ -439,14 +531,14 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
     // Answered from the ledger when we already executed it (a lost report must not re-inject).
     const done = await dbCall('getExternalOp', request.id)
     if (done) {
-      await reportInline(client, request, done.status === 'done' ? 'DONE' : 'FAILED', done.result ?? {})
+      await report({ ref: request.id, agentPath: agent.path, target: done.status === 'done' ? 'DONE' : 'FAILED', mode: 'inline', payload: done.result ?? {}, request })
       return 'reconciled'
     }
     const spec = sessionOpSpec(request)
     if (spec.error) {
       const result = { diagnostics: { kind: 'error', text: spec.error } }
       await dbCall('recordExternalOp', { external_ref: request.id, orchestrator: ORCHESTRATOR, op: spec.op ?? 'invalid', status: 'failed', result })
-      await reportInline(client, request, 'FAILED', result)
+      await report({ ref: request.id, agentPath: agent.path, target: 'FAILED', mode: 'inline', payload: result, request })
       return 'invalid'
     }
     if (!sessionOps) return 'unsupported'
@@ -475,7 +567,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
     }
     await dbCall('recordExternalOp', { external_ref: request.id, orchestrator: ORCHESTRATOR, op: spec.op, status: outcome.status, result: outcome.result })
     status.sessionOpsTotal++
-    await reportInline(client, request, outcome.status === 'done' ? 'DONE' : 'FAILED', outcome.result)
+    await report({ ref: request.id, agentPath: agent.path, target: outcome.status === 'done' ? 'DONE' : 'FAILED', mode: 'inline', payload: outcome.result, request })
     return outcome.status === 'done' ? 'executed' : 'failed'
   }
 
@@ -527,15 +619,15 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
   async function onJobFinished({ job, status, result, sessionId, diagnostics }) {
     const meta = isOurs(job)
     if (!meta) return
-    const client = clientFor(meta.agent_path ?? job.agent_path)
-    if (!client) return
     const target = status === 'done' ? 'DONE' : 'FAILED'
     try {
-      await advance(client, { id: job.external_ref, status: known.get(job.external_ref) ?? 'ACKNOWLEDGED' }, target,
-        { qalatraJobId: job.id, ...finishExtras({ status, result, sessionId, diagnostics }) })
+      // Queued even when the folder has no credential right now; the outbox sends it once it does.
+      await report({ ref: job.external_ref, agentPath: meta.agent_path ?? job.agent_path, target,
+        payload: { qalatraJobId: job.id, ...finishExtras({ status, result, sessionId, diagnostics }) } })
     } finally {
       // A closeout that just reported DONE is usually the last job this task will get.
-      try { await closeIfFinished(client, { taskId: job.task_id, ref: meta.task_ref, agentPath: job.agent_path }) }
+      const client = clientFor(meta.agent_path ?? job.agent_path)
+      try { if (client) await closeIfFinished(client, { taskId: job.task_id, ref: meta.task_ref, agentPath: job.agent_path }) }
       catch (err) { log.error(`[flightdesk] close check after job ${job.id} failed: ${err.message}`) }
     }
   }
@@ -544,19 +636,13 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
     for (const job of jobs ?? []) {
       const meta = isOurs(job)
       if (!meta) continue
-      const client = clientFor(meta.agent_path ?? job.agent_path)
-      if (!client) continue
-      try {
-        await advance(client, { id: job.external_ref, status: 'ACKNOWLEDGED' }, 'FAILED', {
-          qalatraJobId: job.id,
-          resumable: Boolean(job.session_id),
-          diagnostics: { kind: 'orphaned', text: `Qalatra Server on ${hostname} restarted while this job was running` },
-        })
-      } catch (err) {
-        log.error(`[flightdesk] could not report orphaned job ${job.id}: ${err.message}`)
-      }
+      await report({ ref: job.external_ref, agentPath: meta.agent_path ?? job.agent_path, target: 'FAILED', payload: {
+        qalatraJobId: job.id,
+        resumable: Boolean(job.session_id),
+        diagnostics: { kind: 'orphaned', text: `Qalatra Server on ${hostname} restarted while this job was running` },
+      } })
     }
   }
 
-  return { pollFolder, onJobStarted, onJobFinished, reportOrphaned, sweepFinishedTasks, closeIfFinished, folders, advance, handleRequest, handleSessionOp }
+  return { pollFolder, onJobStarted, onJobFinished, reportOrphaned, sweepFinishedTasks, closeIfFinished, flushReports, folders, reports, advance, handleRequest, handleSessionOp }
 }

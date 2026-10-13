@@ -30,7 +30,7 @@ const dbCall = (method, ...args) => new Promise((resolve, reject) => {
 })
 await new Promise(resolve => worker.once('message', m => m.ready && resolve()))
 
-const { createFlightDeskDispatcher, formatAnswersBlock, orderRequests, buildPrompt, sessionOpSpec, flushOutbox, OUTBOX_DIR } = await import('../server/integrations/flightdesk/dispatch.js')
+const { createFlightDeskDispatcher, reportBackoffMs, REPORT_RETRY_MAX_MS, formatAnswersBlock, orderRequests, buildPrompt, sessionOpSpec, flushOutbox, OUTBOX_DIR } = await import('../server/integrations/flightdesk/dispatch.js')
 const { BridgeUnavailableError, turnEndsWithQuestion, createSessionOps } = await import('../server/session-ops.js')
 const { isTransitionRejection, FlightDeskAuthError } = await import('../server/integrations/flightdesk/client.js')
 const { externalEnv, diagnosticsKindFor, flightdeskRcEnv, buildAgentEnv } = await import('../server/workers.js')
@@ -58,7 +58,7 @@ function fakeFlightDesk() {
     setAnswers(a) { answers = a },
     failNext() { failNextUpdate = true },
     client: {
-      async listDispatches() { calls.push(['list']); return [...requests.values()].filter(r => ['REQUESTED', 'ACKNOWLEDGED', 'RUNNING'].includes(r.status)).map(r => structuredClone(r)) },
+      async listDispatches() { calls.push(['list']); return [...requests.values()].filter(r => !r.hidden && ['REQUESTED', 'ACKNOWLEDGED', 'RUNNING'].includes(r.status)).map(r => structuredClone(r)) },
       async updateDispatch(input) {
         calls.push(['update', input])
         if (failNextUpdate) { failNextUpdate = false; throw new Error('network down') }
@@ -498,6 +498,104 @@ try {
   fs.rmSync(bound, { recursive: true, force: true })
   fs.rmSync(unbound, { recursive: true, force: true })
   check('only the injected network failure was logged', logs, ['[flightdesk] /agents/repo: dispatch d2 (EXECUTE): network down'])
+
+  // ── 14. Report outbox: a terminal report survives a network cut, a restart, and a crash ──
+  // FlightDesk stops listing a RUNNING dispatch at some point, so the poll reconcile is not a
+  // safety net; the outbox is. Earlier sections finished jobs without the hook, which owe reports
+  // too — clear those so this section counts only its own.
+  for (const owed of await dbCall('listDueExternalReports', 'flightdesk', '9999')) await dbCall('ackExternalReport', owed.external_ref)
+  const ofd = fakeFlightDesk()
+  const oagent = { path: '/agents/outbox', name: 'outbox', context: 'internal', project: 'outbox' }
+  await dbCall('upsertAgents', [oagent])
+  const ologs = []
+  const quiet = { error: m => ologs.push(m), log: () => {} }
+  let first = createFlightDeskDispatcher({ dbCall, clientFor: () => ofd.client, log: quiet, hostname: 'testbox' })
+  const makeDue = ref => dbCall('deferExternalReport', ref, '2000-01-01T00:00:00.000Z', 'test: due now')
+  async function runningJob(id) {
+    ofd.add({ id, taskId: `fd-out-${id}`, kind: 'EXECUTE', prompt: `work ${id}` })
+    await first.pollFolder(oagent)
+    const j = await dbCall('getAgentJobByExternalRef', id)
+    await dbCall('startAgentJob', j.id)
+    await first.onJobStarted({ job: await dbCall('getAgentJob', j.id) })
+    return dbCall('getAgentJob', j.id)
+  }
+
+  // Network cut: the DONE report fails, and FlightDesk stops listing the dispatch.
+  const o1 = await runningJob('o1')
+  await dbCall('finishAgentJob', o1.id, 'done', 'finished the work', 'sess-o1')
+  ofd.failNext()
+  await first.onJobFinished({ job: o1, status: 'done', result: 'finished the work', sessionId: 'sess-o1', diagnostics: { kind: null } })
+  ofd.requests.get('o1').hidden = true
+  let owed = await dbCall('getExternalReport', 'o1')
+  check('outbox: undelivered DONE is kept with its payload', [ofd.requests.get('o1').status, owed?.target, owed?.payload?.resultTail, owed?.attempts], ['RUNNING', 'DONE', 'finished the work', 1])
+  check('outbox: retry waits out the backoff', Date.parse(owed.next_attempt_at) > Date.now(), true)
+  await first.pollFolder(oagent)
+  check('outbox: poll alone does not deliver once FlightDesk stops listing it', ofd.requests.get('o1').status, 'RUNNING')
+  let flushed = await first.flushReports()
+  check('outbox: nothing sent before the backoff passes', [flushed.sent, ofd.requests.get('o1').status], [0, 'RUNNING'])
+
+  // Restart while it is queued: a new dispatcher (cold ladder cache) on the same DB delivers it.
+  let second = createFlightDeskDispatcher({ dbCall, clientFor: () => ofd.client, log: quiet, hostname: 'testbox' })
+  await makeDue('o1')
+  flushed = await second.flushReports()
+  const or1 = ofd.requests.get('o1')
+  check('outbox: delivered after restart with the original payload', [flushed.sent, or1.status, or1.extras.resultTail, or1.extras.resumable, or1.extras.qalatraJobId], [1, 'DONE', 'finished the work', true, o1.id])
+  check('outbox: delivered report leaves the outbox', [await dbCall('getExternalReport', 'o1'), second.reports.pending], [null, 0])
+
+  // Crash between the job's terminal write and the hook: the row is owed but blank, and the
+  // report is rebuilt from the job (OOM keeps its headline and travels as 'error').
+  const o2 = await runningJob('o2')
+  ofd.requests.get('o2').hidden = true
+  await dbCall('finishAgentJob', o2.id, 'failed', 'The run was OOM-killed by its per-run scope limit.\nlots of output', 'sess-o2', 'oom')
+  owed = await dbCall('getExternalReport', 'o2')
+  check('outbox: the terminal write alone records a blank owed report', [owed?.target, owed?.payload, owed?.agent_path], [null, null, oagent.path])
+  flushed = await second.flushReports()
+  check('outbox: a blank row gives the finish hook a head start', [flushed.sent, ofd.requests.get('o2').status], [0, 'RUNNING'])
+  await makeDue('o2')
+  flushed = await second.flushReports()
+  const or2 = ofd.requests.get('o2')
+  check('outbox: blank report rebuilt from the job and delivered', [or2.status, or2.extras.diagnostics?.kind, /^The run was OOM-killed/.test(or2.extras.diagnostics?.text ?? ''), or2.extras.resumable], ['FAILED', 'error', true, true])
+
+  // Orphaned at boot while FlightDesk is unreachable: retried, not dropped.
+  const o3 = await runningJob('o3')
+  ofd.requests.get('o3').hidden = true
+  const reset3 = await dbCall('resetStuckJobs', 'boundary-o3', { ids: [o3.id], details: { [o3.id]: { sessionId: 'sess-o3' } } })
+  ofd.failNext()
+  await second.reportOrphaned(reset3.orphaned)
+  check('outbox: failed orphan report kept', [ofd.requests.get('o3').status, (await dbCall('getExternalReport', 'o3'))?.payload?.diagnostics?.kind], ['RUNNING', 'orphaned'])
+  await makeDue('o3')
+  await second.flushReports()
+  check('outbox: orphan report delivered on a later tick', [ofd.requests.get('o3').status, ofd.requests.get('o3').extras.diagnostics.kind, ofd.requests.get('o3').extras.resumable], ['FAILED', 'orphaned', true])
+
+  // No credential for the folder right now: queued and retried, not lost.
+  let credentialed = false
+  const third = createFlightDeskDispatcher({ dbCall, clientFor: () => credentialed ? ofd.client : null, log: quiet, hostname: 'testbox' })
+  const o4 = await runningJob('o4')
+  ofd.requests.get('o4').hidden = true
+  await dbCall('finishAgentJob', o4.id, 'done', 'ok', 'sess-o4')
+  await third.onJobFinished({ job: o4, status: 'done', result: 'ok', sessionId: 'sess-o4', diagnostics: { kind: null } })
+  check('outbox: no credential → kept', [(await dbCall('getExternalReport', 'o4'))?.attempts, ofd.requests.get('o4').status], [1, 'RUNNING'])
+  credentialed = true
+  await makeDue('o4')
+  await third.flushReports()
+  check('outbox: delivered once the credential is back', ofd.requests.get('o4').status, 'DONE')
+
+  // FlightDesk no longer has the dispatch: deterministic, so dropped rather than retried forever.
+  await dbCall('enqueueExternalReport', { external_ref: 'gone', orchestrator: 'flightdesk', agent_path: oagent.path, target: 'FAILED', payload: { diagnostics: { kind: 'error', text: 'x' } } })
+  flushed = await third.flushReports()
+  check('outbox: unknown dispatch dropped', [flushed.dropped, await dbCall('getExternalReport', 'gone')], [1, null])
+
+  // A report delivered by the poll reconcile clears the outbox too, and keeps the first payload.
+  const o5 = await runningJob('o5')
+  await dbCall('finishAgentJob', o5.id, 'done', 'from the job row', 'sess-o5')
+  ofd.failNext()
+  await second.onJobFinished({ job: o5, status: 'done', result: 'hook payload', sessionId: 'sess-o5', diagnostics: { kind: null } })
+  await second.pollFolder(oagent)
+  check('outbox: poll reconcile delivers the stored payload and clears the row', [ofd.requests.get('o5').status, ofd.requests.get('o5').extras.resultTail, await dbCall('getExternalReport', 'o5')], ['DONE', 'hook payload', null])
+
+  check('outbox: backoff doubles from 30 s and caps at 15 min', [reportBackoffMs(0), reportBackoffMs(1), reportBackoffMs(3), reportBackoffMs(20)], [30_000, 60_000, 240_000, REPORT_RETRY_MAX_MS])
+  check('outbox: every failed delivery was logged', ologs.filter(m => /not delivered/.test(m)).length, 4)
+  check('outbox: dropped report was logged', ologs.some(m => /dispatch gone rejected by FlightDesk, dropped/.test(m)), true)
 } catch (err) {
   failures++
   console.log(`FAIL  ${err.stack || err}`)

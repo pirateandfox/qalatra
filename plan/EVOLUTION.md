@@ -1,5 +1,20 @@
 # Qalatra — Evolution Notes
 
+## Dead turns always reach FlightDesk: persistent report outbox (2026-10-12)
+
+- Part 2 of the fleet turn-stall task (FlightDesk `dc18dbeb`). A DONE or FAILED report that failed
+  to send was retried only by the poll's reconcile, which works only while FlightDesk still lists
+  the dispatch. A network blip at the wrong moment could leave a dead turn RUNNING in FlightDesk
+  indefinitely, and a failed orphan report at boot was only logged.
+- New `external_reports` table (generic: keyed by `external_ref`, with an `orchestrator` column).
+  The job's terminal DB write records that a report is owed, in the same transaction. The
+  FlightDesk hooks store the exact payload and try once. `flushReports` retries on every tick with
+  backoff (30 s → 15 min), survives restarts, and rebuilds a blank row from the job. It drops only
+  "dispatch not found", 10 GraphQL rejections in a row, or a week without delivery.
+- Session-op results go through the same outbox (mode `inline`).
+- Not done: the other parts of that task (OOM classification for an unconfirmed SIGKILL at
+  `MemoryMax`, worktrees and memory sizing in each repo, timeouts) are fleet/repo configuration.
+
 ## Restarts re-adopt running agent jobs instead of orphaning them (2026-10-12)
 
 - On shi a `qalatra-server` restart 11 s into two FlightDesk build jobs orphaned both. FlightDesk

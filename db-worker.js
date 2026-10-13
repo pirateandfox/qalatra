@@ -308,6 +308,24 @@ function migrate() {
     result       TEXT,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
   )`)
+  // Outbox of terminal reports (DONE/FAILED) owed to an orchestrator. A report is written here
+  // before it is sent and deleted once the orchestrator has it, so a network blip or a restart
+  // between "the job ended" and "the orchestrator heard" cannot leave the request RUNNING there
+  // forever. payload is the exact report, so a retry says what the first attempt would have.
+  // The job's own terminal write records that a report is owed (target/payload still NULL), in
+  // the same transaction, so even a crash before the integration builds the report loses nothing.
+  db.exec(`CREATE TABLE IF NOT EXISTS external_reports (
+    external_ref    TEXT PRIMARY KEY,
+    orchestrator    TEXT NOT NULL,
+    agent_path      TEXT,
+    target          TEXT,
+    mode            TEXT NOT NULL DEFAULT 'ladder',
+    payload         TEXT,
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    last_error      TEXT,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  )`)
   tryAlter('ALTER TABLE projects ADD COLUMN context TEXT')
   tryAlter('ALTER TABLE attachments ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0')
   db.prepare(`UPDATE tasks SET last_reviewed_at = COALESCE(last_touched_human, created_at, datetime('now')) WHERE last_reviewed_at IS NULL`).run()
@@ -1318,6 +1336,43 @@ function getExternalOp(externalRef) {
   try { result = row.result ? JSON.parse(row.result) : null } catch { result = { text: row.result } }
   return { ...row, result }
 }
+// Report outbox (see external_reports). Enqueue fills a row the job's terminal write left blank
+// and otherwise keeps the first payload: the report built when the job ended is the authoritative
+// one, and a later reconcile must not replace it.
+function parseReport(row) {
+  if (!row) return null
+  let payload = null
+  try { payload = row.payload ? JSON.parse(row.payload) : null } catch { payload = null }
+  return { ...row, payload }
+}
+function enqueueExternalReport({ external_ref, orchestrator, agent_path = null, target, mode = 'ladder', payload = null }) {
+  db.prepare(`INSERT INTO external_reports (external_ref, orchestrator, agent_path, target, mode, payload) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(external_ref) DO UPDATE SET
+      agent_path = COALESCE(external_reports.agent_path, excluded.agent_path),
+      target = COALESCE(external_reports.target, excluded.target),
+      mode = CASE WHEN external_reports.payload IS NULL THEN excluded.mode ELSE external_reports.mode END,
+      payload = COALESCE(external_reports.payload, excluded.payload)`)
+    .run(String(external_ref), orchestrator, agent_path, target, mode, payload == null ? null : JSON.stringify(payload))
+  return parseReport(db.prepare('SELECT * FROM external_reports WHERE external_ref = ?').get(String(external_ref)))
+}
+function getExternalReport(externalRef) {
+  return parseReport(db.prepare('SELECT * FROM external_reports WHERE external_ref = ?').get(String(externalRef)))
+}
+function listDueExternalReports(orchestrator, now = new Date().toISOString(), limit = 50) {
+  return db.prepare(`SELECT * FROM external_reports WHERE orchestrator = ? AND next_attempt_at <= ? ORDER BY created_at LIMIT ?`)
+    .all(orchestrator, now, limit).map(parseReport)
+}
+function countExternalReports(orchestrator) {
+  return db.prepare('SELECT COUNT(*) AS n FROM external_reports WHERE orchestrator = ?').get(orchestrator).n
+}
+function ackExternalReport(externalRef) {
+  return { deleted: db.prepare('DELETE FROM external_reports WHERE external_ref = ?').run(String(externalRef)).changes }
+}
+function deferExternalReport(externalRef, nextAttemptAt, error) {
+  db.prepare('UPDATE external_reports SET attempts = attempts + 1, next_attempt_at = ?, last_error = ? WHERE external_ref = ?')
+    .run(nextAttemptAt, error == null ? null : String(error).slice(0, 1000), String(externalRef))
+  return getExternalReport(externalRef)
+}
 // Whether a session operation must wait for a running job under this folder's base concurrency
 // key (see getQueuedJobs), since that job's agent may be mid-inject into the same session. Only
 // a job that could be touching the op's session blocks it: one for the same task (task_ref ===
@@ -1371,9 +1426,26 @@ function setAgentJobRuntime(id, runtime) {
   return { ok: true }
 }
 function finishAgentJob(id, status, result, sessionId, terminatedBy = null, usage = null, mcpToolCalls = null) {
-  db.prepare(`UPDATE agent_jobs SET status = ?, result = ?, session_id = ?, terminated_by = ?, usage_json = ?, mcp_tool_calls = ?, completed_at = datetime('now') WHERE id = ?`)
-    .run(status, result, sessionId, terminatedBy, usage ? JSON.stringify(usage) : null, mcpToolCalls, id)
+  db.transaction(() => {
+    db.prepare(`UPDATE agent_jobs SET status = ?, result = ?, session_id = ?, terminated_by = ?, usage_json = ?, mcp_tool_calls = ?, completed_at = datetime('now') WHERE id = ?`)
+      .run(status, result, sessionId, terminatedBy, usage ? JSON.stringify(usage) : null, mcpToolCalls, id)
+    oweExternalReport(id)
+  })()
   return { ok: true }
+}
+// An orchestrated job just reached a terminal status: record that its orchestrator is owed a
+// report. The integration fills in what to send; this row only guarantees somebody will. It is
+// not due for a minute, so the tick does not race the finish hook and rebuild a report that is
+// less specific than the one the hook is about to store (launch_failed, dependency_down…).
+function oweExternalReport(jobId) {
+  const job = db.prepare('SELECT external_ref, external_meta, agent_path FROM agent_jobs WHERE id = ?').get(jobId)
+  if (!job?.external_ref) return
+  let orchestrator = null
+  try { orchestrator = JSON.parse(job.external_meta ?? 'null')?.orchestrator ?? null } catch {}
+  if (!orchestrator) return
+  db.prepare(`INSERT INTO external_reports (external_ref, orchestrator, agent_path, next_attempt_at)
+    VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+60 seconds')) ON CONFLICT(external_ref) DO NOTHING`)
+    .run(String(job.external_ref), orchestrator, job.agent_path)
 }
 function insertAgentNote(id, taskId, result, jobId) {
   db.prepare(`INSERT INTO notes (id, task_id, body, author, agent_job_id) VALUES (?, ?, ?, 'agent', ?)`).run(id, taskId, result, jobId)
@@ -1430,6 +1502,7 @@ function resetStuckJobs(bootBoundary = null, { ids = null, details = {} } = {}) 
       const detail = details?.[job.id] ?? {}
       const session = detail.sessionId ?? null
       update.run({ id: job.id, boundary: bootBoundary, result: detail.result || ORPHANED_RESULT, session })
+      oweExternalReport(job.id)
       orphaned.push({ ...job, session_id: session ?? job.session_id })
     }
   })()
@@ -1598,6 +1671,7 @@ const METHODS = {
   resetStuckJobs, getRunningAgentJobs, getAutorunTasks, insertAutorunJob,
   queueExternalJob, getAgentJobByExternalRef, findTaskByOrchestratorRef, bindTaskOrchestrator, listOpenOrchestratedTasks, closeOrchestratedTask,
   recordExternalOp, getExternalOp, folderHasRunningJob,
+  enqueueExternalReport, getExternalReport, listDueExternalReports, countExternalReports, ackExternalReport, deferExternalReport,
   setAgentJobRunCwd, listActiveTaskRefs, lastJobActivityUnder, listWorktreeAgents,
   listHeartbeats, createHeartbeat, updateHeartbeat, deleteHeartbeat, toggleHeartbeat,
   getDueHeartbeats, markHeartbeatRun, createHeartbeatJob, listHeartbeatJobs,
