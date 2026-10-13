@@ -1,6 +1,6 @@
 ---
 name: publish-qalatra
-description: Cut a full Qalatra release end-to-end — commit code with good notes, bump version, tag, publish a GitHub release, and sync the changelog + docs in ../qalatra.com. Use whenever Justin says "publish", "release", "deploy", "cut a release", or /publish-qalatra.
+description: Cut a full Qalatra release end-to-end — commit code with good notes, bump version, tag, publish a GitHub release, move the cloud fleet's Qalatra pin, and sync the changelog + docs in ../qalatra.com. Use whenever Justin says "publish", "release", "deploy", "cut a release", or /publish-qalatra.
 ---
 
 # Publish Qalatra
@@ -12,7 +12,7 @@ This skill is path-portable: it uses **relative paths only**. The qalatra repo a
 ## Preconditions
 
 - Run from the repo root (the directory containing `package.json` and `electron-builder.yml`).
-- Confirm the website sibling exists before relying on it: `ls ../qalatra.com >/dev/null` — if it's missing, do the qalatra release steps, then tell Justin the website couldn't be synced and stop short of step 6–7.
+- Confirm the website sibling exists before relying on it: `ls ../qalatra.com >/dev/null` — if it's missing, do the qalatra release steps and the fleet pin (step 7), then tell Justin the website couldn't be synced and stop short of step 8.
 - Both repos are on the `develop` branch.
 
 ## Steps
@@ -52,7 +52,42 @@ git push origin vX.Y.Z
 - CI creates the release and sets its body from `plan/releases/vX.Y.Z.md` — no manual `gh release edit` is needed. Watch the run: `gh run list --workflow=release.yml --limit 1`; a failure within seconds is the `verify-release` job (tag/version mismatch or missing notes file).
 - If the notes file was forgotten and no release exists yet, add it, commit, then move the tag: `git tag -f vX.Y.Z && git push --force origin vX.Y.Z`. Never move a tag that already has a published release.
 
-### 7. Sync the website (../qalatra.com, also on develop)
+### 7. Move the cloud fleet's Qalatra pin (every release, no exceptions)
+The qalatra.com `fleet-worker` (Railway project `qalatra.com`, environment `production`) installs
+Qalatra on customer cloud nodes from `QALATRA_REF`, and the portal shows `QALATRA_VERSION` as the
+node's version. A stale pin means new nodes start on an old release and the portal reports the wrong
+version, so moving it is part of the release, not a follow-up.
+
+- Do it only after step 6 shows the GitHub release published.
+- **Never list the fleet-worker's variables** (`railway variable list`, the Railway MCP
+  `list-variables`): that prints its secrets. Only set.
+- **Only restart an idle worker.** A variable change restarts it, and a restart interrupts a
+  running provision or deploy. Check for open jobs (read-only) with a SQL file, so no connection
+  string is echoed:
+  ```
+  cat > /tmp/fleetjobs.sql <<'SQL'
+  select status, kind, count(*) from "FleetJob" where status::text in ('QUEUED','RUNNING') group by 1,2;
+  SQL
+  railway run -p 24e9c7be-aa56-4af5-8763-5d2ff4f6d1a1 -e production -s Postgres -- \
+    bash -c 'psql "$DATABASE_PUBLIC_URL" -X -A -t -f /tmp/fleetjobs.sql'
+  ```
+  No rows means idle. Otherwise wait for those jobs to finish, then check again.
+- Set both, the first without a deploy so the worker restarts once:
+  ```
+  printf 'vX.Y.Z' | railway variable set QALATRA_REF --stdin --skip-deploys -p 24e9c7be-aa56-4af5-8763-5d2ff4f6d1a1 -e production -s fleet-worker
+  printf 'X.Y.Z'  | railway variable set QALATRA_VERSION --stdin -p 24e9c7be-aa56-4af5-8763-5d2ff4f6d1a1 -e production -s fleet-worker
+  ```
+  Pin the release tag (or a full 40-character SHA), never a short SHA or a branch.
+- Confirm the fleet-worker's new deployment reaches SUCCESS.
+- Record the new values under "Current pins" in `../qalatra.com/docs/operations/fleet-v1-runbook.md`
+  (committed with step 8).
+- `QALATRA_REF` is a minimum: nodes run Qalatra's own updater and are never downgraded, so this
+  only affects new nodes and the displayed version. `FLEET_PLAYBOOKS_REF` is not moved here; it
+  moves when a `fleet-*` tag is cut in qalatra-fleet.
+- If the Railway CLI isn't available or logged in on this box, finish the release and tell Justin
+  the pin still needs moving. Never leave it unmentioned.
+
+### 8. Sync the website (../qalatra.com, also on develop)
 The website is a pnpm + Nx monorepo. Update these, then commit + push to `origin/develop` (no separate version/tag needed for the website):
 - **Changelog** — `../qalatra.com/apps/web/app/routes/_marketing/changelog.tsx`: add a new entry at the top of the `RELEASES` array, move `current: true` to the new version (remove it from the previous entry), and include all changes since the previous release.
 - **Docs** — check `../qalatra.com/apps/web/app/routes/_marketing/docs/` for anything that new features in this release make stale, especially:
@@ -65,8 +100,8 @@ The website is a pnpm + Nx monorepo. Update these, then commit + push to `origin
   git -C ../qalatra.com push origin develop
   ```
 
-### 8. Report
-Tell Justin: the version shipped, the tag, the GitHub release URL, and which website pages were updated.
+### 9. Report
+Tell Justin: the version shipped, the tag, the GitHub release URL, the fleet pin (moved, or why not), and which website pages were updated.
 
 ## Gotchas
 - **Commit signing is per-box, not part of this skill** — each box configures its own git identity + signing:

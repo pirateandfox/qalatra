@@ -150,6 +150,13 @@ Tagging triggers the GitHub Actions workflow (`.github/workflows/release.yml`) w
 
 The in-app auto-updater (`electron-updater`) checks GitHub Releases on launch and prompts to install when a new version is available.
 
+**Every release also moves the cloud fleet's pin.** The qalatra.com `fleet-worker` on Railway installs
+new customer nodes from `QALATRA_REF` and shows `QALATRA_VERSION` in the portal; a stale pin starts
+new nodes on an old release. Once the GitHub release is published, set both on the worker (set only,
+never list its variables) while no fleet job is queued or running, and record them in qalatra.com's
+`docs/operations/fleet-v1-runbook.md`. Full procedure: step 7 of
+`.claude/skills/publish-qalatra/SKILL.md`.
+
 ---
 
 ## Development Autonomy
