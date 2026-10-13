@@ -93,6 +93,9 @@ The website is a pnpm + Nx monorepo. Update these, then commit + push to `origin
 - **Docs** — check `../qalatra.com/apps/web/app/routes/_marketing/docs/` for anything that new features in this release make stale, especially:
   - `docs/mcp.tsx`
   - `docs/remote-instances.tsx`
+- **Pushing qalatra.com `develop` redeploys the fleet-worker too** (Railway builds every service
+  from `develop`), so push only while no fleet job is queued or running — run the idle check from
+  step 7 again right before pushing.
 - Commit and push:
   ```
   git -C ../qalatra.com add -A
