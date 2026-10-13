@@ -72,14 +72,23 @@ ensure_dependencies() {
 checkout_qalatra() {
   if [ -d "$INSTALL_DIR/.git" ]; then
     info "Updating Qalatra checkout at $INSTALL_DIR"
-    git -C "$INSTALL_DIR" fetch origin "$REF"
-    git -C "$INSTALL_DIR" checkout "$REF"
-    git -C "$INSTALL_DIR" reset --hard "origin/$REF"
   elif [ -e "$INSTALL_DIR" ]; then
     fail "$INSTALL_DIR exists but is not a git checkout. Set QALATRA_INSTALL_DIR to a different path."
   else
     info "Cloning Qalatra into $INSTALL_DIR"
-    git clone --branch "$REF" "$REPO_URL" "$INSTALL_DIR"
+    git clone "$REPO_URL" "$INSTALL_DIR"
+  fi
+  # REF may be a branch, a release tag or a full commit SHA. Fetch it into one ref so all three
+  # resolve: `checkout REF` + `reset --hard origin/REF` only worked for a branch, and
+  # `clone --branch` refuses a commit. A branch stays a branch; anything else is checked out detached,
+  # the way the auto-updater leaves a box on its release tag.
+  git -C "$INSTALL_DIR" fetch --tags origin "+$REF:refs/qalatra/requested" \
+    || fail "Could not fetch $REF from $REPO_URL. Use a branch, a release tag or a full 40-character commit SHA."
+  if git -C "$INSTALL_DIR" ls-remote --exit-code origin "refs/heads/$REF" >/dev/null 2>&1; then
+    git -C "$INSTALL_DIR" checkout --force -B "$REF" refs/qalatra/requested
+    git -C "$INSTALL_DIR" branch --quiet --set-upstream-to "origin/$REF" "$REF" 2>/dev/null || true
+  else
+    git -C "$INSTALL_DIR" checkout --force --detach refs/qalatra/requested
   fi
 }
 
