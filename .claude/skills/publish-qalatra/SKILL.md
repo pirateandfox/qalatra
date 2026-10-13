@@ -94,8 +94,8 @@ The website is a pnpm + Nx monorepo. Update these, then commit + push to `origin
   - `docs/mcp.tsx`
   - `docs/remote-instances.tsx`
 - **A changelog/docs push does not restart the fleet-worker.** Its Railway watch paths
-  (`.railway/railway.ts` in qalatra.com) limit rebuilds to `apps/fleet-worker`, `libs/api` and the
-  root build files. If this push touches any of those, run the idle check from step 7 first.
+  (set on the service; listed in qalatra.com's `docs/operations/fleet-v1-runbook.md`) limit rebuilds
+  to `apps/fleet-worker`, `libs/api` and the root build files. If this push touches any of those, run the idle check from step 7 first.
 - Commit and push:
   ```
   git -C ../qalatra.com add -A

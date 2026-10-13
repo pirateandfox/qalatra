@@ -85,7 +85,6 @@ had expired.
 - Hosted client is live at **https://app.qalatra.com**, Railway service `app`
   (`a2429b81-7fc2-4974-a757-a98b609bb332`) in the qalatra.com production project. The service
   tracks `pirateandfox/qalatra` develop, watching `ui/`, `packages/shared/`, and `deploy/`.
-  Its configuration is recorded in the website repository's `.railway/railway.ts`.
 - Cloudflare has a DNS-only CNAME to `xryhc4re.up.railway.app` and the required TXT ownership
   record at `_railway-verify.app.qalatra.com`. Railway's MCP domain response omitted the TXT;
   `railway domain status app.qalatra.com --service app --json` exposes `verification.dnsHost`
