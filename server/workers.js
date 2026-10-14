@@ -8,9 +8,9 @@ import { syncPendingAttachments } from './attachments.js'
 import { getRuntime, isKnownRuntime, inferRuntime, DEFAULT_RUNTIME, runtimeNames } from './agent-runtimes.js'
 import { createAgentWatchdog } from './agent-watchdog.js'
 import { loadFolderRc } from './integrations/flightdesk/rc.js'
-import { ensureTaskWorktree, sweepIdleWorktrees } from './worktrees.js'
+import { configBranchMismatches, ensureTaskWorktree, formatConfigBranchWarning, sweepIdleWorktrees } from './worktrees.js'
 import { createJobScheduler } from './job-scheduler.js'
-import { createScopeMemoryMonitor, formatOomNotice } from './agent-memory.js'
+import { createScopeMemoryMonitor, formatOomNotice, isOomKill } from './agent-memory.js'
 import {
   agentRunDir, prepareRunDir, runFiles, writeRunMeta, readRunMeta, readExitStatus, removeRunDir, sweepRunDirs,
   withExitRecorder, processStartTime, runProcessAlive, createFileTail, lastOutputAt,
@@ -688,6 +688,10 @@ export async function runAgentScan({ dbCall, loadSettings }) {
   if (!root) return []
   const agents = await scanAgents(root, excludeFolders)
   await dbCall('upsertAgents', agents, { root })
+  // A main tree left on a task branch runs that branch's agent.config. Warn on every scan.
+  configBranchMismatches(agents.map(a => a.path))
+    .then(found => { for (const m of found) console.warn(formatConfigBranchWarning(m)) })
+    .catch(err => console.error(`[agents] agent.config branch check failed: ${err.message}`))
   return agents
 }
 
@@ -1079,7 +1083,7 @@ function superviseAgentRun({ dbCall, notify, job, meta, runDir, proc = null, rel
     } finally {
       memoryMonitor?.cancel()
     }
-    const oomKilled = memoryDiagnostics?.confirmed === true
+    const oomKilled = isOomKill(memoryDiagnostics)
     // The tracked command can exit while a daemonized tool remains in the scope with closed
     // stdio. Reap any such remainder on every terminal path, not only when the watchdog fired.
     if (scopeUnit) killProcessTree(runHandle)

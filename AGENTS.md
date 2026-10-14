@@ -297,10 +297,14 @@ the slice before any one reaches its own limit.
 confirm a victim; they do not by themselves establish which limit constrained the run. The worker
 captures scope/slice limits and local counter deltas before collection. An unprivileged, bounded
 kernel-journal query can match this run's `task_memcg` to `oom_memcg` for scope/shared-slice
-attribution; missing or conflicting evidence leaves the constraint unknown. A slice hierarchical
-kill-counter rise plus SIGKILL is only possible OOM, never confirmation. Confirmed OOMs remain
-`failed`, `terminated_by = 'oom'`, `failureKind: 'oom'`, with evidence and partial output retained;
-the session remains resumable. See `docs/agent-memory-scheduling.md`.
+attribution; missing or conflicting evidence leaves the constraint unknown.
+Without proof, a SIGKILL is a *likely* OOM when the scope reached its MemoryMax
+(`memory.events` `max`, or `memory.peak` at the limit) or the slice's `oom_kill` rose during the run;
+it is never reported as confirmed. Confirmed and likely OOMs are `failed`, `terminated_by = 'oom'`,
+`failureKind: 'oom'`, with evidence and partial output retained; the session remains resumable. The
+headline says "OOM-killed" or "likely OOM-killed" (FlightDesk matches that text to retry once with a
+memory hint), and a plain SIGKILL with no memory evidence avoids OOM wording.
+See `docs/agent-memory-scheduling.md`.
 
 **The slice needs limits from the fleet, and the code refuses to run without them.** An unknown
 `--slice=` is auto-created with *no* limits, so using the launcher before the fleet has installed the

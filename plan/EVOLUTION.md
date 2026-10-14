@@ -1,5 +1,21 @@
 # Qalatra — Evolution Notes
 
+## Likely OOMs get the OOM wording; misparked agent.config checkouts warn (2026-10-14)
+
+- Parts 1 and 3a of the fleet turn-stall task (FlightDesk `dc18dbeb`). FlightDesk retries an OOM'd
+  turn once with a memory hint, recognising it from the text
+  (`/out of memory|\bOOM\b|OOM-killed|memory limit/i`).
+- An unconfirmed SIGKILL/137 is now a *likely* OOM when the scope reached its MemoryMax
+  (`memory.events` `max`, or `memory.peak` at `memory.max`) or the shared slice's `oom_kill` rose.
+  It is reported like a confirmed one (`terminated_by = 'oom'`, `failureKind: 'oom'`, headline
+  first) and says "likely OOM-killed by its per-run scope limit" or "…by the shared agent slice".
+- A SIGKILL with no memory evidence used to say "does not confirm an OOM kill … memory limit",
+  which FlightDesk's pattern counted as an OOM. It now names a plain kill of unknown cause.
+- The monitor also dropped `memory.peak` (it kept only the fields it started with); fixed.
+- Every agent scan warns when a repo's main checkout (not a linked worktree) is off its base branch
+  and its `agent.config` is tracked: jobs there run that branch's config. Warning only; reading the
+  config from `origin/<base>` would break local edits and untracked configs.
+
 ## Dead turns always reach FlightDesk: persistent report outbox (2026-10-12)
 
 - Part 2 of the fleet turn-stall task (FlightDesk `dc18dbeb`). A DONE or FAILED report that failed

@@ -15,7 +15,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
   ensureTaskWorktree, removeTaskWorktree, sweepIdleWorktrees, worktreeDirName,
-  baseBranchFromPipelineConfig, WorktreeError, WORKTREES_DIR,
+  baseBranchFromPipelineConfig, WorktreeError, WORKTREES_DIR, configBranchMismatches, formatConfigBranchWarning,
 } from '../server/worktrees.js'
 import { buildAgentEnv } from '../server/workers.js'
 import { scanAgents } from '../server/agents.js'
@@ -177,6 +177,31 @@ try {
       err => err instanceof WorktreeError && /inside the repo/.test(err.message),
     )
     assert.ok(!fs.existsSync(path.join(repo, WORKTREES_DIR, 'fd-escape')), 'refused before anything was created')
+  })
+
+  await test('a main tree off its base branch is reported; on it, or untracked config, is not', async () => {
+    const loose = path.join(tmp, 'loose')
+    fs.mkdirSync(path.join(loose, 'untracked'), { recursive: true })
+    fs.writeFileSync(path.join(loose, 'untracked', 'agent.config'), '{}')
+    assert.deepEqual(await configBranchMismatches([agentDir, path.join(loose, 'untracked')]), [])
+    git(repo, 'switch', '-c', 'task/fd-9')
+    try {
+      const [m, ...rest] = await configBranchMismatches([agentDir])
+      assert.equal(rest.length, 0)
+      assert.deepEqual([m.repoRoot, m.base, m.branch, m.agents], [repo, 'trunk', 'task/fd-9', [agentDir]])
+      assert.match(formatConfigBranchWarning(m), /is on task\/fd-9, not trunk.*switch trunk/)
+      git(repo, 'switch', '--detach', 'trunk')
+      const [detached] = await configBranchMismatches([agentDir])
+      assert.equal(detached.branch, null)
+      assert.match(detached.head, /^detached HEAD at [0-9a-f]+$/)
+    } finally {
+      git(repo, 'switch', 'trunk')
+    }
+    assert.deepEqual(await configBranchMismatches([agentDir]), [])
+    // A linked worktree on its own branch is expected, not a misparked main tree.
+    const linked = path.join(tmp, 'linked')
+    git(repo, 'worktree', 'add', '-b', 'side', linked, 'trunk')
+    assert.deepEqual(await configBranchMismatches([path.join(linked, 'agents', 'pipeline')]), [])
   })
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true })

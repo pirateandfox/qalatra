@@ -59,16 +59,26 @@ Scope and shared-slice matches get specific advice; another ancestor, conflictin
 matches or no accessible evidence leave the constraint **unknown**. Local allocation
 failure counters are retained as evidence but cannot disambiguate concurrent events.
 
-A sibling's hierarchical OOM counter increase plus this job's SIGKILL/exit 137 is only
-**possible OOM**, never confirmation. With missing evidence an abrupt exit explicitly
-reports that an OOM kill could not be confirmed. Sampling can miss a scope created and
-collected between observations; unavailable journal access also leaves uncertainty.
-Completion and cleanup continue in both cases.
+Without that proof, a SIGKILL/exit 137 is a **likely OOM** (`likely` in the diagnosis) when
+either holds, and is never reported as confirmed:
 
-Confirmed OOMs keep `status=failed`, `terminated_by=oom` and `diagnostics.kind=oom`.
-Unknown constraints get no unconditional recommendation to raise the per-run cap.
-Unconfirmed kills remain ordinary failures. Result text retains the evidence, partial
-output and session ID; lifecycle hooks additionally receive `diagnostics.memory`.
+- **`scope`:** the run's own scope reached its MemoryMax (a `max` event in its
+  `memory.events`, or `memory.peak` at `memory.max`). This takes precedence.
+- **`slice`:** the shared slice's `oom_kill` counter rose during the run. Another job may have
+  been the victim, and the text says so.
+
+A SIGKILL with neither is a plain kill of unknown cause (manual kill, shutdown, a kill from
+outside Qalatra), and its text deliberately avoids OOM wording. Sampling can miss a scope
+created and collected between observations; unavailable journal access also leaves
+uncertainty. Completion and cleanup continue in every case.
+
+Confirmed and likely OOMs keep `status=failed`, `terminated_by=oom` and
+`diagnostics.kind=oom` (sent to FlightDesk as `error` with the headline first). The first line
+says "OOM-killed", "likely OOM-killed" or neither, because FlightDesk recognises an OOM from that
+text (`/out of memory|\bOOM\b|OOM-killed|memory limit/i`) and retries the turn once with a
+memory hint. Unknown constraints get no unconditional recommendation to raise the per-run cap.
+Plain kills remain ordinary failures. Result text retains the evidence, partial output and
+session ID; lifecycle hooks additionally receive `diagnostics.memory`.
 Timeout classification takes precedence over OOM speculation. Resumable sessions,
 whole-scope cleanup and FlightDesk's existing diagnostic mapping are preserved.
 

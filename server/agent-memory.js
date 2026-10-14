@@ -21,10 +21,11 @@ function read(file) {
 }
 
 function snapshot(dir) {
-  if (!dir) return { high: null, max: null, events: null, local: null }
+  if (!dir) return { high: null, max: null, peak: null, events: null, local: null }
   return {
     high: read(path.join(dir, 'memory.high')),
     max: read(path.join(dir, 'memory.max')),
+    peak: read(path.join(dir, 'memory.peak')),
     events: parseMemoryEvents(read(path.join(dir, 'memory.events'))),
     local: parseMemoryEvents(read(path.join(dir, 'memory.events.local'))),
   }
@@ -72,16 +73,40 @@ async function readKernelEvidence({ startedAt, endedAt, scopeCgroup, sliceCgroup
   }
 }
 
+/** The scope reached its own MemoryMax: a `max` event, or a peak at the limit. */
+export function scopeAtMemoryMax(scope) {
+  if ((scope?.events?.max ?? 0) > 0) return true
+  const peak = Number(scope?.peak)
+  const max = Number(scope?.max)
+  return Number.isFinite(peak) && Number.isFinite(max) && max > 0 && peak >= max
+}
+
+/**
+ * `confirmed`: a kill counter or a correlated kernel record names this run as the victim.
+ * `likely`: no such proof, but the run was SIGKILLed while its scope sat at MemoryMax (`scope`)
+ * or while the shared slice was OOM-killing (`slice`, where another job may have been the victim).
+ * Both are reported as OOMs so an orchestrator gets the memory hint; the text says which.
+ * `unconfirmed`: any abrupt end without proof, likely or not.
+ */
 export function classifyOom(evidence, { signal, code } = {}) {
   const confirmed = (evidence.scope?.events?.oom_kill ?? 0) > 0 || evidence.kernel?.confirmed === true
   const abrupt = signal === 'SIGKILL' || code === 137
+  const atScopeMax = !confirmed && abrupt && scopeAtMemoryMax(evidence.scope)
+  const sliceKilling = !confirmed && abrupt && (evidence.sliceDelta?.oom_kill ?? 0) > 0
+  const likely = atScopeMax ? 'scope' : sliceKilling ? 'slice' : null
   return {
     confirmed,
-    suspected: !confirmed && abrupt && (evidence.sliceDelta?.oom_kill ?? 0) > 0,
+    likely,
+    suspected: sliceKilling,
     unconfirmed: !confirmed && abrupt,
-    constraint: confirmed && evidence.kernel?.confirmed ? evidence.kernel.constraint : 'unknown',
+    constraint: confirmed && evidence.kernel?.confirmed ? evidence.kernel.constraint : likely ?? 'unknown',
     evidence,
   }
+}
+
+/** Report it as an OOM (failure kind, terminated_by, resume lookup): confirmed or likely. */
+export function isOomKill(diagnosis) {
+  return diagnosis?.confirmed === true || Boolean(diagnosis?.likely)
 }
 
 /** Start BEFORE spawn. Snapshot during the run and at close, before whole-scope cleanup.
@@ -91,7 +116,7 @@ export function classifyOom(evidence, { signal, code } = {}) {
 export function createScopeMemoryMonitor({ scopeDir, sliceDir, memory, readKernel = readKernelEvidence }) {
   const startedAt = Date.now()
   const sliceBefore = snapshot(sliceDir)
-  let scope = { high: null, max: null, events: null, local: null }
+  let scope = { high: null, max: null, peak: null, events: null, local: null }
   let slice = sliceBefore
   let watcher = null
   let stopped = false
@@ -143,13 +168,17 @@ export function createScopeMemoryMonitor({ scopeDir, sliceDir, memory, readKerne
 }
 
 export function formatOomNotice(diagnosis) {
-  const { confirmed, suspected, unconfirmed, constraint, evidence } = diagnosis
+  const { confirmed, likely, unconfirmed, constraint, evidence } = diagnosis
   if (!confirmed && !unconfirmed) return ''
+  // The first line is the headline FlightDesk reads. It matches /out of memory|\bOOM\b|OOM-killed|
+  // memory limit/i, so OOM wording appears only when this is reported as an OOM.
   let message
-  if (suspected) {
-    message = 'Possible OOM: the run ended abruptly while OOM kills occurred in the shared slice. This does not confirm that this run was OOM-killed; another job may have been the victim. The constraining limit is unknown.'
+  if (likely === 'scope') {
+    message = 'The run was likely OOM-killed by its per-run scope limit: it was SIGKILLed after reaching its MemoryMax, though no kernel record confirms it. Reduce workload memory or request a larger per-run allowance that fits the host budget.'
+  } else if (likely === 'slice') {
+    message = 'The run was likely OOM-killed by the shared agent slice limit: it was SIGKILLed while the slice was killing processes for memory, though another job may have been the victim. Reduce concurrent memory demand or run the workload exclusively/on a suitably sized host.'
   } else if (!confirmed) {
-    message = 'The run ended abruptly. Available memory evidence does not confirm an OOM kill; the termination cause and any constraining memory limit are unknown.'
+    message = 'The run was killed (SIGKILL / exit 137) with no sign of memory pressure in its scope or the shared slice. The cause is unknown: a manual kill, a system shutdown, or a kill from outside Qalatra.'
   } else if (constraint === 'scope') {
     message = 'The run was OOM-killed by its per-run scope limit. Reduce workload memory or request a larger per-run allowance that fits the host budget.'
   } else if (constraint === 'slice') {

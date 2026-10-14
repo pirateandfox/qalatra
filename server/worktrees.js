@@ -96,6 +96,47 @@ export async function resolveBaseBranch({ repoRoot, cfg, meta }) {
   throw new WorktreeError('no base branch: set base_branch in agents/pipeline-config.md or worktree_base in agent.config')
 }
 
+/**
+ * Agent folders whose tracked agent.config is read from a checkout that is not on the repo's base
+ * branch (resolveBaseBranch without a dispatch or config override), e.g. a main tree left on a task
+ * branch or detached. Jobs then run whatever config that branch has. One entry per repo; linked
+ * worktrees, an untracked agent.config, a non-repo folder or an unresolvable base are skipped.
+ */
+export async function configBranchMismatches(agentPaths) {
+  const byRepo = new Map()
+  await Promise.all(agentPaths.map(async agentPath => {
+    try {
+      await git(['ls-files', '--error-unmatch', '--', 'agent.config'], { cwd: agentPath, timeout: 10_000 })
+      const repoRoot = fs.realpathSync(await git(['rev-parse', '--show-toplevel'], { cwd: agentPath, timeout: 10_000 }))
+      // A linked worktree (a task worktree, a sibling checkout) is on its own branch by design.
+      const [gitDir, commonDir] = (await git(['rev-parse', '--git-dir', '--git-common-dir'], { cwd: repoRoot, timeout: 10_000 }))
+        .split('\n').map(d => fs.realpathSync(path.resolve(repoRoot, d)))
+      if (gitDir !== commonDir) return
+      if (!byRepo.has(repoRoot)) byRepo.set(repoRoot, [])
+      byRepo.get(repoRoot).push(agentPath)
+    } catch {}
+  }))
+  const mismatches = []
+  for (const [repoRoot, agents] of byRepo) {
+    let base
+    try { base = await resolveBaseBranch({ repoRoot }) } catch { continue }
+    let branch = null
+    try { branch = await git(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: repoRoot, timeout: 10_000 }) } catch {}
+    if (branch === base) continue
+    let head = branch
+    if (!head) {
+      try { head = `detached HEAD at ${await git(['rev-parse', '--short', 'HEAD'], { cwd: repoRoot, timeout: 10_000 })}` } catch { head = 'detached HEAD' }
+    }
+    mismatches.push({ repoRoot, base, branch, head, agents: agents.sort() })
+  }
+  return mismatches.sort((a, b) => a.repoRoot.localeCompare(b.repoRoot))
+}
+
+export function formatConfigBranchWarning({ repoRoot, base, head, agents }) {
+  return `[agents] WARNING: ${repoRoot} is on ${head}, not ${base}. Jobs for ${agents.join(', ')} run with ` +
+    `the agent.config on that checkout, not the one on ${base}. Park it with: git -C ${repoRoot} switch ${base}`
+}
+
 export async function repoRootFor(agentPath) {
   try {
     return fs.realpathSync(await git(['rev-parse', '--show-toplevel'], { cwd: agentPath, timeout: 10_000 }))
