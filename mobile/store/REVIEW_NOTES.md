@@ -57,9 +57,9 @@ NOTES
 
 - Sign-in required: yes. Username `review@qalatra.com`, password `<PASSWORD>`.
 - Contact: Justin Handley, support@qalatra.com, phone (yours — Apple requires one).
-- `store.config.json` sets the contact name/email, demo username and these notes with placeholders.
-  Running `eas metadata:push` again overwrites whatever you typed into Notes/password in App Store
-  Connect, so re-paste the token and password after any push.
+- App Review information is entered by hand in App Store Connect. `store.config.json` leaves it out
+  (EAS requires a phone number there), so `eas metadata:push` never touches the notes, password or
+  token.
 
 ## Google Play: App access
 
