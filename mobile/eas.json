@@ -25,6 +25,11 @@
     "production": {
       "ios": {
         "ascAppId": "6782659910"
+      },
+      "android": {
+        "serviceAccountKeyPath": "/Users/justinhandley/.secrets/qalatra-play.json",
+        "track": "internal",
+        "releaseStatus": "draft"
       }
     }
   }
