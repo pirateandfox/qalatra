@@ -11,6 +11,7 @@ RAW = Path('store/screenshots')
 SET = [
     ('01-priority', 'See what matters today'),
     ('02-task', 'Every detail, in your pocket'),
+    ('06-terminal', 'Run coding agents on your server'),
     ('04-habits', 'Build habits alongside your tasks'),
     ('05-search', 'Find anything, fast'),
     ('00-connect', 'Your server, your data'),
