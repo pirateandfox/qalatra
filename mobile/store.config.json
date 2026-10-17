@@ -3,7 +3,10 @@
   "apple": {
     "version": "0.3.1",
     "copyright": "2026 Pirate & Fox",
-    "categories": ["PRODUCTIVITY", "DEVELOPER_TOOLS"],
+    "categories": [
+      "PRODUCTIVITY",
+      "DEVELOPER_TOOLS"
+    ],
     "release": {
       "automaticRelease": true
     },
@@ -12,20 +15,25 @@
         "title": "Qalatra",
         "subtitle": "Tasks and agents, on the go",
         "promoText": "Check today's priorities, capture a task in seconds, and keep an eye on your agents, all from your own Qalatra server.",
-        "keywords": ["tasks", "todo", "productivity", "agents", "AI", "terminal", "habits", "daily notes", "planner", "self-hosted", "GTD", "focus"],
+        "keywords": [
+          "tasks",
+          "todo",
+          "productivity",
+          "agents",
+          "AI",
+          "terminal",
+          "habits",
+          "daily notes",
+          "planner",
+          "self-hosted",
+          "GTD",
+          "focus"
+        ],
         "marketingUrl": "https://qalatra.com",
         "supportUrl": "https://qalatra.com/support",
         "privacyPolicyUrl": "https://qalatra.com/privacy",
         "description": "Qalatra is a personal task system and agent workspace that runs on a server you control: your own computer, a machine you host, or a dedicated Qalatra Cloud server. The mobile app puts that workspace in your pocket.\n\nPLAN YOUR DAY\n• A Priority view of what matters today, in the order you set\n• Capture tasks in seconds with due dates, recurrence, priority, energy, context and project\n• Complete, snooze or skip with a tap; recurring tasks roll forward on their own\n• Search across your whole workspace\n\nKEEP THE CONTEXT\n• A daily note for each day, plus a backlog and reading list for everything that isn't today\n• Habit tracking alongside your tasks\n• Descriptions, notes, links and photo attachments on every task\n• Browse your server's files and read or edit Markdown\n\nWORK WITH YOUR AGENTS\n• Assign tasks to the AI agents on your server and see their job status\n• Open terminal sessions on your server, built for touch\n• Pick up the output your agents leave behind\n\nYOUR DATA, YOUR SERVER\nYour tasks live on your Qalatra server. The app talks to it directly using an access token you create, and you can connect several servers and switch between them. With Qalatra Cloud, the server is a dedicated machine run for you, not a shared database.\n\nREQUIREMENTS\nQalatra mobile requires a Qalatra account with hosted-app access and a Qalatra server to connect to. The Qalatra desktop app and self-hosted server are free and open source."
       }
-    },
-    "review": {
-      "firstName": "Justin",
-      "lastName": "Handley",
-      "email": "support@qalatra.com",
-      "demoUsername": "review@qalatra.com",
-      "demoRequired": true,
-      "notes": "Qalatra is a free companion app to the Qalatra web service, a task and agent workspace running on a server the user owns or rents through Qalatra Cloud. Accounts and servers are set up at qalatra.com. The app has no sign-up, no purchases, and no calls to action to purchase (guideline 3.1.3(f)).\n\nA Qalatra account is required, and the server where tasks live is connected separately on each device.\n\nDEMO ACCOUNT\nEmail: review@qalatra.com\nPassword: (see the sign-in fields)\n\nDEMO SERVER (needed after signing in)\nServer URL: https://api-review.qalatra.com\nAccess token: <TOKEN>\n\nSTEPS\n1. Open the app and sign in with the email and password above.\n2. On \"Connect your Qalatra server\", enter the Server URL and Access token above. Server name is optional. The token goes in the \"Access Token\" field, not the account password.\n3. Tap \"Connect server\". The Priority list opens.\n\nWHAT TO TRY\n- Priority tab: today's tasks. Tap a task to open it and edit the title, priority, due date, description, or notes.\n- Search tab: find any task.\n- Create a task with the + button.\n- More: Daily Note, Habits, Backlog, Terminals, and Files. Under More you can also switch, add, or remove servers (Backends).\n\nNOTES\n- The demo server is a dedicated review environment with sample data. Feel free to create, edit, or complete tasks.\n- The connection is saved on the device. To start over, remove the server under More > Backends and connect again.\n- Contact: support@qalatra.com"
     },
     "advisory": {
       "ageRatingOverride": "NONE",
