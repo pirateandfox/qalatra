@@ -4,8 +4,8 @@ Paste-ready reviewer instructions for App Store Connect (App Review Information 
 email/password in the sign-in fields) and Google Play Console (App content → App access).
 
 Replace `<PASSWORD>` and `<TOKEN>` by hand in the store consoles. Never commit them here. The token
-belongs to the review server's portal credentials; rotate it after both reviews are approved, since
-both review teams will have seen it.
+belongs to the review server's portal credentials. It stays active permanently: every future review
+uses it, and the review server holds sample data only. If it is ever rotated, update both consoles.
 
 - Review account: `review@qalatra.com` (2FA off, comp Connect seat + comp Cloud slot, org "Qalatra")
 - Review server: `review` → `https://api-review.qalatra.com` (Qalatra Cloud, comp, sample data only)
