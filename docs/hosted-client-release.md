@@ -73,8 +73,10 @@ project. Validate a signed build on-device before distribution and provide a com
 plus an accessible demo backend for App Review.
 
 Expo access was restored on September 23 by signing the local EAS CLI into `pirateandfox`
-(`justin@pirateandfox.com`). The verified project is `@pirateandfox/qalatra`, ID
-`aada33e2-e5c5-4cf8-9ad1-c0ca22ccb0d4`. The existing App Store app ID is `6782659910`, now pinned
+(`justin@pirateandfox.com`). On October 18 the project was transferred to the Pirate and Fox
+organization account: it is now `@pirate-and-fox/qalatra`, same ID
+`aada33e2-e5c5-4cf8-9ad1-c0ca22ccb0d4`, with `"owner": "pirate-and-fox"` pinned in
+`mobile/app.json` and the root `app.json`. The existing App Store app ID is `6782659910`, now pinned
 in `mobile/eas.json` for non-interactive submissions. Apple confirmed the prior 0.2.0 (9) beta
 had expired.
 
