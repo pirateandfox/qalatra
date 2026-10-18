@@ -15,12 +15,14 @@ import {
   appendAiContext, capAiContext, LEGACY_RRULE, toRruleString, rruleToText,
   nextRecurrenceDate, isAgentScheduleDue, nextRunAt,
   isHabitDueOn, DAY_ABBR_TO_DOW, withTimestampZones,
+  resolveHeartbeatSchedule, touchesHeartbeatSchedule, heartbeatNextRunAt, heartbeatUpcomingRuns,
 } from '../server/task-logic.js';
 export {
   today, nowIso, offsetDate, daysBetween, addMinutesFromNow,
   appendAiContext, capAiContext, LEGACY_RRULE, toRruleString, rruleToText,
   nextRecurrenceDate, isAgentScheduleDue, nextRunAt,
   isHabitDueOn, DAY_ABBR_TO_DOW, withTimestampZones,
+  resolveHeartbeatSchedule, touchesHeartbeatSchedule, heartbeatNextRunAt, heartbeatUpcomingRuns,
 };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -250,6 +252,14 @@ function initSchema(db) {
   // create/update handlers write.
   if (!heartbeatCols.includes('minute_offset')) {
     db.exec(`ALTER TABLE heartbeats ADD COLUMN minute_offset INTEGER`);
+  }
+  // Cron schedules: a standard 5-field expression evaluated in an IANA timezone. When set it takes
+  // precedence over the interval columns; next_run_at stays UTC either way.
+  if (!heartbeatCols.includes('cron_expression')) {
+    db.exec(`ALTER TABLE heartbeats ADD COLUMN cron_expression TEXT`);
+  }
+  if (!heartbeatCols.includes('timezone')) {
+    db.exec(`ALTER TABLE heartbeats ADD COLUMN timezone TEXT`);
   }
 
   // Migrations for agent_jobs table

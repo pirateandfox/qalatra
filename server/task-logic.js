@@ -10,9 +10,10 @@
 //
 // HARD CONSTRAINT: this module must have NO side effects at import time — no DB open, no
 // parentPort, no filesystem or network. It is safe for any process to `import` it. Its only
-// dependency is the pure `rrule` library.
+// dependencies are the pure `rrule` library and ./cron.js.
 
 import pkg from 'rrule'
+import { nextCronRun, normalizeTimeZone, parseCron, serverTimeZone, upcomingCronRuns } from './cron.js'
 const { rrulestr } = pkg
 
 // ── Date primitives (local wall-clock) ─────────────────────────────────────────
@@ -289,6 +290,85 @@ export function nextRunAt(intervalMinutes, runAtTime, minuteOffset) {
     return next.toISOString().replace('T', ' ').slice(0, 19)
   }
   return addMinutesFromNow(intervalMinutes)
+}
+
+const toNaiveUtc = date => date.toISOString().replace('T', ' ').slice(0, 19)
+
+function scheduleError(message) {
+  const err = new Error(message)
+  err.status = 400
+  return err
+}
+
+// Validate and normalize a heartbeat's schedule fields for create (existing = null) or update.
+// A heartbeat is scheduled either by cron_expression + timezone or by the legacy interval fields
+// (interval_minutes, run_at_time, minute_offset) — never both. Absent (undefined) fields keep the
+// existing value; null clears. Returns all five columns, or throws an Error with status 400.
+//
+// interval_minutes is NOT NULL in the schema, so a cron heartbeat keeps its previous value (60 on
+// create); cron_expression takes precedence wherever the schedule is evaluated.
+export function resolveHeartbeatSchedule(fields = {}, existing = null) {
+  const given = k => fields[k] !== undefined
+  const intervalFields = ['interval_minutes', 'run_at_time', 'minute_offset'].filter(k => given(k) && fields[k] !== null)
+  const cronGiven = given('cron_expression') && fields.cron_expression !== null && fields.cron_expression !== ''
+  if (cronGiven && intervalFields.length) {
+    throw scheduleError(`cron_expression can't be combined with ${intervalFields.join(', ')}; use one schedule type`)
+  }
+  const cronCleared = given('cron_expression') && !cronGiven
+  if (!cronGiven && !cronCleared && existing?.cron_expression && intervalFields.length) {
+    throw scheduleError(`This heartbeat is scheduled by cron_expression; set cron_expression to null to switch it to ${intervalFields.join(', ')}`)
+  }
+
+  if (cronGiven || (!cronCleared && existing?.cron_expression)) {
+    if (cronGiven && typeof fields.cron_expression !== 'string') throw scheduleError('cron_expression must be a string')
+    const expr = (cronGiven ? fields.cron_expression : existing.cron_expression).trim().replace(/\s+/g, ' ')
+    const rawTz = given('timezone') && fields.timezone !== null && fields.timezone !== '' ? fields.timezone : (existing?.timezone ?? serverTimeZone())
+    const timezone = normalizeTimeZone(rawTz)
+    if (!timezone) throw scheduleError(`Unknown timezone "${rawTz}"; use an IANA name such as America/Puerto_Rico`)
+    if (!nextCronRun(parseCron(expr), timezone)) throw scheduleError(`Invalid cron expression "${expr}": it never fires`)
+    return { interval_minutes: existing?.interval_minutes ?? 60, run_at_time: null, minute_offset: null, cron_expression: expr, timezone }
+  }
+
+  if (given('timezone') && fields.timezone !== null && fields.timezone !== '') {
+    throw scheduleError('timezone applies only to cron_expression schedules')
+  }
+  // Legacy normalization, unchanged: run_at_time only with a daily interval, minute_offset only below it.
+  const mins = (given('interval_minutes') ? fields.interval_minutes : existing?.interval_minutes) ?? 60
+  const rawRunAt = given('run_at_time') ? fields.run_at_time : existing?.run_at_time
+  const rawOffset = given('minute_offset') ? fields.minute_offset : existing?.minute_offset
+  return {
+    interval_minutes: mins,
+    run_at_time: (rawRunAt && mins === 1440) ? rawRunAt : null,
+    minute_offset: (rawOffset != null && mins < 1440) ? rawOffset : null,
+    cron_expression: null,
+    timezone: null,
+  }
+}
+
+// True when `fields` touches any schedule column, i.e. next_run_at must be recomputed (bugs C8/C18).
+export const HEARTBEAT_SCHEDULE_FIELDS = ['interval_minutes', 'run_at_time', 'minute_offset', 'cron_expression', 'timezone']
+export const touchesHeartbeatSchedule = fields => HEARTBEAT_SCHEDULE_FIELDS.some(k => fields?.[k] !== undefined)
+
+// next_run_at for a heartbeat row (UTC, YYYY-MM-DD HH:MM:SS): the first cron slot strictly after
+// `now`, else the legacy interval rule. Strictly after is what makes a slot fire once: the run that
+// fires at (or after) a slot computes the next one from a time already past it.
+export function heartbeatNextRunAt(hb, now = new Date()) {
+  if (hb.cron_expression) {
+    const next = nextCronRun(hb.cron_expression, hb.timezone || serverTimeZone(), now)
+    return next ? toNaiveUtc(next) : null
+  }
+  return nextRunAt(hb.interval_minutes, hb.run_at_time ?? null, hb.minute_offset ?? null)
+}
+
+// The next `count` cron runs as ISO-8601 UTC strings, starting with the stored next_run_at when
+// there is one (it may be overdue while a previous run is still going). Empty for interval schedules.
+export function heartbeatUpcomingRuns(hb, count = 3, now = new Date()) {
+  if (!hb.cron_expression) return []
+  const tz = hb.timezone || serverTimeZone()
+  const stored = hb.next_run_at && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(hb.next_run_at)
+    ? new Date(`${hb.next_run_at.replace(' ', 'T')}Z`) : null
+  const runs = stored ? [stored, ...upcomingCronRuns(hb.cron_expression, tz, count - 1, stored)] : upcomingCronRuns(hb.cron_expression, tz, count, now)
+  return runs.map(d => d.toISOString())
 }
 
 // ── Habits ───────────────────────────────────────────────────────────────────────

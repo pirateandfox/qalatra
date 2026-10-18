@@ -340,3 +340,19 @@
   opacity: 0.8;
 }
 .hb-job-expand-btn:hover { opacity: 1; }
+
+/* Schedule picker */
+.hb-schedule { display: flex; flex-direction: column; gap: 8px; }
+.hb-schedule-type { flex: 0 0 auto; }
+.hb-form-row { flex-wrap: wrap; }
+.hb-form-actions { justify-content: flex-end; }
+.hb-weekdays { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; color: var(--text); }
+.hb-weekdays-disabled { opacity: 0.5; }
+.hb-weekday { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.hb-cron-input { flex: 1; min-width: 140px; font-family: 'SF Mono', 'Fira Code', monospace; }
+.hb-hint { font-size: 11px; color: var(--muted); }
+.hb-preview { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.hb-preview-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.hb-preview-run { color: var(--text); font-variant-numeric: tabular-nums; }
+.hb-preview-error, .hb-form-error { color: #f87171; font-size: 12px; }
+.hb-card-upcoming { margin-top: 6px; }

@@ -1,15 +1,28 @@
 import { v4 as uuidv4 } from 'uuid';
-import { openDb, nowIso, nextRunAt, withTimestampZones } from '../db.js';
+import {
+  openDb, nowIso, withTimestampZones,
+  resolveHeartbeatSchedule, touchesHeartbeatSchedule, heartbeatNextRunAt, heartbeatUpcomingRuns,
+} from '../db.js';
+
+const CRON_DESCRIPTION = 'Standard 5-field cron expression (minute hour day-of-month month day-of-week), evaluated in `timezone`. E.g. "0 5 * * 2-5" = 05:00 Tuesday–Friday. Takes precedence over the interval fields and cannot be combined with interval_minutes, run_at_time or minute_offset.';
+const TIMEZONE_DESCRIPTION = 'IANA timezone for cron_expression, e.g. "America/Puerto_Rico". Defaults to the server\'s timezone. Only valid with cron_expression.';
+
+// A heartbeat row leaving the process: zone-stamped, plus the next three cron runs (UTC ISO; empty
+// for interval schedules). Computed from the stored naive row, before stamping.
+function heartbeatOut(row) {
+  if (!row) return row;
+  return withTimestampZones({ ...row, upcoming_runs: heartbeatUpcomingRuns(row) }, 'heartbeats');
+}
 
 export const toolDefs = [
   {
     name: 'list_heartbeats',
-    description: 'List all heartbeat agents — persistent background agents that run on a fixed interval (e.g. every 10 min, every hour). Shows active/paused state, timing, and recent run counts.',
+    description: 'List all heartbeat agents — persistent background agents that run on a fixed interval (e.g. every 10 min, every hour) or a cron schedule in a timezone. Shows active/paused state, schedule (cron_expression, timezone), next_run_at, upcoming_runs (next three cron runs, UTC), and recent run counts.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'create_heartbeat',
-    description: 'Create a new heartbeat agent that runs a Claude agent prompt on a fixed schedule.',
+    description: 'Create a new heartbeat agent that runs a Claude agent prompt on a schedule: either interval_minutes (with optional run_at_time / minute_offset) or cron_expression + timezone, not both. An invalid cron expression or unknown timezone is rejected.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -20,13 +33,15 @@ export const toolDefs = [
         interval_minutes: { type: 'number', description: 'How often to run in minutes (e.g. 5, 10, 15, 30, 60, 120, 240, 1440)' },
         run_at_time:      { type: 'string', description: 'For daily heartbeats (interval_minutes=1440): local time to run, as HH:MM (e.g. "09:00", "17:30")' },
         minute_offset:    { type: 'number', description: 'For sub-daily heartbeats: pin runs to clock-aligned times. The heartbeat fires at every Nth minute where N ≡ minute_offset (mod interval_minutes). E.g. interval=30 offset=0 → :00 and :30; interval=30 offset=15 → :15 and :45; interval=60 offset=30 → :30 past every hour.' },
+        cron_expression:  { type: 'string', description: CRON_DESCRIPTION },
+        timezone:         { type: 'string', description: TIMEZONE_DESCRIPTION },
       },
       required: ['title', 'agent_path', 'prompt'],
     },
   },
   {
     name: 'update_heartbeat',
-    description: 'Update a heartbeat agent\'s title, description, prompt, agent_path, schedule, or active state. Any schedule change (interval_minutes, run_at_time, minute_offset) recomputes the next run time. Setting `active` is idempotent — use it instead of toggle_heartbeat when you need a heartbeat to be definitely on or definitely off.',
+    description: 'Update a heartbeat agent\'s title, description, prompt, agent_path, schedule, or active state. Any schedule change (interval_minutes, run_at_time, minute_offset, cron_expression, timezone) recomputes the next run time. To switch a cron heartbeat back to an interval, pass cron_expression: null with the interval fields. Setting `active` is idempotent — use it instead of toggle_heartbeat when you need a heartbeat to be definitely on or definitely off.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -38,6 +53,8 @@ export const toolDefs = [
         interval_minutes: { type: 'number' },
         run_at_time:      { type: 'string', description: 'For daily heartbeats (interval_minutes=1440): local time to run, as HH:MM' },
         minute_offset:    { type: 'number', description: 'For sub-daily heartbeats: pin runs to clock-aligned times (N ≡ minute_offset mod interval_minutes)' },
+        cron_expression:  { type: ['string', 'null'], description: `${CRON_DESCRIPTION} null switches back to the interval fields.` },
+        timezone:         { type: 'string', description: TIMEZONE_DESCRIPTION },
         active:           { type: 'boolean', description: 'Idempotent enable/disable: false pauses the heartbeat, true resumes it (scheduling the next run). Unlike toggle_heartbeat, calling this repeatedly with the same value is safe.' },
       },
       required: ['id'],
@@ -89,27 +106,27 @@ export const handlers = {
         (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status IN ('queued','running')) as runs_pending
       FROM heartbeats h ORDER BY h.created_at DESC
     `).all();
-    return withTimestampZones(rows, 'heartbeats');
+    return rows.map(heartbeatOut);
   },
 
-  create_heartbeat({ title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset } = {}) {
+  create_heartbeat(args = {}) {
+    const { title, description, agent_path, prompt } = args;
     if (!title || !agent_path || !prompt) return { error: 'title, agent_path, and prompt are required' };
+    let schedule;
+    try { schedule = resolveHeartbeatSchedule(args); } catch (err) { return { error: err.message }; }
     const db = openDb();
     const id = uuidv4();
     const now = nowIso();
-    const mins = interval_minutes ?? 60;
-    const runAt = (run_at_time && mins === 1440) ? run_at_time : null;
-    const offset = (minute_offset != null && mins < 1440) ? minute_offset : null;
-    const firstRun = nextRunAt(mins, runAt, offset);
     db.prepare(`
-      INSERT INTO heartbeats (id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset, active, next_run_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-    `).run(id, title.trim(), description ?? null, agent_path.trim(), prompt.trim(), mins, runAt, offset, firstRun, now, now);
-    return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats');
+      INSERT INTO heartbeats (id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset, cron_expression, timezone, active, next_run_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+    `).run(id, title.trim(), description ?? null, agent_path.trim(), prompt.trim(), schedule.interval_minutes, schedule.run_at_time,
+      schedule.minute_offset, schedule.cron_expression, schedule.timezone, heartbeatNextRunAt(schedule), now, now);
+    return heartbeatOut(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id));
   },
 
   update_heartbeat(args = {}) {
-    const { id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset, active } = args;
+    const { id, title, description, agent_path, prompt, active } = args;
     if (!id) return { error: 'id required' };
     const db = openDb();
     const existing = db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
@@ -119,20 +136,15 @@ export const handlers = {
     for (const [k, v] of Object.entries({ title, description, agent_path, prompt })) {
       if (v !== undefined) { sets.push(`${k} = ?`); vals.push(v); }
     }
-    // Recompute next_run_at on ANY schedule change (bug C18) and normalize like create
-    // (run_at_time only with interval 1440; minute_offset only with <1440), so schedule edits
-    // take effect instead of firing once more on the stale next_run_at (up to ~7 days late).
-    const scheduleChanged = ['interval_minutes', 'run_at_time', 'minute_offset'].some(k => k in args && args[k] !== undefined);
+    // Recompute next_run_at on ANY schedule change (bug C18) and normalize like create, so schedule
+    // edits take effect instead of firing once more on the stale next_run_at (up to ~7 days late).
+    // resolveHeartbeatSchedule rejects cron mixed with interval fields, bad cron and unknown zones.
+    const scheduleChanged = touchesHeartbeatSchedule(args);
     if (scheduleChanged) {
-      const mins = (interval_minutes !== undefined ? interval_minutes : existing.interval_minutes) ?? 60;
-      const rawRunAt = run_at_time !== undefined ? run_at_time : existing.run_at_time;
-      const rawOffset = minute_offset !== undefined ? minute_offset : existing.minute_offset;
-      const runAt = (rawRunAt && mins === 1440) ? rawRunAt : null;
-      const offset = (rawOffset != null && mins < 1440) ? rawOffset : null;
-      sets.push('interval_minutes = ?'); vals.push(mins);
-      sets.push('run_at_time = ?'); vals.push(runAt);
-      sets.push('minute_offset = ?'); vals.push(offset);
-      sets.push('next_run_at = ?'); vals.push(nextRunAt(mins, runAt, offset));
+      let schedule;
+      try { schedule = resolveHeartbeatSchedule(args, existing); } catch (err) { return { error: err.message }; }
+      for (const [k, v] of Object.entries(schedule)) { sets.push(`${k} = ?`); vals.push(v); }
+      sets.push('next_run_at = ?'); vals.push(heartbeatNextRunAt(schedule));
     }
     // Idempotent enable/disable — the fix for the toggle_heartbeat blind-flip footgun:
     // setting the same value twice is a no-op, unlike toggle. Resuming (0→1) schedules
@@ -141,27 +153,26 @@ export const handlers = {
       const newActive = active ? 1 : 0;
       sets.push('active = ?'); vals.push(newActive);
       if (newActive === 1 && existing.active !== 1 && !scheduleChanged) {
-        sets.push('next_run_at = ?'); vals.push(nextRunAt(existing.interval_minutes, existing.run_at_time, existing.minute_offset));
+        sets.push('next_run_at = ?'); vals.push(heartbeatNextRunAt(existing));
       }
     }
-    if (!sets.length) return existing;
+    if (!sets.length) return heartbeatOut(existing);
     sets.push('updated_at = ?'); vals.push(nowIso()); vals.push(id);
     db.prepare(`UPDATE heartbeats SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
-    return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats');
+    return heartbeatOut(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id));
   },
 
   toggle_heartbeat({ id } = {}) {
     if (!id) return { error: 'id required' };
     const db = openDb();
-    const hb = db.prepare('SELECT id, active, interval_minutes, run_at_time, minute_offset FROM heartbeats WHERE id = ?').get(id);
+    const hb = db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id);
     if (!hb) return { error: 'Heartbeat not found' };
     if (hb.active === 1) {
       db.prepare(`UPDATE heartbeats SET active = 0, updated_at = ? WHERE id = ?`).run(nowIso(), id);
     } else {
-      const nextRun = nextRunAt(hb.interval_minutes, hb.run_at_time, hb.minute_offset);
-      db.prepare(`UPDATE heartbeats SET active = 1, next_run_at = ?, updated_at = ? WHERE id = ?`).run(nextRun, nowIso(), id);
+      db.prepare(`UPDATE heartbeats SET active = 1, next_run_at = ?, updated_at = ? WHERE id = ?`).run(heartbeatNextRunAt(hb), nowIso(), id);
     }
-    return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats');
+    return heartbeatOut(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id));
   },
 
   delete_heartbeat({ id } = {}) {

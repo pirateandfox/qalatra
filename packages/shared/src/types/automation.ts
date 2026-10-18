@@ -40,13 +40,29 @@ export interface Heartbeat {
   interval_minutes: number
   run_at_time: string | null
   minute_offset: number | null
+  // Cron schedule: a 5-field expression evaluated in an IANA timezone. When set it takes precedence
+  // over interval_minutes/run_at_time/minute_offset. Null on interval heartbeats.
+  cron_expression?: string | null
+  timezone?: string | null
   active: number
   last_run_at: string | null
   next_run_at: string | null
+  // Next three cron runs as ISO-8601 UTC; empty for interval heartbeats.
+  upcoming_runs?: string[]
   created_at: string
   runs_done: number
   runs_failed: number
   runs_pending: number
+}
+
+export interface HeartbeatSchedulePreview {
+  interval_minutes: number
+  run_at_time: string | null
+  minute_offset: number | null
+  cron_expression: string | null
+  timezone: string | null
+  server_timezone: string
+  upcoming_runs: string[]
 }
 
 export interface HeartbeatJob {

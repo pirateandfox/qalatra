@@ -172,3 +172,13 @@ them against anything. `getPendingAttachments` is deliberately left unstamped be
 upload worker rather than a caller. Add tables to `TIMESTAMP_ZONES` when a real comparison appears,
 not speculatively; the map is only trustworthy while every entry has been verified against the
 actual writer.
+
+---
+
+## Cron schedules (2026-10-18)
+
+Heartbeats gained `cron_expression` + `timezone`. The invariant above is unchanged: the timezone is
+used only to decide which wall-clock minutes match; `next_run_at` and `last_run_at` are still
+computed and stored as naive UTC and compared against `datetime('now')`. `timezone` is an IANA name
+describing the *schedule*, not a zone for any stored column, so it is not in `TIMESTAMP_ZONES`.
+`upcoming_runs` is emitted as ISO-8601 with `Z`.

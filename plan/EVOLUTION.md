@@ -1,5 +1,41 @@
 # Qalatra — Evolution Notes
 
+## Heartbeats: cron schedules with a timezone and weekday selection (2026-10-18)
+
+- New optional `heartbeats.cron_expression` (standard 5-field) and `timezone` (IANA) columns, added
+  by idempotent `ALTER TABLE` in both `db-worker.js` and `mcp/db.js`. When cron is set it takes
+  precedence over `interval_minutes`/`run_at_time`/`minute_offset`; sending both is a 400 (MCP:
+  `{ error }`). Interval fields sent to a cron heartbeat are refused until `cron_expression: null`
+  clears it. `timezone` without cron is refused; cron without `timezone` stores the server's zone.
+- `server/cron.js` (new, pure, no dependency) parses cron (ranges, steps, lists, MON/JAN names,
+  7 = Sunday, vixie OR-semantics when both day fields are restricted) and finds the next run in a
+  zone. DST: a wall time skipped by spring-forward fires once at the first instant after the gap
+  (02:30 → 03:00); one repeated by fall-back fires once, on its first pass. A never-firing
+  expression (`0 0 31 2 *`) is rejected.
+- Validation, normalization and next-run math are single-sourced in `server/task-logic.js`
+  (`resolveHeartbeatSchedule`, `heartbeatNextRunAt`, `heartbeatUpcomingRuns`), used by db-worker,
+  MCP and the new `POST /api/v1/heartbeats/schedule-preview`. All stored times stay UTC; the
+  timezone only decides which wall-clock minutes match.
+- **Firing is now atomic** (`fireHeartbeat` in db-worker): queueing the job and advancing
+  `next_run_at` are one transaction that re-checks due-ness. Before, `createHeartbeatJob` and
+  `markHeartbeatRun` were two calls, so a restart between them left `next_run_at` on the slot that
+  had just run and it ran again once the job finished. Next run is the first slot strictly after
+  now, so each slot fires once; a slot missed while the server was down fires once at boot and
+  several missed slots collapse into that one run (same as intervals always did).
+- `list_heartbeats` / `GET /heartbeats` rows carry `cron_expression`, `timezone`, `next_run_at` and
+  `upcoming_runs` (next three cron runs, ISO UTC; empty for interval heartbeats).
+- UI: the Heartbeats form has a schedule type (Interval / Daily at a time / Weekdays-cron). Weekday
+  checkboxes + a time write the cron expression (Tue–Fri 05:00 → `0 5 * * 2-5`); the expression is
+  also editable directly. Timezone dropdown defaults to the server's zone. The form previews the
+  next three runs in the schedule's zone and UTC, and cron cards list them too.
+- Tests: `npm run test:heartbeat-schedule` (in `ci:server`) covers Tue–Fri skipping Sat–Mon,
+  weekday-only, both DST changes in America/New_York, validation, interval parity with the old
+  `nextRunAt`, and once-per-slot firing across terminated/respawned db-worker threads. Smoke test
+  covers the HTTP 400s and preview. Fixed `test-mcp-heartbeats.mjs`, which had been comparing the
+  offset-stamped `next_run_at` to a naive string since 2026-08-10.
+- Follow-up (not done here): set the morning review to `0 5 * * 2-5` in `America/Puerto_Rico` and
+  remove its self-filtering weekday check.
+
 ## Likely OOMs get the OOM wording; misparked agent.config checkouts warn (2026-10-14)
 
 - Parts 1 and 3a of the fleet turn-stall task (FlightDesk `dc18dbeb`). FlightDesk retries an OOM'd

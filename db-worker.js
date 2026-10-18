@@ -21,8 +21,9 @@ import { autoAttachMentionedFiles } from './server/mentioned-files.js'
 // test-recurrence.mjs extracts it from this file's source text and runs it in isolation. That test
 // also asserts this copy === the shared copy, so it is an automated guard against drift.
 import {
-  today, nowIso, utcNowIso, offsetDate, daysBetween, appendAiContext, isHabitDueOn, nextRunAt,
+  today, nowIso, utcNowIso, offsetDate, daysBetween, appendAiContext, isHabitDueOn,
   withTimestampZones, buildHabitHistory, habitRangeError,
+  resolveHeartbeatSchedule, touchesHeartbeatSchedule, heartbeatNextRunAt, heartbeatUpcomingRuns,
 } from './server/task-logic.js'
 const { rrulestr } = pkg
 
@@ -272,6 +273,9 @@ function migrate() {
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN heartbeat_id TEXT REFERENCES heartbeats(id)')
   tryAlter('ALTER TABLE heartbeats ADD COLUMN run_at_time TEXT')
   tryAlter('ALTER TABLE heartbeats ADD COLUMN minute_offset INTEGER')
+  // Cron schedules (cron_expression + IANA timezone) take precedence over the interval columns.
+  tryAlter('ALTER TABLE heartbeats ADD COLUMN cron_expression TEXT')
+  tryAlter('ALTER TABLE heartbeats ADD COLUMN timezone TEXT')
   tryAlter('ALTER TABLE tasks ADD COLUMN assigned_agent TEXT')
   tryAlter('ALTER TABLE projects ADD COLUMN is_repo INTEGER NOT NULL DEFAULT 0')
   // agents.concurrency_key / agents.worktrees: added by ensureAgentSchema (server/capability-registry.js).
@@ -1518,7 +1522,14 @@ function insertAutorunJob(taskId, agentPath, prompt) {
 }
 
 // ── Heartbeats ────────────────────────────────────────────────────────────────
-// addMinutesFromNow + nextRunAt are imported from server/task-logic.js (shared with mcp).
+// Schedule validation and next-run math are imported from server/task-logic.js (shared with mcp).
+
+// A heartbeat row leaving the process: zone-stamped, plus the next three cron runs (UTC ISO; empty
+// for interval schedules). Computed from the stored naive row, before stamping.
+function heartbeatOut(row) {
+  if (!row) return row
+  return withTimestampZones({ ...row, upcoming_runs: heartbeatUpcomingRuns(row) }, 'heartbeats')
+}
 
 function listHeartbeats() {
   const rows = db.prepare(`
@@ -1528,22 +1539,21 @@ function listHeartbeats() {
       (SELECT COUNT(*) FROM agent_jobs j WHERE j.heartbeat_id = h.id AND j.status IN ('queued','running')) as runs_pending
     FROM heartbeats h ORDER BY h.created_at DESC
   `).all()
-  return withTimestampZones(rows, 'heartbeats')
+  return rows.map(heartbeatOut)
 }
 
-function createHeartbeat({ title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset } = {}) {
+function createHeartbeat(fields = {}) {
+  const { title, description, agent_path, prompt } = fields
   if (!title || !agent_path || !prompt) throw new Error('title, agent_path, and prompt are required')
+  const schedule = resolveHeartbeatSchedule(fields)
   const id = crypto.randomUUID()
   const now = nowIso()
-  const mins = interval_minutes ?? 60
-  const runAt = (run_at_time && mins === 1440) ? run_at_time : null
-  const offset = (minute_offset != null && mins < 1440) ? minute_offset : null
-  const firstRun = nextRunAt(mins, runAt, offset)
   db.prepare(`
-    INSERT INTO heartbeats (id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset, active, next_run_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-  `).run(id, title.trim(), description ?? null, agent_path.trim(), prompt.trim(), mins, runAt, offset, firstRun, now, now)
-  return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats')
+    INSERT INTO heartbeats (id, title, description, agent_path, prompt, interval_minutes, run_at_time, minute_offset, cron_expression, timezone, active, next_run_at, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+  `).run(id, title.trim(), description ?? null, agent_path.trim(), prompt.trim(), schedule.interval_minutes, schedule.run_at_time,
+    schedule.minute_offset, schedule.cron_expression, schedule.timezone, heartbeatNextRunAt(schedule), now, now)
+  return heartbeatOut(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id))
 }
 
 function updateHeartbeat(id, fields = {}) {
@@ -1555,19 +1565,13 @@ function updateHeartbeat(id, fields = {}) {
     if (k in fields) { sets.push(`${k} = ?`); vals.push(fields[k]) }
   }
   // Recompute next_run_at on ANY schedule-field change (bug C8) and apply the create-path
-  // normalization (run_at_time only valid with interval 1440; minute_offset only with <1440),
-  // so a schedule edit takes effect immediately instead of firing on the stale next_run_at.
-  const scheduleChanged = ['interval_minutes', 'run_at_time', 'minute_offset'].some(k => k in fields)
+  // normalization, so a schedule edit takes effect immediately instead of firing on the stale
+  // next_run_at. resolveHeartbeatSchedule rejects cron mixed with interval fields.
+  const scheduleChanged = touchesHeartbeatSchedule(fields)
   if (scheduleChanged) {
-    const mins = (('interval_minutes' in fields) ? fields.interval_minutes : existing.interval_minutes) ?? 60
-    const rawRunAt = ('run_at_time' in fields) ? fields.run_at_time : existing.run_at_time
-    const rawOffset = ('minute_offset' in fields) ? fields.minute_offset : existing.minute_offset
-    const runAt = (rawRunAt && mins === 1440) ? rawRunAt : null
-    const offset = (rawOffset != null && mins < 1440) ? rawOffset : null
-    sets.push('interval_minutes = ?'); vals.push(mins)
-    sets.push('run_at_time = ?'); vals.push(runAt)
-    sets.push('minute_offset = ?'); vals.push(offset)
-    sets.push('next_run_at = ?'); vals.push(nextRunAt(mins, runAt, offset))
+    const schedule = resolveHeartbeatSchedule(fields, existing)
+    for (const [k, v] of Object.entries(schedule)) { sets.push(`${k} = ?`); vals.push(v) }
+    sets.push('next_run_at = ?'); vals.push(heartbeatNextRunAt(schedule))
   }
   // Idempotent enable/disable — the fix for the toggleHeartbeat blind-flip footgun:
   // setting the same value twice is a no-op, unlike toggle. Resuming (0→1) schedules
@@ -1576,13 +1580,13 @@ function updateHeartbeat(id, fields = {}) {
     const newActive = fields.active ? 1 : 0
     sets.push('active = ?'); vals.push(newActive)
     if (newActive === 1 && existing.active !== 1 && !scheduleChanged) {
-      sets.push('next_run_at = ?'); vals.push(nextRunAt(existing.interval_minutes, existing.run_at_time ?? null, existing.minute_offset ?? null))
+      sets.push('next_run_at = ?'); vals.push(heartbeatNextRunAt(existing))
     }
   }
-  if (!sets.length) return existing
+  if (!sets.length) return heartbeatOut(existing)
   sets.push('updated_at = ?'); vals.push(nowIso()); vals.push(id)
   db.prepare(`UPDATE heartbeats SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
-  return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats')
+  return heartbeatOut(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id))
 }
 
 function deleteHeartbeat(id) {
@@ -1592,37 +1596,29 @@ function deleteHeartbeat(id) {
 }
 
 function toggleHeartbeat(id) {
-  const hb = db.prepare('SELECT id, active, interval_minutes, run_at_time, minute_offset FROM heartbeats WHERE id = ?').get(id)
+  const hb = db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id)
   if (!hb) throw new Error('Heartbeat not found')
   if (hb.active === 1) {
     db.prepare(`UPDATE heartbeats SET active = 0, updated_at = ? WHERE id = ?`).run(nowIso(), id)
   } else {
-    const nr = nextRunAt(hb.interval_minutes, hb.run_at_time ?? null, hb.minute_offset ?? null)
-    db.prepare(`UPDATE heartbeats SET active = 1, next_run_at = ?, updated_at = ? WHERE id = ?`).run(nr, nowIso(), id)
+    db.prepare(`UPDATE heartbeats SET active = 1, next_run_at = ?, updated_at = ? WHERE id = ?`).run(heartbeatNextRunAt(hb), nowIso(), id)
   }
-  return withTimestampZones(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id), 'heartbeats')
+  return heartbeatOut(db.prepare('SELECT * FROM heartbeats WHERE id = ?').get(id))
 }
+
+// next_run_at and datetime('now') are both UTC. A heartbeat with a queued or running job waits for
+// it to finish rather than piling up runs.
+const HEARTBEAT_IS_DUE = `
+  h.active = 1
+  AND h.next_run_at IS NOT NULL
+  AND h.next_run_at <= datetime('now')
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_jobs j
+    WHERE j.heartbeat_id = h.id AND j.status IN ('queued','running')
+  )`
 
 function getDueHeartbeats() {
-  return db.prepare(`
-    SELECT h.* FROM heartbeats h
-    WHERE h.active = 1
-    AND h.next_run_at IS NOT NULL
-    AND h.next_run_at <= datetime('now')
-    AND NOT EXISTS (
-      SELECT 1 FROM agent_jobs j
-      WHERE j.heartbeat_id = h.id AND j.status IN ('queued','running')
-    )
-  `).all()
-}
-
-function markHeartbeatRun(id, intervalMinutes, runAtTime, minuteOffset) {
-  // last_run_at must be UTC like next_run_at and agent_jobs.created_at, not local nowIso()
-  // (docs/bug-heartbeat-timezone-mismatch.md); updated_at stays local like the rest of the table.
-  const lastRun = utcNowIso()
-  const nr = nextRunAt(intervalMinutes, runAtTime ?? null, minuteOffset ?? null)
-  db.prepare(`UPDATE heartbeats SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?`).run(lastRun, nr, nowIso(), id)
-  return { ok: true }
+  return db.prepare(`SELECT h.* FROM heartbeats h WHERE ${HEARTBEAT_IS_DUE}`).all()
 }
 
 function createHeartbeatJob(heartbeatId) {
@@ -1635,6 +1631,24 @@ function createHeartbeatJob(heartbeatId) {
   `).run(id, heartbeatId, hb.agent_path, hb.prompt)
   return { id, status: 'queued' }
 }
+
+// Fire one due heartbeat: queue its job and advance next_run_at in one transaction, re-checking
+// due-ness inside it. These used to be two separate calls (createHeartbeatJob, then
+// markHeartbeatRun), so a restart between them left next_run_at on the slot that had just run, and
+// it ran again once that job finished. Now a slot fires exactly once: either both writes land or
+// neither does, and the new next_run_at is the first slot strictly after now. A slot missed while
+// the server was down is still overdue at boot and fires once; several missed slots collapse into
+// that one run.
+// last_run_at is UTC like next_run_at and agent_jobs.created_at, not local nowIso()
+// (docs/bug-heartbeat-timezone-mismatch.md); updated_at stays local like the rest of the table.
+const fireHeartbeat = db.transaction((id) => {
+  const hb = db.prepare(`SELECT h.* FROM heartbeats h WHERE h.id = ? AND ${HEARTBEAT_IS_DUE}`).get(id)
+  if (!hb) return { fired: false }
+  const job = createHeartbeatJob(id)
+  db.prepare(`UPDATE heartbeats SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?`)
+    .run(utcNowIso(), heartbeatNextRunAt(hb), nowIso(), id)
+  return { fired: true, job_id: job.id }
+})
 
 function listHeartbeatJobs(heartbeatId, limit = 10) {
   const rows = db.prepare(`
@@ -1674,7 +1688,7 @@ const METHODS = {
   enqueueExternalReport, getExternalReport, listDueExternalReports, countExternalReports, ackExternalReport, deferExternalReport,
   setAgentJobRunCwd, listActiveTaskRefs, lastJobActivityUnder, listWorktreeAgents,
   listHeartbeats, createHeartbeat, updateHeartbeat, deleteHeartbeat, toggleHeartbeat,
-  getDueHeartbeats, markHeartbeatRun, createHeartbeatJob, listHeartbeatJobs,
+  getDueHeartbeats, fireHeartbeat, listHeartbeatJobs,
 }
 
 parentPort.on('message', ({ id, method, args }) => {

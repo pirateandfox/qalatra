@@ -5,12 +5,15 @@ import {
   fetchAgents,
   listHeartbeatJobs,
   listHeartbeats,
+  previewHeartbeatSchedule,
   toggleHeartbeat,
   updateHeartbeat,
   type Agent,
 } from '../api'
 import { useContexts } from '../lib/ContextsProvider'
 import './HeartbeatsView.css'
+
+type ScheduleType = 'interval' | 'daily' | 'cron'
 
 const INTERVAL_OPTIONS = [
   { value: 5,    label: 'Every 5 min' },
@@ -33,6 +36,100 @@ function offsetOptions(intervalMinutes: number): { value: number; label: string 
     opts.push({ value: o, label: h > 0 ? `${h}:${String(m).padStart(2, '0')}` : `:${String(m).padStart(2, '0')}` })
   }
   return opts
+}
+
+// Monday-first for display; values are cron day-of-week numbers (0 = Sunday).
+const WEEKDAYS = [
+  { value: 1, label: 'Mon' }, { value: 2, label: 'Tue' }, { value: 3, label: 'Wed' }, { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' }, { value: 6, label: 'Sat' }, { value: 0, label: 'Sun' },
+]
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+// Weekday checkboxes + a time → a cron expression, e.g. Tue–Fri 05:00 → "0 5 * * 2-5".
+// Runs of three or more days become a range; no days (or all seven) means every day.
+function cronFromWeekdays(time: string, days: number[]): string {
+  const [h, m] = time.split(':').map(Number)
+  const sorted = [...new Set(days)].sort((a, b) => a - b)
+  let dow = '*'
+  if (sorted.length > 0 && sorted.length < 7) {
+    const parts: string[] = []
+    for (let i = 0; i < sorted.length;) {
+      let j = i
+      while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++
+      if (j - i >= 2) parts.push(`${sorted[i]}-${sorted[j]}`)
+      else for (let k = i; k <= j; k++) parts.push(String(sorted[k]))
+      i = j + 1
+    }
+    dow = parts.join(',')
+  }
+  return `${m} ${h} * * ${dow}`
+}
+
+// The inverse, for expressions the checkboxes can represent ("M H * * <days>"); null otherwise.
+function weekdaysFromCron(expr: string): { time: string; days: number[] } | null {
+  const match = expr.trim().match(/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+([\d,*-]+)$/)
+  if (!match) return null
+  const [, m, h, dowField] = match
+  if (Number(m) > 59 || Number(h) > 23) return null
+  const days = new Set<number>()
+  if (dowField === '*') [0, 1, 2, 3, 4, 5, 6].forEach(d => days.add(d))
+  else {
+    for (const part of dowField.split(',')) {
+      const range = part.match(/^(\d)(?:-(\d))?$/)
+      if (!range) return null
+      const lo = Number(range[1]), hi = Number(range[2] ?? range[1])
+      if (hi < lo || hi > 7) return null
+      for (let d = lo; d <= hi; d++) days.add(d % 7)
+    }
+  }
+  return { time: `${h.padStart(2, '0')}:${m.padStart(2, '0')}`, days: [...days] }
+}
+
+function weekdaysLabel(days: number[]): string {
+  const set = new Set(days)
+  if (set.size === 7) return 'Every day'
+  if (set.size === 5 && [1, 2, 3, 4, 5].every(d => set.has(d))) return 'Weekdays'
+  // Monday-first, collapsing runs: Tue–Fri, Mon, Wed
+  const ordered = WEEKDAYS.map(w => w.value).filter(d => set.has(d))
+  const order = WEEKDAYS.map(w => w.value)
+  const parts: string[] = []
+  for (let i = 0; i < ordered.length;) {
+    let j = i
+    while (j + 1 < ordered.length && order.indexOf(ordered[j + 1]) === order.indexOf(ordered[j]) + 1) j++
+    parts.push(j - i >= 2 ? `${DAY_NAMES[ordered[i]]}–${DAY_NAMES[ordered[j]]}` : ordered.slice(i, j + 1).map(d => DAY_NAMES[d]).join(', '))
+    i = j + 1
+  }
+  return parts.join(', ')
+}
+
+function scheduleLabel(hb: Heartbeat) {
+  if (hb.cron_expression) {
+    const simple = weekdaysFromCron(hb.cron_expression)
+    const what = simple ? `${weekdaysLabel(simple.days)} at ${simple.time}` : `Cron ${hb.cron_expression}`
+    return `${what} (${hb.timezone})`
+  }
+  return intervalLabel(hb.interval_minutes, hb.run_at_time, hb.minute_offset)
+}
+
+// A run instant in the schedule's own timezone and in UTC, e.g. "Tue, Oct 20, 05:00 AST · 09:00 UTC".
+function formatRun(iso: string, timeZone: string | null | undefined) {
+  const d = new Date(iso)
+  let local: string
+  try {
+    local = d.toLocaleString(undefined, { timeZone: timeZone ?? undefined, weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' })
+  } catch {
+    local = d.toLocaleString()
+  }
+  const utc = d.toLocaleString(undefined, { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+  return `${local} · ${utc} UTC`
+}
+
+function timeZoneOptions(current: string): string[] {
+  let zones: string[] = []
+  try { zones = Intl.supportedValuesOf('timeZone') } catch { /* older runtime: fall back to current only */ }
+  if (!zones.includes('UTC')) zones = ['UTC', ...zones]
+  if (current && !zones.includes(current)) zones = [current, ...zones]
+  return zones
 }
 
 function intervalLabel(minutes: number, runAtTime?: string | null, minuteOffset?: number | null) {
@@ -84,9 +181,12 @@ interface Heartbeat {
   interval_minutes: number
   run_at_time: string | null
   minute_offset: number | null
+  cron_expression?: string | null
+  timezone?: string | null
   active: number
   last_run_at: string | null
   next_run_at: string | null
+  upcoming_runs?: string[]
   created_at: string
   runs_done: number
   runs_failed: number
@@ -174,13 +274,184 @@ function AgentPicker({ agents, context, project, agentPath, onContextChange, onP
   )
 }
 
+// ── Schedule sub-form ─────────────────────────────────────────────────────────
+
+interface ScheduleForm {
+  schedule_type: ScheduleType
+  interval_minutes: number
+  run_at_time: string
+  minute_offset: number | null
+  cron_expression: string
+  cron_time: string
+  cron_days: number[]
+  timezone: string
+}
+
+// The schedule part of a create/update body. Non-cron schedules send cron_expression: null so an
+// edit can switch a cron heartbeat back to an interval (the server rejects cron mixed with interval
+// fields, and refuses interval fields on a cron heartbeat unless cron is cleared).
+function schedulePayload(f: ScheduleForm): Record<string, unknown> {
+  if (f.schedule_type === 'cron') return { cron_expression: f.cron_expression.trim(), timezone: f.timezone || undefined }
+  const mins = f.schedule_type === 'daily' ? 1440 : f.interval_minutes
+  return {
+    cron_expression: null,
+    timezone: null,
+    interval_minutes: mins,
+    run_at_time: mins === 1440 ? f.run_at_time : null,
+    minute_offset: mins < 1440 ? f.minute_offset : null,
+  }
+}
+
+function ScheduleFields<F extends ScheduleForm>({ form, setForm }: { form: F; setForm: (update: (f: F) => F) => void }) {
+  const [preview, setPreview] = useState<{ runs: string[]; error: string | null }>({ runs: [], error: null })
+  const isCron = form.schedule_type === 'cron'
+
+  useEffect(() => {
+    if (!isCron) return
+    let cancelled = false
+    const timer = setTimeout(() => {
+      previewHeartbeatSchedule({ cron_expression: form.cron_expression, timezone: form.timezone || undefined })
+        .then(p => { if (!cancelled) setPreview({ runs: p.upcoming_runs, error: null }) })
+        .catch((err: Error) => { if (!cancelled) setPreview({ runs: [], error: err.message }) })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [isCron, form.cron_expression, form.timezone])
+
+  function setWeekdays(time: string, days: number[]) {
+    setForm(f => ({ ...f, cron_time: time, cron_days: days, cron_expression: cronFromWeekdays(time, days) }))
+  }
+
+  const custom = isCron && !weekdaysFromCron(form.cron_expression)
+
+  return (
+    <div className="hb-schedule">
+      <div className="hb-form-row">
+        <select
+          className="hb-select hb-schedule-type"
+          value={form.schedule_type}
+          onChange={e => setForm(f => ({ ...f, schedule_type: e.target.value as ScheduleType }))}
+        >
+          <option value="interval">Interval</option>
+          <option value="daily">Daily at a time</option>
+          <option value="cron">Weekdays / cron</option>
+        </select>
+
+        {form.schedule_type === 'interval' && (
+          <>
+            <select
+              className="hb-select"
+              value={form.interval_minutes}
+              onChange={e => setForm(f => ({ ...f, interval_minutes: Number(e.target.value), minute_offset: null }))}
+            >
+              {INTERVAL_OPTIONS.filter(o => o.value < 1440).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            {offsetOptions(form.interval_minutes).length > 0 && (
+              <select
+                className="hb-select"
+                value={form.minute_offset ?? ''}
+                onChange={e => setForm(f => ({ ...f, minute_offset: e.target.value === '' ? null : Number(e.target.value) }))}
+              >
+                <option value="">Any time</option>
+                {offsetOptions(form.interval_minutes).map(o => (
+                  <option key={o.value} value={o.value}>at {o.label}</option>
+                ))}
+              </select>
+            )}
+          </>
+        )}
+
+        {form.schedule_type === 'daily' && (
+          <input
+            type="time"
+            className="hb-input hb-time-input"
+            value={form.run_at_time}
+            onChange={e => setForm(f => ({ ...f, run_at_time: e.target.value }))}
+            required
+          />
+        )}
+
+        {isCron && (
+          <input
+            type="time"
+            className="hb-input hb-time-input"
+            value={form.cron_time}
+            onChange={e => e.target.value && setWeekdays(e.target.value, form.cron_days)}
+            disabled={custom}
+          />
+        )}
+      </div>
+
+      {isCron && (
+        <>
+          <div className={`hb-weekdays${custom ? ' hb-weekdays-disabled' : ''}`}>
+            {WEEKDAYS.map(d => (
+              <label key={d.value} className="hb-weekday">
+                <input
+                  type="checkbox"
+                  checked={form.cron_days.includes(d.value)}
+                  disabled={custom}
+                  onChange={e => setWeekdays(form.cron_time, e.target.checked
+                    ? [...form.cron_days, d.value]
+                    : form.cron_days.filter(x => x !== d.value))}
+                />
+                {d.label}
+              </label>
+            ))}
+          </div>
+
+          <div className="hb-form-row">
+            <input
+              className="hb-input hb-cron-input"
+              value={form.cron_expression}
+              onChange={e => {
+                const expr = e.target.value
+                const simple = weekdaysFromCron(expr)
+                setForm(f => ({ ...f, cron_expression: expr, ...(simple ? { cron_time: simple.time, cron_days: simple.days } : {}) }))
+              }}
+              placeholder="0 5 * * 2-5"
+              spellCheck={false}
+              aria-label="Cron expression"
+              required
+            />
+            <select
+              className="hb-select"
+              value={form.timezone}
+              onChange={e => setForm(f => ({ ...f, timezone: e.target.value }))}
+              aria-label="Timezone"
+            >
+              {!form.timezone && <option value="">Server timezone</option>}
+              {timeZoneOptions(form.timezone).map(z => <option key={z} value={z}>{z}</option>)}
+            </select>
+          </div>
+          {custom && <div className="hb-hint">Custom expression — edit it directly, or clear it to a simple “M H * * days” form to use the checkboxes.</div>}
+
+          {preview.error
+            ? <div className="hb-preview hb-preview-error">{preview.error}</div>
+            : preview.runs.length > 0 && (
+              <div className="hb-preview">
+                <span className="hb-preview-label">Next runs</span>
+                {preview.runs.map(r => <span key={r} className="hb-preview-run">{formatRun(r, form.timezone)}</span>)}
+              </div>
+            )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 
 interface Props {
   onMutate?: () => void
 }
 
-const BLANK_FORM = { title: '', context: '', project: '', agent_path: '', prompt: '', interval_minutes: 60, run_at_time: '09:00', minute_offset: null as number | null }
+const BLANK_FORM = {
+  title: '', context: '', project: '', agent_path: '', prompt: '',
+  schedule_type: 'interval' as ScheduleType,
+  interval_minutes: 60, run_at_time: '09:00', minute_offset: null as number | null,
+  cron_expression: '0 9 * * 1-5', cron_time: '09:00', cron_days: [1, 2, 3, 4, 5], timezone: '',
+}
+type HeartbeatForm = typeof BLANK_FORM
 
 export default function HeartbeatsView({ onMutate }: Props) {
   const [heartbeats, setHeartbeats] = useState<Heartbeat[]>([])
@@ -190,9 +461,13 @@ export default function HeartbeatsView({ onMutate }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [jobs, setJobs]             = useState<Record<string, AgentJob[]>>({})
   const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(new Set())
-  const [form, setForm]             = useState(BLANK_FORM)
+  const [serverTz, setServerTz]     = useState('')
+  const blankForm                   = useCallback((): HeartbeatForm => ({ ...BLANK_FORM, timezone: serverTz }), [serverTz])
+  const [form, setForm]             = useState<HeartbeatForm>(BLANK_FORM)
+  const [formError, setFormError]   = useState<string | null>(null)
   const [editId, setEditId]         = useState<string | null>(null)
-  const [editForm, setEditForm]     = useState(BLANK_FORM)
+  const [editForm, setEditForm]     = useState<HeartbeatForm>(BLANK_FORM)
+  const [editError, setEditError]   = useState<string | null>(null)
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -204,6 +479,11 @@ export default function HeartbeatsView({ onMutate }: Props) {
   useEffect(() => {
     load()
     fetchAgents().then(setAgents).catch(() => {})
+    // An empty preview returns the server's timezone: the default for a new cron schedule.
+    previewHeartbeatSchedule({}).then(p => {
+      setServerTz(p.server_timezone)
+      setForm(f => f.timezone ? f : { ...f, timezone: p.server_timezone })
+    }).catch(() => {})
   }, [load])
 
   useEffect(() => {
@@ -233,15 +513,19 @@ export default function HeartbeatsView({ onMutate }: Props) {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     if (!form.title.trim() || !form.agent_path || !form.prompt.trim()) return
-    await createHeartbeat({
-      title: form.title.trim(),
-      agent_path: form.agent_path,
-      prompt: form.prompt.trim(),
-      interval_minutes: form.interval_minutes,
-      run_at_time: form.interval_minutes === 1440 ? form.run_at_time : null,
-      minute_offset: form.interval_minutes < 1440 ? form.minute_offset : null,
-    })
-    setForm(BLANK_FORM)
+    try {
+      await createHeartbeat({
+        title: form.title.trim(),
+        agent_path: form.agent_path,
+        prompt: form.prompt.trim(),
+        ...schedulePayload(form),
+      })
+    } catch (err) {
+      setFormError((err as Error).message)
+      return
+    }
+    setFormError(null)
+    setForm(blankForm())
     setCreating(false)
     load()
     onMutate?.()
@@ -262,30 +546,39 @@ export default function HeartbeatsView({ onMutate }: Props) {
 
   function startEdit(hb: Heartbeat) {
     const agent = agents.find(a => a.path === hb.agent_path)
+    const simple = hb.cron_expression ? weekdaysFromCron(hb.cron_expression) : null
     setEditId(hb.id)
+    setEditError(null)
     setEditForm({
+      ...blankForm(),
       title: hb.title,
       context: agent?.context ?? '',
       project: agent?.project ?? '',
       agent_path: hb.agent_path,
       prompt: hb.prompt,
-      interval_minutes: hb.interval_minutes,
+      schedule_type: hb.cron_expression ? 'cron' : hb.interval_minutes === 1440 ? 'daily' : 'interval',
+      interval_minutes: hb.interval_minutes === 1440 ? 60 : hb.interval_minutes,
       run_at_time: hb.run_at_time ?? '09:00',
       minute_offset: hb.minute_offset ?? null,
+      ...(hb.cron_expression ? { cron_expression: hb.cron_expression, timezone: hb.timezone ?? serverTz } : {}),
+      ...(simple ? { cron_time: simple.time, cron_days: simple.days } : {}),
     })
   }
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault()
     if (!editId) return
-    await updateHeartbeat(editId, {
-      title: editForm.title.trim(),
-      agent_path: editForm.agent_path,
-      prompt: editForm.prompt.trim(),
-      interval_minutes: editForm.interval_minutes,
-      run_at_time: editForm.interval_minutes === 1440 ? editForm.run_at_time : null,
-      minute_offset: editForm.interval_minutes < 1440 ? editForm.minute_offset : null,
-    })
+    try {
+      await updateHeartbeat(editId, {
+        title: editForm.title.trim(),
+        agent_path: editForm.agent_path,
+        prompt: editForm.prompt.trim(),
+        ...schedulePayload(editForm),
+      })
+    } catch (err) {
+      setEditError((err as Error).message)
+      return
+    }
     setEditId(null)
     load(true)
   }
@@ -343,37 +636,12 @@ export default function HeartbeatsView({ onMutate }: Props) {
             required
           />
 
-          <div className="hb-form-row">
-            <select
-              className="hb-select"
-              value={form.interval_minutes}
-              onChange={e => setForm(f => ({ ...f, interval_minutes: Number(e.target.value), minute_offset: null }))}
-            >
-              {INTERVAL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            {form.interval_minutes === 1440 && (
-              <input
-                type="time"
-                className="hb-input hb-time-input"
-                value={form.run_at_time}
-                onChange={e => setForm(f => ({ ...f, run_at_time: e.target.value }))}
-                required
-              />
-            )}
-            {offsetOptions(form.interval_minutes).length > 0 && (
-              <select
-                className="hb-select"
-                value={form.minute_offset ?? ''}
-                onChange={e => setForm(f => ({ ...f, minute_offset: e.target.value === '' ? null : Number(e.target.value) }))}
-              >
-                <option value="">Any time</option>
-                {offsetOptions(form.interval_minutes).map(o => (
-                  <option key={o.value} value={o.value}>at {o.label}</option>
-                ))}
-              </select>
-            )}
+          <ScheduleFields form={form} setForm={setForm} />
+
+          {formError && <div className="hb-form-error">{formError}</div>}
+          <div className="hb-form-row hb-form-actions">
             <button type="submit" className="hb-btn-primary" disabled={!form.agent_path}>Create</button>
-            <button type="button" className="hb-btn-cancel" onClick={() => { setCreating(false); setForm(BLANK_FORM) }}>Cancel</button>
+            <button type="button" className="hb-btn-cancel" onClick={() => { setCreating(false); setForm(blankForm()); setFormError(null) }}>Cancel</button>
           </div>
         </form>
       )}
@@ -402,31 +670,10 @@ export default function HeartbeatsView({ onMutate }: Props) {
 
                   <textarea className="hb-textarea" value={editForm.prompt} onChange={e => setEditForm(f => ({ ...f, prompt: e.target.value }))} rows={4} required />
 
-                  <div className="hb-form-row">
-                    <select className="hb-select" value={editForm.interval_minutes} onChange={e => setEditForm(f => ({ ...f, interval_minutes: Number(e.target.value), minute_offset: null }))}>
-                      {INTERVAL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                    {editForm.interval_minutes === 1440 && (
-                      <input
-                        type="time"
-                        className="hb-input hb-time-input"
-                        value={editForm.run_at_time}
-                        onChange={e => setEditForm(f => ({ ...f, run_at_time: e.target.value }))}
-                        required
-                      />
-                    )}
-                    {offsetOptions(editForm.interval_minutes).length > 0 && (
-                      <select
-                        className="hb-select"
-                        value={editForm.minute_offset ?? ''}
-                        onChange={e => setEditForm(f => ({ ...f, minute_offset: e.target.value === '' ? null : Number(e.target.value) }))}
-                      >
-                        <option value="">Any time</option>
-                        {offsetOptions(editForm.interval_minutes).map(o => (
-                          <option key={o.value} value={o.value}>at {o.label}</option>
-                        ))}
-                      </select>
-                    )}
+                  <ScheduleFields form={editForm} setForm={setEditForm} />
+
+                  {editError && <div className="hb-form-error">{editError}</div>}
+                  <div className="hb-form-row hb-form-actions">
                     <button type="submit" className="hb-btn-primary" disabled={!editForm.agent_path}>Save</button>
                     <button type="button" className="hb-btn-cancel" onClick={() => setEditId(null)}>Cancel</button>
                   </div>
@@ -451,7 +698,7 @@ export default function HeartbeatsView({ onMutate }: Props) {
                   </div>
 
                   <div className="hb-card-meta">
-                    <span className="hb-meta-item">{intervalLabel(hb.interval_minutes, hb.run_at_time, hb.minute_offset)}</span>
+                    <span className="hb-meta-item">{scheduleLabel(hb)}</span>
                     <span className="hb-meta-sep">·</span>
                     <span className="hb-meta-item" title={hb.last_run_at ?? undefined}>Last: {relativeTime(hb.last_run_at)}</span>
                     {hb.active === 1 && (
@@ -474,6 +721,13 @@ export default function HeartbeatsView({ onMutate }: Props) {
                       </>
                     )}
                   </div>
+
+                  {hb.active === 1 && (hb.upcoming_runs?.length ?? 0) > 0 && (
+                    <div className="hb-preview hb-card-upcoming">
+                      <span className="hb-preview-label">Next runs</span>
+                      {hb.upcoming_runs!.map(r => <span key={r} className="hb-preview-run">{formatRun(r, hb.timezone)}</span>)}
+                    </div>
+                  )}
 
                   <div className="hb-card-path" title={hb.agent_path}>
                     <span className="hb-path-label">path</span> {hb.agent_path}

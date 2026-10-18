@@ -19,6 +19,7 @@ import type {
   HabitHistory,
   Heartbeat,
   HeartbeatJob,
+  HeartbeatSchedulePreview,
   Note,
   Project,
   ProjectDetail,
@@ -365,6 +366,13 @@ export async function createHeartbeat(body: Record<string, unknown>): Promise<vo
 
 export async function updateHeartbeat(id: string, fields: Record<string, unknown>): Promise<void> {
   await v1(`/heartbeats/${enc(id)}`, jsonRequest('PATCH', fields))
+}
+
+// Validates a schedule without saving it; rejects (HTTP 400) on a bad cron expression or timezone.
+// An empty body returns the server's timezone, the default for new cron schedules.
+export async function previewHeartbeatSchedule(body: Record<string, unknown>): Promise<HeartbeatSchedulePreview> {
+  const data = await v1('/heartbeats/schedule-preview', jsonRequest('POST', body))
+  return data.preview
 }
 
 export async function deleteHeartbeat(id: string): Promise<void> {

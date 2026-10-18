@@ -32,8 +32,8 @@ try {
   check('next_run_at recomputed (changed)', updated.next_run_at !== original)
   check('interval_minutes persisted', updated.interval_minutes === 30)
   check('run_at_time normalized to null for sub-daily', updated.run_at_time == null)
-  const soon = new Date(Date.now() + 31 * 60_000).toISOString().replace('T', ' ').slice(0, 19)
-  check('next_run_at is within ~31 min (not the stale daily time)', updated.next_run_at <= soon)
+  // Compare instants, not strings: reads return next_run_at with an explicit offset ("…T…Z").
+  check('next_run_at is within ~31 min (not the stale daily time)', new Date(updated.next_run_at).getTime() <= Date.now() + 31 * 60_000)
 
   // Editing only a non-schedule field must NOT move next_run_at.
   const afterTitle = handlers.update_heartbeat({ id: hb.id, title: 'renamed' })

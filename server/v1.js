@@ -5,6 +5,8 @@ import { syncPendingAttachments } from './attachments.js'
 import { exportKey, generateKey, importKey, keyStatus } from './keys.js'
 import { runAgentScan, agentWorkerStatus } from './workers.js'
 import { validateSettings } from './settings.js'
+import { serverTimeZone } from './cron.js'
+import { heartbeatUpcomingRuns, resolveHeartbeatSchedule } from './task-logic.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -337,6 +339,12 @@ export async function handleV1(req, url, ctx, { parseBody }) {
   if (resource === 'heartbeats') {
     if (!id && method === 'GET') return data('heartbeats', await ctx.dbCall('listHeartbeats'))
     if (!id && method === 'POST') return data('heartbeat', await ctx.dbCall('createHeartbeat', await parseBody(req)))
+    // Validate a schedule without saving it: the normalized fields, the next three cron runs, and the
+    // server's timezone (the default for a new cron schedule). An empty body returns just the default.
+    if (id === 'schedule-preview' && !action && method === 'POST') {
+      const schedule = resolveHeartbeatSchedule(await parseBody(req))
+      return data('preview', { ...schedule, server_timezone: serverTimeZone(), upcoming_runs: heartbeatUpcomingRuns(schedule) })
+    }
     if (id && !action && method === 'PATCH') return data('heartbeat', await ctx.dbCall('updateHeartbeat', id, await parseBody(req)))
     if (id && !action && method === 'DELETE') return result(await ctx.dbCall('deleteHeartbeat', id))
     if (id && action === 'toggle' && method === 'POST') return data('heartbeat', await ctx.dbCall('toggleHeartbeat', id))

@@ -194,6 +194,28 @@ async function main() {
       throw new Error(`created_at resolved to the wrong instant: ${fetched.created_at}`)
     }
 
+    // Cron heartbeats over HTTP: bad cron / unknown timezone are 400s with the reason, the preview
+    // returns the next three runs, and a created cron heartbeat serves next_run_at in UTC.
+    const postJson = (route, body) => fetch(`http://127.0.0.1:${apiPort}/api/v1${route}`, {
+      method: 'POST', headers: authJson, body: JSON.stringify(body),
+    }).then(async r => ({ res: r, data: await r.json().catch(() => ({})) }))
+    const badCron = await postJson('/heartbeats/schedule-preview', { cron_expression: '0 5 * *' })
+    if (badCron.res.status !== 400 || !/expected 5 fields/.test(badCron.data.error ?? '')) {
+      throw new Error(`bad cron preview expected 400, got ${badCron.res.status} ${JSON.stringify(badCron.data)}`)
+    }
+    const preview = await postJson('/heartbeats/schedule-preview', { cron_expression: '0 5 * * 2-5', timezone: 'America/Puerto_Rico' })
+    if (!preview.res.ok || preview.data.preview?.upcoming_runs?.length !== 3 || !preview.data.preview.server_timezone) {
+      throw new Error(`schedule preview failed: ${JSON.stringify(preview.data)}`)
+    }
+    const badZone = await postJson('/heartbeats', { title: 'hb', agent_path: dataDir, prompt: 'x', cron_expression: '0 5 * * 2-5', timezone: 'Nowhere/Land' })
+    if (badZone.res.status !== 400 || !/Unknown timezone/.test(badZone.data.error ?? '')) {
+      throw new Error(`unknown timezone expected 400, got ${badZone.res.status} ${JSON.stringify(badZone.data)}`)
+    }
+    const cronHb = await postJson('/heartbeats', { title: 'hb', agent_path: dataDir, prompt: 'x', cron_expression: '0 5 * * 2-5', timezone: 'America/Puerto_Rico' })
+    if (!cronHb.res.ok || !/T09:00:00Z$/.test(cronHb.data.heartbeat?.next_run_at ?? '')) {
+      throw new Error(`cron heartbeat create failed: ${JSON.stringify(cronHb.data)}`)
+    }
+
     // C26: GET a nonexistent task must be 404, not 200 { task:null }.
     const getMissing = await fetch(`http://127.0.0.1:${apiPort}/api/v1/tasks/does-not-exist`, { headers: authJson })
     if (getMissing.status !== 404) throw new Error(`GET missing task expected 404, got ${getMissing.status}`)

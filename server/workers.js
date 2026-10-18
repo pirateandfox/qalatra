@@ -1287,8 +1287,7 @@ async function autoRunAgents({ dbCall }) {
 
 async function runDueHeartbeats({ dbCall }) {
   const due = await dbCall('getDueHeartbeats')
-  for (const hb of due) {
-    await dbCall('createHeartbeatJob', hb.id)
-    await dbCall('markHeartbeatRun', hb.id, hb.interval_minutes, hb.run_at_time ?? null, hb.minute_offset ?? null)
-  }
+  // fireHeartbeat queues the job and advances next_run_at atomically, so a restart mid-pass cannot
+  // fire the same slot twice.
+  for (const hb of due) await dbCall('fireHeartbeat', hb.id)
 }
