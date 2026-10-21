@@ -1,5 +1,17 @@
 # Qalatra — Evolution Notes
 
+## Agent jobs no longer inherit the server's NODE_ENV / ELECTRON_RUN_AS_NODE (2026-10-21)
+
+- The server units (`scripts/qalatra-server.service`, `install-linux-server.sh`, `serviceEnv()` in
+  `server/service-manager.js`) set `NODE_ENV=production`, and `buildAgentEnv` started every job
+  from `process.env`. Every agent on every box therefore ran with `NODE_ENV=production`, so an
+  agent's `npm install` silently skipped devDependencies (seen on huli and shi).
+- `buildAgentEnv` now drops `NODE_ENV` and `ELECTRON_RUN_AS_NODE` (the desktop app's equivalent:
+  an Electron app an agent launched would run as plain Node) before the `agentEnv` and
+  `agent.config` `env` layers apply, so a folder or box that wants either still sets it there.
+- The fleet stopgap (`NODE_ENV: null` in each box's `agentEnv`) is harmless after this and can be
+  removed at leisure. Covered in `test:flightdesk-dispatch`.
+
 ## Worktree/concurrency decisions follow agent.config on disk, not the last scan (2026-10-20)
 
 - `getQueuedJobs` picks worktree-vs-folder and the concurrency key from the `agents` table, which

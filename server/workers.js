@@ -457,15 +457,21 @@ export function flightdeskRcEnv(agentPath) {
 }
 
 /**
- * Job environment, lowest to highest precedence: server process.env, settings.agentEnv,
+ * Job environment, lowest to highest precedence: server process.env (minus SERVER_ONLY_ENV), settings.agentEnv,
  * agent.config.env, then the folder's .flightdeskrc. The rc wins over the configured layers on
  * purpose — the file is the binding, and a stale agent.config on a client repo must not be able to
  * re-identify a folder. It is also applied *before* the configured layers expand, so an
  * agent.config entry can reference it ("Bearer ${FLIGHTDESK_API_KEY}" for an MCP header) without
  * being able to replace it. The launch loop layers the reserved QALATRA_* names and externalEnv on top.
  */
+// How the server itself runs, not how a job should: the service units set NODE_ENV=production (an
+// agent's `npm install` then skips devDependencies) and the desktop app sets ELECTRON_RUN_AS_NODE (an
+// Electron app the agent starts then runs as plain Node). A folder that wants either sets it in env.
+const SERVER_ONLY_ENV = ['NODE_ENV', 'ELECTRON_RUN_AS_NODE']
+
 export function buildAgentEnv(settings, cfg, shellBin, agentPath = null) {
   const env = { ...process.env }
+  for (const key of SERVER_ONLY_ENV) delete env[key]
   if (!env.HOME) env.HOME = os.homedir()
   try {
     const user = os.userInfo()

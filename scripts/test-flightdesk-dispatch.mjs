@@ -481,6 +481,12 @@ try {
   const unboundEnv = buildAgentEnv({ agentEnv: { FLIGHTDESK_OTHER: 'kept' } }, null, '/bin/sh', unbound)
   check('no rc: nothing added, unrelated FLIGHTDESK_* untouched', [unboundEnv.FLIGHTDESK_API_KEY, unboundEnv.FLIGHTDESK_API_URL, unboundEnv.FLIGHTDESK_OTHER], [undefined, undefined, 'kept'])
   check('no agent_path: nothing added', flightdeskRcEnv(null), {})
+  const savedServerEnv = { NODE_ENV: process.env.NODE_ENV, ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE }
+  Object.assign(process.env, { NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: '1' })
+  const serverOnly = buildAgentEnv({}, null, '/bin/sh', unbound)
+  const optedIn = buildAgentEnv({ agentEnv: { NODE_ENV: 'development' } }, null, '/bin/sh', unbound)
+  for (const [key, value] of Object.entries(savedServerEnv)) value === undefined ? delete process.env[key] : (process.env[key] = value)
+  check('server-only NODE_ENV/ELECTRON_RUN_AS_NODE do not reach jobs; a configured NODE_ENV does', [serverOnly.NODE_ENV, serverOnly.ELECTRON_RUN_AS_NODE, optedIn.NODE_ENV], [undefined, undefined, 'development'])
   const shadowed = buildAgentEnv({ agentEnv: { FLIGHTDESK_API_KEY: 'settings-wrong' } }, { env: { FLIGHTDESK_API_KEY: 'config-wrong', FLIGHTDESK_API_URL: 'https://config-wrong.test' } }, '/bin/sh', bound)
   check('rc wins over agent.config.env and settings.agentEnv', [shadowed.FLIGHTDESK_API_KEY, shadowed.FLIGHTDESK_API_URL], ['k1', 'https://api.flightdesk.dev'])
   const referencing = buildAgentEnv({}, { env: { MCP_AUTH: 'Bearer ${FLIGHTDESK_API_KEY}', ORG_COPY: '$FLIGHTDESK_ORGANIZATION_ID' } }, '/bin/sh', bound)
