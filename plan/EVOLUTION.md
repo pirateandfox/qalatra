@@ -1,5 +1,58 @@
 # Qalatra — Evolution Notes
 
+## Worktree/concurrency decisions follow agent.config on disk, not the last scan (2026-10-20)
+
+- `getQueuedJobs` picks worktree-vs-folder and the concurrency key from the `agents` table, which
+  a full scan refreshed only at boot or from the UI. On forge, mi-core's pipeline turned on
+  `worktrees: true` on 10-07, but the cache kept `worktrees = 0` until a restart around 10-12. Task
+  3bdeebb4 started in that window (10-08), got a session in the main checkout, and the
+  "session from a folder run stays in the folder" rule pinned it there through 10-17: 14 jobs on
+  the main tree, which is how forge's checkout ended up on a task branch.
+- Each admission pass now re-reads `agent.config` for folders with queued jobs
+  (`refreshQueuedAgents` → `readAgentFolders` in `server/agents.js`, `queuedAgentPaths` in
+  db-worker) and upserts those rows before `getQueuedJobs` runs. No tree walk; no prune.
+- The boot scan's errors are logged instead of swallowed. Forge's scans had been failing silently
+  since 10-14 (the array-`command` bind bug above), freezing its agents cache.
+- Tasks already pinned to a folder by an earlier folder session stay there by design; that rule
+  is unchanged.
+
+## File links open on every machine: relative links + foreign-root translation (2026-10-20)
+
+- A task link to a workspace file only opened on the machine that wrote it: the laptop keeps
+  projects under `~/IdeaProjects`, a fleet box under `~/workspaces`, absolute paths from the other
+  machine opened as a blank page, and relative paths resolved against the server's own folder.
+- `server/files.js` now resolves every file path through `resolveLinkPath` before the allowed-root
+  check (so reads, writes, `exists`, `content` and the Markdown style lookup all get it):
+  - a relative path (`projects/shi/desk.md`) resolves against `workspaceRoot` first, then the
+    other configured roots; first one where the file exists wins, else `workspaceRoot` (so a new
+    file can still be written);
+  - an absolute path that does not exist here and sits under `/Users/<u>/` or `/home/<u>/`
+    `IdeaProjects|workspaces/` is retried under each local root by its remainder, so older links
+    from either machine keep working.
+  The allowed-root check still runs on the result, so `..` cannot escape a root.
+- The MCP `links` descriptions on `create_task`/`update_task` now tell agents to write workspace
+  files relative to the workspace root.
+
+## Agent scan no longer fails on an argv-array `command` (2026-10-19)
+
+- An `agent.config` using the array form of `command` made every agent scan throw `SQLite3 can
+  only bind numbers, strings, bigints, buffers, and null`, so Terminals (and Settings → Agents)
+  showed no agents at all. `server/agents.js` already stored the array as JSON text for the agents
+  row; the capability builder in `server/capability-registry.js` passed the raw array to the
+  capabilities upsert. It now stores it as JSON text too.
+
+## Recurring autorun tasks no longer wedge after one unfinished run (2026-10-19)
+
+- `getAutorunTasks()` excluded any task that had *ever* had an agent job. Correct for one-shot
+  tasks, wrong for recurring ones: a recurring row only spawns its next occurrence when completed,
+  so a run killed before completing it (60-minute timeout on a weekly site-editor task) left the
+  row active with one job, and autorun skipped it forever with no error anywhere.
+- Recurring tasks are now blocked only by a queued/running job or a job created today (local day,
+  compared against UTC `created_at`). An unfinished occurrence retries at most once a day at its
+  autorun time until something completes it; one-shot tasks keep the run-once rule.
+- On a headless box this matters more than on the desktop: `autoRolloverRecurring` (which would
+  skip an overdue occurrence and spawn the next) only runs when someone loads today's view.
+
 ## Heartbeats: cron schedules with a timezone and weekday selection (2026-10-18)
 
 - New optional `heartbeats.cron_expression` (standard 5-field) and `timezone` (IANA) columns, added

@@ -170,7 +170,9 @@ export function buildCapabilityFromAgentConfig({ agentDir, config, configText, r
     kind: capabilityBlock.kind || 'agent',
     context: config.context || null,
     project: config.project || null,
-    command: config.command || null,
+    // An argv-array command is stored as JSON text, as the agents row does (server/agents.js);
+    // binding the array itself throws and fails the whole scan.
+    command: Array.isArray(config.command) ? JSON.stringify(config.command) : (config.command || null),
     active: boolInt(capabilityBlock.active, true),
     provider_support: arrayValue(capabilityBlock.provider_support),
     trigger_phrases: hasCapabilityBlock && explicitTriggers.length ? explicitTriggers : inferredTriggers,

@@ -18,38 +18,8 @@ export async function scanAgents(root, excludeFolders = []) {
     }
 
     if (entries.some(e => e.isFile() && e.name === 'agent.config')) {
-      const configPath = path.join(dir, 'agent.config')
-      try {
-        const configText = await fs.promises.readFile(configPath, 'utf8')
-        const cfg = JSON.parse(configText)
-        const rel = path.relative(root, dir)
-        const agent = {
-          path: dir,
-          name: cfg.name || path.basename(dir),
-          context: cfg.context || null,
-          project: cfg.project || null,
-          description: cfg.description || null,
-          command: Array.isArray(cfg.command) ? JSON.stringify(cfg.command) : (cfg.command || null),
-          coding: !!cfg.coding,
-          concurrencyKey: typeof cfg.concurrency_key === 'string' && cfg.concurrency_key.trim() ? cfg.concurrency_key.trim() : null,
-          worktrees: cfg.worktrees === true,
-          relativePath: rel,
-          folder: topFolder,
-        }
-        agent.capability = buildCapabilityFromAgentConfig({
-          agentDir: dir,
-          config: cfg,
-          configText,
-          root,
-          relativePath: rel,
-          folder: topFolder,
-        })
-        results.push(agent)
-      } catch (err) {
-        // The file was listed a moment ago, so ENOENT only means it was removed mid-scan. Invalid
-        // JSON or an unreadable file used to drop the agent from the registry without a trace.
-        if (err?.code !== 'ENOENT') console.error(`[agents] skipping agent at ${dir}: could not load ${configPath}: ${err.message}`)
-      }
+      const agent = await loadAgentFolder(dir, root, topFolder)
+      if (agent) results.push(agent)
     }
 
     for (const entry of entries) {
@@ -64,5 +34,60 @@ export async function scanAgents(root, excludeFolders = []) {
   }
 
   await walk(root, null)
+  return results
+}
+
+// One agent folder's registry entry from its agent.config, or null when it cannot be loaded.
+async function loadAgentFolder(dir, root, topFolder) {
+  const configPath = path.join(dir, 'agent.config')
+  try {
+    const configText = await fs.promises.readFile(configPath, 'utf8')
+    const cfg = JSON.parse(configText)
+    const rel = path.relative(root, dir)
+    const agent = {
+      path: dir,
+      name: cfg.name || path.basename(dir),
+      context: cfg.context || null,
+      project: cfg.project || null,
+      description: cfg.description || null,
+      command: Array.isArray(cfg.command) ? JSON.stringify(cfg.command) : (cfg.command || null),
+      coding: !!cfg.coding,
+      concurrencyKey: typeof cfg.concurrency_key === 'string' && cfg.concurrency_key.trim() ? cfg.concurrency_key.trim() : null,
+      worktrees: cfg.worktrees === true,
+      relativePath: rel,
+      folder: topFolder,
+    }
+    agent.capability = buildCapabilityFromAgentConfig({
+      agentDir: dir,
+      config: cfg,
+      configText,
+      root,
+      relativePath: rel,
+      folder: topFolder,
+    })
+    return agent
+  } catch (err) {
+    // A scan lists the file a moment before reading it, so ENOENT only means it was removed in
+    // between (or, for readAgentFolders, that the folder has none). Invalid JSON or an unreadable
+    // file used to drop the agent from the registry without a trace.
+    if (err?.code !== 'ENOENT') console.error(`[agents] skipping agent at ${dir}: could not load ${configPath}: ${err.message}`)
+    return null
+  }
+}
+
+/**
+ * Registry entries for specific folders under `root`, without walking the tree. Job admission uses
+ * this to re-read the agent.config of folders with queued jobs, so `worktrees` and
+ * `concurrency_key` reflect the file on disk rather than the last full scan. Folders outside `root`
+ * are skipped: a full scan would not register them either.
+ */
+export async function readAgentFolders(root, dirs) {
+  const results = []
+  for (const dir of new Set(dirs)) {
+    const rel = path.relative(root, dir)
+    if (rel.startsWith('..') || path.isAbsolute(rel)) continue
+    const agent = await loadAgentFolder(dir, root, rel ? rel.split(path.sep)[0] : null)
+    if (agent) results.push(agent)
+  }
   return results
 }

@@ -1059,6 +1059,9 @@ function updateProject(name, fields) {
 function upsertAgents(agents, opts = {}) {
   return syncScannedAgents(db, agents, { root: opts.root ?? null })
 }
+function queuedAgentPaths() {
+  return db.prepare(`SELECT DISTINCT agent_path FROM agent_jobs WHERE status = 'queued' AND agent_path IS NOT NULL`).pluck().all()
+}
 function listAgentsDb(filter = {}) {
   const conds = []; const params = {}
   if (filter.project !== undefined) { conds.push('project = @project'); params.project = filter.project }
@@ -1512,8 +1515,24 @@ function resetStuckJobs(bootBoundary = null, { ids = null, details = {} } = {}) 
   })()
   return { ok: true, orphaned }
 }
+// A one-shot task autoruns once, ever. A recurring task is one row per occurrence until it is
+// completed, so "ever" wedged it: a run that died before completing the task (timeout, OOM, crash)
+// never spawned the next occurrence, and the row's single job blocked autorun for good. A recurring
+// task is therefore blocked only by a job still in flight or one already launched today (local
+// day; created_at is UTC), so an unfinished occurrence retries at most once a day until it is done.
 function getAutorunTasks() {
-  return db.prepare(`SELECT t.* FROM tasks t WHERE t.agent_path IS NOT NULL AND t.agent_autorun = 1 AND t.status = 'active' AND (t.due_date IS NULL OR t.due_date <= date('now', 'localtime')) AND time('now', 'localtime') >= COALESCE(t.agent_autorun_time, '09:00') AND NOT EXISTS (SELECT 1 FROM agent_jobs j WHERE j.task_id = t.id)`).all()
+  return db.prepare(`
+    SELECT t.* FROM tasks t
+    WHERE t.agent_path IS NOT NULL AND t.agent_autorun = 1 AND t.status = 'active'
+      AND (t.due_date IS NULL OR t.due_date <= date('now', 'localtime'))
+      AND time('now', 'localtime') >= COALESCE(t.agent_autorun_time, '09:00')
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_jobs j WHERE j.task_id = t.id
+          AND (t.recurrence IS NULL
+            OR j.status IN ('queued', 'running')
+            OR j.created_at >= datetime('now', 'localtime', 'start of day', 'utc'))
+      )
+  `).all()
 }
 function insertAutorunJob(taskId, agentPath, prompt) {
   const fullPrompt = `You are an agent running inside Qalatra. Task ID: ${taskId}\nIf you create any output files, save them to ${agentPath}/output/ and include their file paths in your response. Qalatra will auto-attach existing mentioned files back to this task.\n${prompt}`
@@ -1675,7 +1694,7 @@ const METHODS = {
   listContexts, createContext, updateContext, deleteContext,
   getProjectSummaries, getProjectDetail,
   listProjects, createProjectExplicit, updateProject, renameProject, setProjectContext, archiveProject, unarchiveProject, deleteProject,
-  upsertAgents, listAgentsDb,
+  upsertAgents, queuedAgentPaths, listAgentsDb,
   listCapabilitiesDb, getCapabilityDb, searchCapabilitiesDb,
   listHabits, getHabitHistory, createHabit, updateHabit, logHabit, unlogHabit,
   listAttachments, insertAttachment, getAttachment, deleteAttachment,

@@ -20,8 +20,34 @@ export function configuredRoots(settings = {}) {
   return [...new Set(roots.map(expandHome).filter(Boolean).map(r => path.resolve(r)))]
 }
 
+// A stored link is read on more than one machine: the laptop keeps projects under ~/IdeaProjects,
+// a fleet box under ~/workspaces. Links written against either root are translated to this
+// install's roots when the path as written does not exist here.
+const FOREIGN_ROOT = /^(?:\/Users\/[^/]+|\/home\/[^/]+)\/(?:IdeaProjects|workspaces)\/(.+)$/
+
+// workspaceRoot first, so a relative link resolves against it when the file exists in several roots.
+function linkRoots(settings) {
+  const primary = settings.workspaceRoot ? [path.resolve(expandHome(settings.workspaceRoot))] : []
+  return [...new Set([...primary, ...configuredRoots(settings)])]
+}
+
+// Relative links (projects/shi/desk.md) resolve against the workspace roots; an absolute link that
+// does not exist here is retried under each root by its path below the other machine's root. The
+// first candidate that exists wins; otherwise a relative link lands in the primary root (so a new
+// file can be written there) and an absolute one is left as written.
+function resolveLinkPath(filePath, settings) {
+  const expanded = expandHome(filePath)
+  let rest = null
+  if (!path.isAbsolute(expanded)) rest = expanded
+  else if (!fs.existsSync(expanded)) rest = FOREIGN_ROOT.exec(expanded)?.[1] ?? null
+  if (rest === null) return path.resolve(expanded)
+  const candidates = linkRoots(settings).map(root => path.resolve(root, rest))
+  return candidates.find(candidate => fs.existsSync(candidate))
+    ?? (path.isAbsolute(expanded) ? path.resolve(expanded) : candidates[0] ?? path.resolve(expanded))
+}
+
 function assertAllowed(filePath, settings = {}) {
-  const resolved = path.resolve(expandHome(filePath))
+  const resolved = resolveLinkPath(filePath, settings)
   const roots = configuredRoots(settings)
   const allowed = roots.some(root => resolved === root || resolved.startsWith(root + path.sep))
   if (!allowed) throw new Error(`Forbidden path: ${resolved}`)

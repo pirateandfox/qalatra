@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { spawn, spawnSync } from 'child_process'
 import { v4 as uuidv4 } from 'uuid'
-import { scanAgents } from './agents.js'
+import { readAgentFolders, scanAgents } from './agents.js'
 import { syncPendingAttachments } from './attachments.js'
 import { getRuntime, isKnownRuntime, inferRuntime, DEFAULT_RUNTIME, runtimeNames } from './agent-runtimes.js'
 import { createAgentWatchdog } from './agent-watchdog.js'
@@ -664,9 +664,11 @@ export function startBackgroundWorkers(ctx) {
       resolveOrphanedAtBoot([])
     })
   syncPendingAttachments(ctx).catch(() => {})
-  runAgentScan({ dbCall, loadSettings }).catch(() => {})
+  runAgentScan({ dbCall, loadSettings }).catch(err => console.error(`[agents] agent scan failed: ${err.message}`))
   setInterval(() => syncPendingAttachments(ctx).catch(() => {}), 5 * 60 * 1000)
-  setInterval(() => orphanedAtBoot.then(() => processAgentJobs({ dbCall, loadSettings, notify, dataDir: ctx.dataDir }))
+  setInterval(() => orphanedAtBoot
+    .then(() => refreshQueuedAgents({ dbCall, loadSettings }).catch(err => console.error(`[agents] queued agent refresh failed: ${err.message}`)))
+    .then(() => processAgentJobs({ dbCall, loadSettings, notify, dataDir: ctx.dataDir }))
     .catch(err => console.error(`[workers] admission pass failed: ${err.message}`)), 30_000)
   setInterval(() => autoRunAgents({ dbCall }).catch(() => {}), 5 * 60_000)
   // Per-task worktrees (agent.config `worktrees: true`) that ran nothing for worktreeIdleDays go,
@@ -681,10 +683,25 @@ export function startBackgroundWorkers(ctx) {
   setInterval(() => runDueHeartbeats({ dbCall }).catch(() => {}), 60_000)
 }
 
+const agentsRootFor = settings => settings.agentsRoot || settings.terminalCwd || process.env.HOME
+
+// getQueuedJobs decides worktree vs. folder and the concurrency key from the agents table, which a
+// full scan only refreshes at boot or from the UI. A folder that turned on `worktrees` therefore
+// kept running tasks in its main checkout until the next restart, and the first such run pinned
+// that task to the folder for good (its session lives there). Re-reading the agent.config of
+// folders with queued jobs before each admission pass keeps that decision current, cheaply.
+export async function refreshQueuedAgents({ dbCall, loadSettings }) {
+  const root = agentsRootFor(loadSettings())
+  const dirs = await dbCall('queuedAgentPaths')
+  if (!root || !dirs.length) return
+  const agents = await readAgentFolders(root, dirs)
+  if (agents.length) await dbCall('upsertAgents', agents)
+}
+
 export async function runAgentScan({ dbCall, loadSettings }) {
   const settings = loadSettings()
   const excludeFolders = (settings.agentExcludeFolders ?? '').split(',').map(f => f.trim()).filter(Boolean)
-  const root = settings.agentsRoot || settings.terminalCwd || process.env.HOME
+  const root = agentsRootFor(settings)
   if (!root) return []
   const agents = await scanAgents(root, excludeFolders)
   await dbCall('upsertAgents', agents, { root })
