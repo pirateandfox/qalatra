@@ -1,5 +1,29 @@
 # Qalatra — Evolution Notes
 
+## A missed recurring occurrence stays until done; occurrences share a series_id (2026-10-21)
+
+- `autoRolloverRecurring` (db-worker and the MCP briefing) marked every overdue recurring task
+  done/skipped and spawned the next one, whether or not the work was finished. Right for routines,
+  wrong for work: an agent's weekly task gating unreviewed PRs was closed out unseen, and its
+  `ai_context` (where the state lived) went with it. It also stamped `last_touched_human` though no
+  person touched it, so auto-skips showed in "Done today".
+- New `tasks.missed_occurrence`: NULL/`'keep'` (default) leaves a missed occurrence active until it
+  is completed or skipped; `'skip'` keeps the old roll-over. Settable from the detail panel ("If
+  missed: Keep until done / Skip to next"), REST create/update and MCP `create_task`/`update_task`;
+  carried to every later occurrence. The rollover now sets `updated_at` only. Context is
+  deliberately not copied between occurrences.
+- Completing or skipping an overdue occurrence in db-worker now advances the next date to today or
+  later (MCP already did), so a long-overdue keep task does not spawn an occurrence that is already
+  overdue.
+- New `tasks.series_id`: the first occurrence's id, carried by every spawned occurrence. `get_task`
+  on a finished occurrence returns `current_occurrence_id`; `search_tasks` takes `series_id`.
+  Existing chains are not backfilled; they gain a series_id from the next spawn on.
+- A task with a start date and no due date is now listed on its start date in a future day's view.
+  Today's view hides it until then and the future view matched `due_date` only, so it appeared in
+  no date view at all.
+- Behavior change for existing tasks: every recurring task is now keep unless set to skip. Covered
+  by `test:recurrence-missed` (in `ci:server`); the older rollover tests now set `'skip'`.
+
 ## Agent jobs no longer inherit the server's NODE_ENV / ELECTRON_RUN_AS_NODE (2026-10-21)
 
 - The server units (`scripts/qalatra-server.service`, `install-linux-server.sh`, `serviceEnv()` in

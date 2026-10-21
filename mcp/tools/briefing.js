@@ -19,16 +19,18 @@ function spawnRecurrence(db, task, nextDate, now, reason) {
     spawnedDue = null;
   }
   // time_estimate + inbox preserved across respawn (bug C15 — this copy was missed; parity with db-worker).
-  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context, time_estimate, inbox, agent_path, agent_resume, agent_autorun, agent_autorun_time) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(uuidv4(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, now, spawnedStart, spawnedDue, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence, appendAiContext(null, reason), task.time_estimate ?? null, task.inbox ?? 0, task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00');
+  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context, time_estimate, inbox, agent_path, agent_resume, agent_autorun, agent_autorun_time, missed_occurrence, series_id) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(uuidv4(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, now, spawnedStart, spawnedDue, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence, appendAiContext(null, reason), task.time_estimate ?? null, task.inbox ?? 0, task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00', task.missed_occurrence ?? null, task.series_id ?? task.id);
 }
 
+// Only tasks set to skip a missed occurrence roll over (matches db-worker); by default a missed
+// occurrence stays active until someone completes or skips it.
 function autoRolloverRecurring(db) {
   const t = today();
   // Exclude events — they must not be auto-skipped/respawned (bug C4; matches db-worker).
   const stale = db.prepare(`
     SELECT * FROM tasks
-    WHERE status = 'active' AND task_type != 'event' AND recurrence IS NOT NULL
+    WHERE status = 'active' AND task_type != 'event' AND recurrence IS NOT NULL AND missed_occurrence = 'skip'
       AND (
         (due_date IS NOT NULL AND due_date < ?)
         OR (due_date IS NULL AND start_date IS NOT NULL AND start_date < ?)
@@ -42,7 +44,8 @@ function autoRolloverRecurring(db) {
   // wins the claim (changes===1); the loser skips the spawn.
   const rollover = db.transaction((tasks) => {
     for (const task of tasks) {
-      const claim = db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ? AND status = 'active'`)
+      // updated_at, not last_touched_human: no person touched it.
+      const claim = db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', updated_at = ?, ai_context = ? WHERE id = ? AND status = 'active'`)
         .run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id);
       if (claim.changes !== 1) continue;
       // Advance from the task's own schedule anchor (not today) to preserve cadence alignment.

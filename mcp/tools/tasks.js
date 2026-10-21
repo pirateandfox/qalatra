@@ -9,6 +9,25 @@ const TASK_BODY_FIELDS = ['description', 'ai_context', 'notes'];
 const SEARCH_TASK_FIELDS = 'id,title,status,task_type,context,project,due_date,surface_after,my_priority,assigned_agent,agent_path';
 const AGENT_TASK_FIELDS = 'id,title,status,task_type,context,project,due_date,my_priority,assigned_agent,agent_path,job_id,job_status,job_started_at,job_completed_at';
 
+// 'keep' (default, stored as NULL) leaves a missed occurrence active until it is completed or
+// skipped; 'skip' lets the briefing roll it over. Mirrors db-worker normalizeMissedOccurrence.
+function normalizeMissedOccurrence(value) {
+  if (value == null || value === '' || value === 'keep') return null;
+  if (value === 'skip') return 'skip';
+  throw new Error("missed_occurrence must be 'keep' or 'skip'");
+}
+
+// The series' active occurrence when `task` is a finished occurrence of a recurring task. The
+// series is keyed by its first occurrence's id (series_id on every later one).
+function currentOccurrenceId(db, task) {
+  if (!task.recurrence || task.status === 'active') return null;
+  const series = task.series_id ?? task.id;
+  return db.prepare(`SELECT id FROM tasks WHERE (series_id = ? OR id = ?) AND status = 'active' AND id != ? ORDER BY created_at DESC LIMIT 1`)
+    .get(series, series, task.id)?.id ?? null;
+}
+
+const MISSED_OCCURRENCE_DESCRIPTION = 'Recurring tasks only. What happens when an occurrence passes its date undone: "keep" (default) leaves it active until it is completed or skipped, "skip" moves on to the next occurrence automatically. Use "skip" only for routines where a missed day does not matter.';
+
 function spawnNextOccurrence(db, task, now) {
   if (!task.recurrence) return null;
   // Advance from the task's due_date (or start_date) to today-or-future in one shot,
@@ -28,12 +47,12 @@ function spawnNextOccurrence(db, task, now) {
       id, title, description, notes, links, status, my_priority, energy_required, context, project,
       tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline,
       task_type, recurrence, ai_context, time_estimate, inbox,
-      agent_path, agent_resume, agent_autorun, agent_autorun_time
+      agent_path, agent_resume, agent_autorun, agent_autorun_time, missed_occurrence, series_id
     ) VALUES (
       @id, @title, @description, @notes, @links, 'active', @my_priority, @energy_required, @context, @project,
       @tags, @source, @source_url, @created_at, @updated_at, @last_reviewed_at, @start_date, @due_date, @hard_deadline,
       @task_type, @recurrence, @ai_context, @time_estimate, @inbox,
-      @agent_path, @agent_resume, @agent_autorun, @agent_autorun_time
+      @agent_path, @agent_resume, @agent_autorun, @agent_autorun_time, @missed_occurrence, @series_id
     )
   `).run({
     id:                next_task_id,
@@ -64,6 +83,8 @@ function spawnNextOccurrence(db, task, now) {
     agent_resume:      task.agent_resume ?? 1,
     agent_autorun:     task.agent_autorun ?? 0,
     agent_autorun_time: task.agent_autorun_time ?? '09:00',
+    missed_occurrence: task.missed_occurrence ?? null,
+    series_id:         task.series_id ?? task.id,
   });
   return { next_task_id, next_start_date: nextDate };
 }
@@ -104,7 +125,8 @@ export const toolDefs = [
         event_time:      { type: 'string', description: 'HH:MM start time for events (e.g. 14:30). Null = all-day.' },
         end_time:        { type: 'string', description: 'HH:MM end time for events. If omitted, defaults to 1hr after event_time.' },
         parent_id:       { type: 'string', description: 'ID of parent task (for subtasks)' },
-        recurrence:      { type: 'string', description: 'daily | weekdays | weekly | monthly — auto-respawns on completion. Also accepts full RRULE strings for precision (e.g. FREQ=WEEKLY;BYDAY=MO for every Monday, FREQ=MONTHLY;BYMONTHDAY=1 for 1st of month).' },
+        recurrence:      { type: 'string', description: 'daily | weekdays | weekly | monthly — auto-respawns on completion. Also accepts full RRULE strings for precision (e.g. FREQ=WEEKLY;BYDAY=MO for every Monday, FREQ=MONTHLY;BYMONTHDAY=1 for 1st of month). Each occurrence is a new task; series_id (the first occurrence\'s id) is shared by all of them.' },
+        missed_occurrence: { type: 'string', enum: ['keep', 'skip'], description: MISSED_OCCURRENCE_DESCRIPTION },
         agent_path:      { type: 'string', description: 'Absolute path to the agent folder to dispatch this task to.' },
         assigned_agent:  { type: 'string', description: 'Human-readable name of the agent assigned to this task (e.g. "Code Planner", "Research Agent"). Used to filter tasks by agent.' },
         links:           { type: 'array', items: { type: 'string' }, description: 'Array of URLs or file paths to attach to the task. Write workspace files relative to the workspace root (e.g. "projects/shi/desk.md") so the link opens on every machine.' },
@@ -140,6 +162,7 @@ export const toolDefs = [
         event_time:      { type: 'string', description: 'HH:MM start time for events. Null = all-day.' },
         end_time:        { type: 'string', description: 'HH:MM end time for events. Defaults to 1hr after event_time if omitted.' },
         recurrence:      { type: 'string', description: 'daily | weekdays | weekly | monthly | null to clear. Also accepts full RRULE strings (e.g. FREQ=WEEKLY;BYDAY=MO for every Monday).' },
+        missed_occurrence: { type: 'string', enum: ['keep', 'skip'], description: MISSED_OCCURRENCE_DESCRIPTION },
         parent_id:       { type: 'string', description: 'ID of parent task (for subtasks). Pass empty string to clear.' },
         links:           { type: 'array', items: { type: 'object' }, description: 'Array of link objects e.g. [{"url": "projects/shi/desk.md"}]. Replaces existing links. Write workspace files relative to the workspace root so the link opens on every machine.' },
         agent_path:          { type: 'string', description: 'Absolute path to the agent folder for this task. Pass empty string to clear.' },
@@ -153,7 +176,7 @@ export const toolDefs = [
   },
   {
     name: 'get_task',
-    description: 'Get a single task by ID. description, ai_context and notes are omitted by default; their sizes are reported under `omitted`. Pass fields="description" (or "*") when the plan text is needed.',
+    description: 'Get a single task by ID. description, ai_context and notes are omitted by default; their sizes are reported under `omitted`. Pass fields="description" (or "*") when the plan text is needed. Each occurrence of a recurring task has its own id: when task_id is a finished occurrence, current_occurrence_id names the series\' active one.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -232,6 +255,7 @@ export const toolDefs = [
         tags:           { type: 'string' },
         assigned_agent: { type: 'string', description: 'Filter by assigned_agent name (partial match, case-insensitive)' },
         agent_path:     { type: 'string', description: 'Filter by agent_path folder (partial match, e.g. "muzebook/agents/plan")' },
+        series_id:      { type: 'string', description: 'Every occurrence of a recurring task: pass the series_id (or the id of the series\' first occurrence)' },
         limit:          { type: 'integer', description: 'Default 20' },
         fields:         fieldsSchema('id,title,status,due_date,my_priority', SEARCH_TASK_FIELDS),
       },
@@ -404,12 +428,12 @@ export const handlers = {
         id, title, description, status, my_priority, energy_required, context, project, tags,
         source, source_id, source_url, source_priority, due_date, hard_deadline, start_date, surface_after,
         created_at, updated_at, last_reviewed_at, ai_context, task_type, event_time, end_time, parent_id, recurrence,
-        agent_path, assigned_agent, links, inbox, time_estimate
+        agent_path, assigned_agent, links, inbox, time_estimate, missed_occurrence
       ) VALUES (
         @id, @title, @description, @status, @my_priority, @energy_required, @context, @project, @tags,
         @source, @source_id, @source_url, @source_priority, @due_date, @hard_deadline, @start_date, @surface_after,
         @created_at, @updated_at, @last_reviewed_at, @ai_context, @task_type, @event_time, @end_time, @parent_id, @recurrence,
-        @agent_path, @assigned_agent, @links, @inbox, @time_estimate
+        @agent_path, @assigned_agent, @links, @inbox, @time_estimate, @missed_occurrence
       )
     `).run({
       id,
@@ -443,6 +467,7 @@ export const handlers = {
       links:           args.links ? JSON.stringify(args.links) : null,
       inbox:           args.inbox ? 1 : 0,
       time_estimate:   args.time_estimate   ?? null,
+      missed_occurrence: normalizeMissedOccurrence(args.missed_occurrence),
     });
     // Register the project so it appears in list/summary views (bug C22): those read exclusively
     // FROM the projects table, whose backfill runs only at server startup. Mirror db-worker.
@@ -464,7 +489,9 @@ export const handlers = {
       'context', 'project', 'tags', 'source_url', 'due_date', 'hard_deadline', 'start_date', 'surface_after',
       'task_type', 'event_time', 'end_time', 'recurrence', 'parent_id', 'agent_path',
       'assigned_agent', 'agent_autorun', 'agent_autorun_time', 'inbox', 'time_estimate',
+      'missed_occurrence',
     ];
+    if (args.missed_occurrence !== undefined) args.missed_occurrence = normalizeMissedOccurrence(args.missed_occurrence);
 
     const updates = {};
     const setClauses = [];
@@ -538,6 +565,7 @@ export const handlers = {
     const db = openDb();
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(args.task_id);
     if (!task) throw new Error(`Task not found: ${args.task_id}`);
+    task.current_occurrence_id = currentOccurrenceId(db, task);
     return withoutBodies(enrichTaskRows(db, [task])[0], args.fields, TASK_BODY_FIELDS);
   },
 
@@ -646,6 +674,10 @@ export const handlers = {
     if (args.task_type) {
       conditions.push('task_type = @task_type');
       params.task_type = args.task_type;
+    }
+    if (args.series_id) {
+      conditions.push('(series_id = @series_id OR id = @series_id)');
+      params.series_id = args.series_id;
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

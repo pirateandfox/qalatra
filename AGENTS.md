@@ -171,7 +171,18 @@ The only exception: **destructive schema changes** (dropping columns, renaming e
 
 ## Recurrence
 
-Stored as RRULE strings (e.g. `FREQ=MONTHLY;BYMONTHDAY=1`). Legacy shorthands (`daily`, `weekdays`, `weekly`, `monthly`) still work. On complete/skip, next occurrence auto-spawns with `due_date = nextDate`. `nextRecurrenceDate` and `rruleToText` live in `mcp/db.js`.
+Stored as RRULE strings (e.g. `FREQ=MONTHLY;BYMONTHDAY=1`). Legacy shorthands (`daily`, `weekdays`, `weekly`, `monthly`) still work. On complete/skip, next occurrence auto-spawns with `due_date = nextDate`, advanced to today or later so completing a long-overdue occurrence never spawns one that is already overdue. `nextRecurrenceDate` and `rruleToText` live in `mcp/db.js`.
+
+**A missed occurrence stays until someone completes or skips it.** `missed_occurrence` decides what
+happens when an occurrence passes its date undone: NULL/`'keep'` (the default) leaves it active, so
+unfinished work is never marked done unseen; `'skip'` lets `autoRolloverRecurring` (db-worker and
+the MCP briefing, run when today's view loads) mark it skipped and spawn the next one. The rollover
+sets `updated_at`, never `last_touched_human`. `ai_context` is not copied between occurrences.
+
+**Each occurrence is a new task.** `series_id` is the first occurrence's id, carried by every later
+one (the first has NULL; it *is* the series). `getTask` / MCP `get_task` on a finished occurrence
+return `current_occurrence_id`, and `search_tasks` takes `series_id`, so an agent holding an old id
+can find the current one.
 
 **Never set `surface_after` on recurring tasks** — use only `due_date`. Setting `surface_after` on a recurring task causes it to appear in "Waking Up" incorrectly.
 

@@ -27,8 +27,8 @@ try {
   const db = openDb()
 
   const id = 'roll-1'
-  db.prepare(`INSERT INTO tasks (id, title, status, context, due_date, task_type, recurrence)
-    VALUES (?, 'overdue daily', 'active', 'personal', '2020-01-01', 'task', 'daily')`).run(id)
+  db.prepare(`INSERT INTO tasks (id, title, status, context, due_date, task_type, recurrence, missed_occurrence)
+    VALUES (?, 'overdue daily', 'active', 'personal', '2020-01-01', 'task', 'daily', 'skip')`).run(id)
 
   handlers.morning_briefing()
   handlers.morning_briefing() // second run must NOT create a duplicate
@@ -41,16 +41,16 @@ try {
 
   // Compare-and-set: a task no longer 'active' is never re-claimed/spawned. Insert one that is
   // already done+overdue+recurring; it must not be selected or spawned.
-  db.prepare(`INSERT INTO tasks (id, title, status, context, due_date, task_type, recurrence)
-    VALUES ('roll-done', 'already done', 'done', 'personal', '2020-01-01', 'task', 'daily')`).run()
+  db.prepare(`INSERT INTO tasks (id, title, status, context, due_date, task_type, recurrence, missed_occurrence)
+    VALUES ('roll-done', 'already done', 'done', 'personal', '2020-01-01', 'task', 'daily', 'skip')`).run()
   handlers.morning_briefing()
   const doneSpawn = db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE ai_context LIKE ?").get('%Auto-recurred from task roll-done%').c
   check('a non-active recurring task is never spawned', doneSpawn, 0)
 
   // Field preservation through the briefing spawn path (bug C15 — this copy was fixed last):
   // time_estimate and inbox must carry over to the respawned occurrence.
-  db.prepare(`INSERT INTO tasks (id, title, status, context, due_date, task_type, recurrence, time_estimate, inbox)
-    VALUES ('roll-est', 'estimated recurring', 'active', 'personal', '2020-01-01', 'task', 'daily', 90, 1)`).run()
+  db.prepare(`INSERT INTO tasks (id, title, status, context, due_date, task_type, recurrence, time_estimate, inbox, missed_occurrence)
+    VALUES ('roll-est', 'estimated recurring', 'active', 'personal', '2020-01-01', 'task', 'daily', 90, 1, 'skip')`).run()
   handlers.morning_briefing()
   const spawned = db.prepare("SELECT time_estimate, inbox FROM tasks WHERE ai_context LIKE ?").get('%Auto-recurred from task roll-est%')
   check('respawn preserves time_estimate', spawned?.time_estimate, 90)

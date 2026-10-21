@@ -899,6 +899,19 @@ export default function DetailPanel({ taskId, onClose, onMutate, onDelete, onSel
               current={task.recurrence}
               onChange={r => setTask(t => t ? { ...t, recurrence: r } : t)}
             />
+            {task.recurrence && (
+              <div className="detail-field-row">
+                <span className="detail-field-label">If missed</span>
+                <select
+                  className="detail-select"
+                  value={task.missed_occurrence === 'skip' ? 'skip' : 'keep'}
+                  onChange={e => patch({ missed_occurrence: e.target.value === 'skip' ? 'skip' : null })}
+                >
+                  <option value="keep">Keep until done</option>
+                  <option value="skip">Skip to next</option>
+                </select>
+              </div>
+            )}
 
             {/* Subtasks */}
             {subtasks.length > 0 && (

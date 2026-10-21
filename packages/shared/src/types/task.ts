@@ -30,6 +30,10 @@ export interface Task {
   task_type: 'task' | 'event' | 'reminder' | 'coding' | 'reading'
   event_time: string | null
   recurrence: string | null
+  /** Recurring tasks: 'skip' rolls a missed occurrence over; null (or 'keep') keeps it until done. */
+  missed_occurrence?: 'keep' | 'skip' | null
+  /** The first occurrence's id, shared by every later occurrence of a recurring task. */
+  series_id?: string | null
   links: string // JSON array string
   ai_context: string | null
   created_at: string

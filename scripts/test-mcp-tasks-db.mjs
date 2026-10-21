@@ -48,13 +48,13 @@ try {
   // ── C4: morning_briefing rollover preserves fields and skips events ──
   const links = JSON.stringify([{ url: 'https://example.com', title: 'ref' }])
   const recId = 'rec-task-1'
-  db.prepare(`INSERT INTO tasks (id, title, notes, links, status, context, due_date, task_type, recurrence, agent_path, agent_resume, agent_autorun, agent_autorun_time)
-    VALUES (?, ?, ?, ?, 'active', 'personal', '2020-01-01', 'task', 'daily', '/agents/thing', 1, 1, '09:00')`)
+  db.prepare(`INSERT INTO tasks (id, title, notes, links, status, context, due_date, task_type, recurrence, agent_path, agent_resume, agent_autorun, agent_autorun_time, missed_occurrence)
+    VALUES (?, ?, ?, ?, 'active', 'personal', '2020-01-01', 'task', 'daily', '/agents/thing', 1, 1, '09:00', 'skip')`)
     .run(recId, 'overdue recurring', 'keep these notes', links)
 
   const evId = 'rec-event-1'
-  db.prepare(`INSERT INTO tasks (id, title, status, context, due_date, task_type, recurrence)
-    VALUES (?, ?, 'active', 'personal', '2020-01-01', 'event', 'daily')`)
+  db.prepare(`INSERT INTO tasks (id, title, status, context, due_date, task_type, recurrence, missed_occurrence)
+    VALUES (?, ?, 'active', 'personal', '2020-01-01', 'event', 'daily', 'skip')`)
     .run(evId, 'overdue recurring event')
 
   briefingHandlers.morning_briefing()

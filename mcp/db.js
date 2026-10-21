@@ -222,6 +222,10 @@ function initSchema(db) {
   // MCP-only DB. An orchestrated task (orchestrator IS NOT NULL) is never the owner's to-do.
   if (!existingCols.includes('orchestrator'))       db.exec('ALTER TABLE tasks ADD COLUMN orchestrator TEXT');
   if (!existingCols.includes('orchestrator_ref'))   db.exec('ALTER TABLE tasks ADD COLUMN orchestrator_ref TEXT');
+  // Recurring tasks: 'skip' lets a missed occurrence roll over; NULL/'keep' keeps it until done.
+  // series_id is the first occurrence's id. Mirrors db-worker's migration.
+  if (!existingCols.includes('missed_occurrence'))  db.exec('ALTER TABLE tasks ADD COLUMN missed_occurrence TEXT');
+  if (!existingCols.includes('series_id'))          db.exec('ALTER TABLE tasks ADD COLUMN series_id TEXT');
   db.exec(`UPDATE tasks SET last_reviewed_at = COALESCE(last_touched_human, created_at, datetime('now')) WHERE last_reviewed_at IS NULL`);
 
   // Migrations for contexts table columns added after initial schema

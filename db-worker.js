@@ -294,6 +294,13 @@ function migrate() {
   tryAlter('ALTER TABLE agent_jobs ADD COLUMN resume_session INTEGER NOT NULL DEFAULT 1')
   tryAlter('ALTER TABLE tasks ADD COLUMN orchestrator TEXT')
   tryAlter('ALTER TABLE tasks ADD COLUMN orchestrator_ref TEXT')
+  // Recurring tasks: what happens to an occurrence that passes its date undone. NULL/'keep' leaves
+  // it active until someone completes or skips it; 'skip' rolls it over (autoRolloverRecurring).
+  // series_id is the first occurrence's id, carried by every later one, so a holder of any
+  // occurrence's id can find the current one.
+  tryAlter('ALTER TABLE tasks ADD COLUMN missed_occurrence TEXT')
+  tryAlter('ALTER TABLE tasks ADD COLUMN series_id TEXT')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_series_id ON tasks(series_id) WHERE series_id IS NOT NULL')
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_jobs_external_ref ON agent_jobs(external_ref) WHERE external_ref IS NOT NULL')
   db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_orchestrator ON tasks(orchestrator, orchestrator_ref)')
   // A task an orchestrator drives is a coding task, always: the orchestrator is its system of
@@ -475,9 +482,11 @@ function stampAgentJobs(...arrays) {
   for (const arr of arrays) for (const t of arr) { if (map[t.id]) t.agent_job_status = map[t.id] }
 }
 
+// Only tasks set to skip a missed occurrence roll over; by default a missed occurrence stays
+// active until someone completes or skips it, so unfinished work is never marked done unseen.
 function autoRolloverRecurring() {
   const t = today()
-  const stale = db.prepare(`SELECT * FROM tasks WHERE status = 'active' AND task_type != 'event' AND recurrence IS NOT NULL AND ((due_date IS NOT NULL AND due_date < ?) OR (due_date IS NULL AND start_date IS NOT NULL AND start_date < ?))`).all(t, t)
+  const stale = db.prepare(`SELECT * FROM tasks WHERE status = 'active' AND task_type != 'event' AND recurrence IS NOT NULL AND missed_occurrence = 'skip' AND ((due_date IS NOT NULL AND due_date < ?) OR (due_date IS NULL AND start_date IS NOT NULL AND start_date < ?))`).all(t, t)
   const now = nowIso()
   // Transaction + compare-and-set claim (bug C12): the MCP briefing runs the same rollover on a
   // separate connection, so two concurrent runs can both read a task as 'active' and both spawn.
@@ -485,19 +494,27 @@ function autoRolloverRecurring() {
   // (changes===0) skips the spawn. Also prevents cascade duplication across repeated UI refreshes.
   const rollover = db.transaction((tasks) => {
     for (const task of tasks) {
-      const claim = db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, ai_context = ? WHERE id = ? AND status = 'active'`).run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id)
+      // updated_at, not last_touched_human: no person touched it.
+      const claim = db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', updated_at = ?, ai_context = ? WHERE id = ? AND status = 'active'`).run(now, appendAiContext(task.ai_context, 'Auto-skipped: overdue recurring task.'), task.id)
       if (claim.changes !== 1) continue
-      // Advance all the way to today-or-future in one shot to preserve cadence alignment.
-      let baseDate = task.due_date ?? task.start_date ?? t
-      let nextDate = nextRecurrenceDate(baseDate, task.recurrence)
-      while (nextDate && nextDate < t) {
-        baseDate = nextDate
-        nextDate = nextRecurrenceDate(baseDate, task.recurrence)
-      }
+      const nextDate = nextOccurrenceDate(task)
       if (nextDate) spawnRecurrence(task, nextDate, now, `Auto-recurred from task ${task.id}`)
     }
   })
   rollover(stale)
+}
+
+// The next occurrence after this one, advanced to today or later in one step so the cadence stays
+// aligned and completing a long-overdue occurrence does not spawn one that is already overdue.
+function nextOccurrenceDate(task) {
+  const t = today()
+  let baseDate = task.due_date ?? task.start_date ?? t
+  let nextDate = nextRecurrenceDate(baseDate, task.recurrence)
+  while (nextDate && nextDate < t) {
+    baseDate = nextDate
+    nextDate = nextRecurrenceDate(baseDate, task.recurrence)
+  }
+  return nextDate
 }
 
 function spawnRecurrence(task, nextDate, now, reason) {
@@ -512,8 +529,8 @@ function spawnRecurrence(task, nextDate, now, reason) {
     spawnedDue = null
   }
   // time_estimate + inbox preserved across respawn (bug C15 — shared gap with the MCP copy).
-  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context, time_estimate, inbox, agent_path, agent_resume, agent_autorun, agent_autorun_time) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(crypto.randomUUID(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, now, spawnedStart, spawnedDue, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence, appendAiContext(null, reason), task.time_estimate ?? null, task.inbox ?? 0, task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00')
+  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context, time_estimate, inbox, agent_path, agent_resume, agent_autorun, agent_autorun_time, missed_occurrence, series_id) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(crypto.randomUUID(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, now, spawnedStart, spawnedDue, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence, appendAiContext(null, reason), task.time_estimate ?? null, task.inbox ?? 0, task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00', task.missed_occurrence ?? null, task.series_id ?? task.id)
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -558,7 +575,9 @@ function getTasksForDate(date) {
     stampAgentJobs(inbox, overdue, dueToday, active)
     return { view: 'today', date, inbox, overdue, dueToday, active, doneToday, timeSnoozed, events, reminders, habits }
   } else if (date > t) {
-    const scheduled   = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE strftime('%Y-%m-%d', due_date) = ? AND parent_id IS NULL AND task_type = 'task' AND orchestrator IS NULL AND status = 'active' ORDER BY ${ORDER}`).all(date))
+    // A task with only a start date is listed on that date: today's view hides it until then, so
+    // matching due_date alone left it in no date view at all.
+    const scheduled   = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE (strftime('%Y-%m-%d', due_date) = ? OR (due_date IS NULL AND strftime('%Y-%m-%d', start_date) = ?)) AND parent_id IS NULL AND task_type = 'task' AND orchestrator IS NULL AND status = 'active' ORDER BY ${ORDER}`).all(date, date))
     const timeSnoozed = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE strftime('%Y-%m-%d', due_date) = ? AND parent_id IS NULL AND task_type = 'task' AND orchestrator IS NULL AND status = 'snoozed' ORDER BY surface_after ASC`).all(date))
     const events      = attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE task_type = 'event' AND parent_id IS NULL AND status != 'done' AND due_date = ? ORDER BY event_time ASC NULLS LAST, created_at ASC`).all(date))
     const reminders   = db.prepare(`SELECT * FROM tasks WHERE task_type = 'reminder' AND parent_id IS NULL AND status != 'done' AND due_date = ? ORDER BY ${ORDER}`).all(date)
@@ -574,7 +593,17 @@ function getTasksForDate(date) {
 
 function getTask(id) {
   const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
-  return row ? attachTrustSignals([row])[0] : null
+  if (!row) return null
+  const current = currentOccurrenceId(row)
+  return attachTrustSignals([current ? { ...row, current_occurrence_id: current } : row])[0]
+}
+
+// For a finished occurrence of a recurring task, the series' active occurrence, if any. The series
+// is keyed by the first occurrence's id, which that occurrence itself holds only as its own id.
+function currentOccurrenceId(task) {
+  if (!task.recurrence || task.status === 'active') return null
+  const series = task.series_id ?? task.id
+  return db.prepare(`SELECT id FROM tasks WHERE (series_id = ? OR id = ?) AND status = 'active' AND id != ? ORDER BY created_at DESC LIMIT 1`).get(series, series, task.id)?.id ?? null
 }
 function getSubtasks(id) { return attachTrustSignals(db.prepare(`SELECT * FROM tasks WHERE parent_id = ? ORDER BY sort_order ASC NULLS LAST, created_at ASC`).all(id)) }
 function getBacklog() { return attachSubtasks(db.prepare(`SELECT * FROM tasks WHERE status = 'backlog' AND parent_id IS NULL ORDER BY context ASC, project ASC NULLS LAST, sort_order ASC NULLS LAST, created_at ASC`).all()) }
@@ -640,6 +669,13 @@ function searchTasks(args = {}) {
   return tasks
 }
 
+// 'keep' (the default, stored as NULL) or 'skip'; see the tasks.missed_occurrence migration.
+function normalizeMissedOccurrence(value) {
+  if (value == null || value === '' || value === 'keep') return null
+  if (value === 'skip') return 'skip'
+  throw validationError("missed_occurrence must be 'keep' or 'skip'")
+}
+
 function createTask(body) {
   if (!body.title) throw validationError('title required')
   const id = crypto.randomUUID(); const now = nowIso()
@@ -667,8 +703,9 @@ function createTask(body) {
     'description', 'notes', 'my_priority', 'energy_required', 'project', 'tags',
     'source_id', 'source_url', 'source_priority', 'due_date', 'start_date', 'surface_after',
     'event_time', 'end_time', 'parent_id', 'recurrence', 'agent_path', 'assigned_agent',
-    'agent_resume', 'agent_autorun', 'agent_autorun_time', 'time_estimate',
+    'agent_resume', 'agent_autorun', 'agent_autorun_time', 'time_estimate', 'missed_occurrence',
   ]
+  if (body.missed_occurrence !== undefined) body = { ...body, missed_occurrence: normalizeMissedOccurrence(body.missed_occurrence) }
   for (const f of PASSTHROUGH) {
     if (body[f] !== undefined) cols[f] = body[f] === '' ? null : body[f]
   }
@@ -688,7 +725,8 @@ function createTask(body) {
 function updateTask(id, body) {
   const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
   if (!existing) return { ok: false, reason: 'not_found' } // bug C16: 0-row PATCH must not report success
-  const MUTABLE = ['title','description','status','my_priority','energy_required','context','project','tags','source_url','due_date','hard_deadline','start_date','surface_after','task_type','event_time','end_time','recurrence','parent_id','agent_path','agent_resume','agent_autorun','agent_autorun_time','outcome','notes','inbox','time_estimate']
+  const MUTABLE = ['title','description','status','my_priority','energy_required','context','project','tags','source_url','due_date','hard_deadline','start_date','surface_after','task_type','event_time','end_time','recurrence','parent_id','agent_path','agent_resume','agent_autorun','agent_autorun_time','outcome','notes','inbox','time_estimate','missed_occurrence']
+  if (body.missed_occurrence !== undefined) body = { ...body, missed_occurrence: normalizeMissedOccurrence(body.missed_occurrence) }
   const now = nowIso()
   if (body.links !== undefined) db.prepare("UPDATE tasks SET links = ?, updated_at = datetime('now'), last_reviewed_at = ? WHERE id = ?").run(JSON.stringify(body.links), now, id)
   const sets = []; const params = {}
@@ -704,7 +742,7 @@ function updateTask(id, body) {
   // status='active', so a done recurring task is never recovered).
   if (body.status === 'done' && existing.status !== 'done' && existing.recurrence) {
     if (body.outcome === undefined) db.prepare(`UPDATE tasks SET outcome = 'completed' WHERE id = ?`).run(id)
-    const nextDate = nextRecurrenceDate(existing.due_date ?? existing.start_date ?? today(), existing.recurrence)
+    const nextDate = nextOccurrenceDate(existing)
     if (nextDate) spawnRecurrence(existing, nextDate, now, `Recurred from task ${id}`)
   }
   return { ok: true }
@@ -760,7 +798,7 @@ function completeTask(id, note) {
   db.prepare(`UPDATE tasks SET status = 'done', outcome = 'completed', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, completionContext(completionNote, 'Marked complete via UI.')), id)
   postCompletionNote(id, completionNote)
   if (task.recurrence) {
-    const nextDate = nextRecurrenceDate(task.due_date ?? task.start_date ?? today(), task.recurrence)
+    const nextDate = nextOccurrenceDate(task)
     if (nextDate) spawnRecurrence(task, nextDate, now, `Recurred from task ${id}`)
   }
   return { ok: true }
@@ -778,7 +816,7 @@ function completeTaskWithSubtasks(id, note) {
   // incomplete subtasks (completeTask rejects it), so without spawning here a recurring task
   // that acquired a subtask would silently end its series. Mirror completeTask's spawn.
   if (task.recurrence) {
-    const nextDate = nextRecurrenceDate(task.due_date ?? task.start_date ?? today(), task.recurrence)
+    const nextDate = nextOccurrenceDate(task)
     if (nextDate) spawnRecurrence(task, nextDate, now, `Recurred from task ${id}`)
   }
   return { ok: true }
@@ -797,7 +835,7 @@ function skipTask(id) {
   if (!task || !task.recurrence) return { ok: false }
   const now = nowIso()
   db.prepare(`UPDATE tasks SET status = 'done', outcome = 'skipped', last_touched_human = ?, last_reviewed_at = ?, ai_context = ? WHERE id = ?`).run(now, now, appendAiContext(task.ai_context, 'Skipped via UI.'), id)
-  const nextDate = nextRecurrenceDate(task.due_date ?? task.start_date ?? today(), task.recurrence)
+  const nextDate = nextOccurrenceDate(task)
   if (nextDate) spawnRecurrence(task, nextDate, now, `Recurred from task ${id}`)
   return { ok: true }
 }
