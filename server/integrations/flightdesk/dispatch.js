@@ -387,7 +387,7 @@ export function createFlightDeskDispatcher({ dbCall, clientFor, sessionOps = nul
   function terminalReportForJob(job) {
     const target = dispatchStatusForJob(job.status)
     const diagnostics = target === 'FAILED'
-      ? { kind: job.status === 'timed_out' ? 'timed_out' : job.status === 'orphaned' ? 'orphaned' : job.terminated_by === 'oom' ? 'oom' : 'error' }
+      ? { kind: job.status === 'timed_out' ? 'timed_out' : job.status === 'orphaned' ? 'orphaned' : job.terminated_by === 'oom' ? 'oom' : job.terminated_by === 'exited_with_children' ? 'exited_with_children' : 'error' }
       : null
     return { target, payload: { qalatraJobId: job.id, ...finishExtras({ status: job.status, result: job.result, sessionId: job.session_id, diagnostics }) } }
   }

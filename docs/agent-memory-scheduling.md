@@ -79,6 +79,10 @@ text (`/out of memory|\bOOM\b|OOM-killed|memory limit/i`) and retries the turn o
 memory hint. Unknown constraints get no unconditional recommendation to raise the per-run cap.
 Plain kills remain ordinary failures. Result text retains the evidence, partial output and
 session ID; lifecycle hooks additionally receive `diagnostics.memory`.
+A clean exit that leaves one of the agent's own tool commands running (it backgrounded a build and
+ended its turn) is `status=failed`, `terminated_by=exited_with_children`, with the killed commands
+listed at the end of the result; MCP servers that outlive the agent do not count (see
+`server/agent-leftovers.js`).
 Timeout classification takes precedence over OOM speculation. Resumable sessions,
 whole-scope cleanup and FlightDesk's existing diagnostic mapping are preserved.
 

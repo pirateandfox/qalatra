@@ -11,6 +11,7 @@ import { loadFolderRc } from './integrations/flightdesk/rc.js'
 import { configBranchMismatches, ensureTaskWorktree, formatConfigBranchWarning, sweepIdleWorktrees } from './worktrees.js'
 import { createJobScheduler } from './job-scheduler.js'
 import { createScopeMemoryMonitor, formatOomNotice, isOomKill } from './agent-memory.js'
+import { abandonedWork, EXITED_WITH_CHILDREN, formatAbandonedNotice } from './agent-leftovers.js'
 import {
   agentRunDir, prepareRunDir, runFiles, writeRunMeta, readRunMeta, readExitStatus, removeRunDir, sweepRunDirs,
   withExitRecorder, processStartTime, runProcessAlive, createFileTail, lastOutputAt,
@@ -249,10 +250,14 @@ function agentSliceCgroupPath() {
   return agentSliceCgroup
 }
 
+function scopeCgroupPath(scopeUnit) {
+  const sliceDir = agentSliceCgroupPath()
+  return scopeUnit && sliceDir ? path.join(sliceDir, scopeUnit) : null
+}
+
 function monitorScopeMemory(scopeUnit, memory) {
   if (!scopeUnit) return null
-  const sliceDir = agentSliceCgroupPath()
-  return createScopeMemoryMonitor({ scopeDir: sliceDir ? path.join(sliceDir, scopeUnit) : null, sliceDir, memory })
+  return createScopeMemoryMonitor({ scopeDir: scopeCgroupPath(scopeUnit), sliceDir: agentSliceCgroupPath(), memory })
 }
 function agentScopeUnit(jobId) {
   const safeId = String(jobId).replace(/[^A-Za-z0-9_.:-]/g, '-').slice(0, 180)
@@ -1107,6 +1112,12 @@ function superviseAgentRun({ dbCall, notify, job, meta, runDir, proc = null, rel
       memoryMonitor?.cancel()
     }
     const oomKilled = isOomKill(memoryDiagnostics)
+    // A clean exit that leaves work in the scope: the agent ended its turn on a backgrounded
+    // command. Look before the reap below, which is what kills that work.
+    let abandoned = []
+    if (scopeUnit && code === 0 && !timeoutKind && !watchdogArmError && !oomKilled) {
+      try { abandoned = await abandonedWork(scopeCgroupPath(scopeUnit)) } catch {}
+    }
     // The tracked command can exit while a daemonized tool remains in the scope with closed
     // stdio. Reap any such remainder on every terminal path, not only when the watchdog fired.
     if (scopeUnit) killProcessTree(runHandle)
@@ -1120,7 +1131,7 @@ function superviseAgentRun({ dbCall, notify, job, meta, runDir, proc = null, rel
     // event, not an agent failure — so it gets its own terminal status alongside `orphaned`
     // rather than polluting failure counts. Streaming means sessionId survives the kill, so
     // these stay resumable (see the resume lookup in db-worker.js).
-    const status = watchdogArmError ? 'failed' : (timeoutKind ? 'timed_out' : (code === 0 && !oomKilled ? 'done' : 'failed'))
+    const status = watchdogArmError ? 'failed' : (timeoutKind ? 'timed_out' : (code === 0 && !oomKilled && !abandoned.length ? 'done' : 'failed'))
     const timeoutNotice = timeoutKind === 'idle'
       ? `Agent killed after ${idleMinutes} minutes with no output (idle_timeout_minutes).`
       : `Agent timed out after ${timeoutMinutes} minutes (set timeout_minutes in agent.config to raise it).`
@@ -1139,19 +1150,22 @@ function superviseAgentRun({ dbCall, notify, job, meta, runDir, proc = null, rel
       // something other than Qalatra's watchdog (an OOM outside our scope, a manual kill, reboot).
       const partial = result ? `\n\nPartial output before it stopped:\n${result}` : ''
       result = `The agent process ended without recording an exit status (killed while re-adopted after a Qalatra Server restart).${partial}${stderr.trim() ? '\n\nStderr:\n' + stderr.trim() : ''}`
+    } else if (abandoned.length) {
+      // The notice goes last, so the tail an orchestrator keeps still says why the turn failed.
+      result = `${result ? `${result}\n\n` : ''}${formatAbandonedNotice(abandoned)}`
     } else if (!result) {
       result = stderr.trim() || `No output (exit code ${code})`
     } else if (status === 'failed' && stderr.trim()) {
       result += `\n\nStderr:\n${stderr.trim()}`
     }
-    if (status === 'failed') result = appendLaunchDiagnostics(result, diagnosticsContext())
+    if (status === 'failed' && !abandoned.length) result = appendLaunchDiagnostics(result, diagnosticsContext())
 
     try {
       const persisted = await finishAgentJobSafely({
         dbCall, notify, job, status, result, sessionId,
-        terminatedBy: timeoutKind ? 'timeout' : (oomKilled ? 'oom' : null),
+        terminatedBy: timeoutKind ? 'timeout' : (oomKilled ? 'oom' : (abandoned.length ? EXITED_WITH_CHILDREN : null)),
         usage, mcpToolCalls, outputRules: meta.outputRules,
-        failureKind: oomKilled ? 'oom' : null, memoryDiagnostics,
+        failureKind: oomKilled ? 'oom' : (abandoned.length ? EXITED_WITH_CHILDREN : null), memoryDiagnostics,
       })
       // Kept when the terminal state did not land, so the next boot can still finish the job.
       if (persisted) removeRunDir(runDir)

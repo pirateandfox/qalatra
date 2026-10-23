@@ -1,5 +1,22 @@
 # Qalatra — Evolution Notes
 
+## A turn that ends on still-running work is a failure, not 'done' (2026-10-23)
+
+- An agent could start a long command in the background, end its turn ("still compiling, I'll wait
+  for the notification"), and exit 0. The whole-scope reap then SIGKILLed that work and the job was
+  recorded `done`, so the orchestrator saw a clean turn that had in fact abandoned its work.
+- On a clean exit, before the reap, `server/agent-leftovers.js` looks in the run's scope for the
+  agent's own tool commands (Claude Code's Bash wrapper: a shell that sources
+  `shell-snapshots/snapshot-*` and evals the command), waiting up to 2 s for the exit race. Any that
+  remain make the job `failed`, `terminated_by = 'exited_with_children'`, `failureKind` the same,
+  with the killed commands listed at the end of the result (FlightDesk keeps the tail; it travels as
+  `error`). No launch diagnostics are appended, and the session stays resumable.
+- Only tool commands count. Stdio MCP servers often outlive the agent briefly: on the busiest fleet
+  box about half of 814 runs in a week still had processes in the scope at the reap, all of them
+  ordinary `done` turns. Counting every leftover would have failed those runs.
+- Not detected: another runtime's background work (Codex has no such wrapper), and work that
+  detached into a new session outside the shell. Both still get reaped, as before.
+
 ## A missed recurring occurrence stays until done; occurrences share a series_id (2026-10-21)
 
 - `autoRolloverRecurring` (db-worker and the MCP briefing) marked every overdue recurring task
