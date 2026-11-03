@@ -1,5 +1,63 @@
 # Qalatra — Evolution Notes
 
+## The SDK 58 OTA runtime is separated from every SDK 56 binary, and a guard stops the collision coming back (2026-11-03)
+
+- **The collision.** `mobile/app.json` sets `"runtimeVersion": { "policy": "appVersion" }`, so the
+  OTA runtime identifier is the literal `version` string. The Expo 58 move below changed React
+  Native 0.85.3 → 0.88.1, every `expo-*` package to its SDK 58 line, gesture-handler 2.31 → 3.3 and
+  webview 13.16 → 14.0 — but not `version`, which `5333675` had set to `0.3.1` while the tree was
+  still SDK 56. Both trees therefore resolved the policy to `0.3.1`, and Expo would have considered
+  an SDK 58 bundle compatible with an SDK 56 binary. It is not: the bundle references native modules
+  that binary does not contain, so it is a crash at launch, not a degraded screen. Copilot raised it
+  on PR #7 at 19:42:08 UTC; the PR auto-merged 83 seconds later, so it was never addressed.
+- **Nothing was delivered wrongly.** `eas update` and `expo publish` appear nowhere in this
+  repository or its CI — OTA publishing is a manual step here, so nothing tripped it automatically.
+  The exposure would have begun the first time someone ran `eas update --channel production` against
+  that head. Only the EAS dashboard can confirm the channel's real state; the repo-side evidence is
+  that no update was ever published from here.
+- **The fix is a version bump: `0.4.0` in `mobile/app.json` and `mobile/package.json`.** `0.4.0` has
+  never existed in this repository, so no binary could have been built at it. An installed SDK 56
+  app now asks for `0.3.1`, is offered nothing, and keeps running — which is what "no compatible
+  update" has always meant. A minor bump follows the house convention set when native deps were
+  added at `0.2.0`; a patch would have worked identically for the runtime.
+- **`fingerprint` was rejected, and the reason is specific to this repo.** Deriving the runtime from
+  a project hash is the more durable mechanism in general, but the entry below records that
+  `@expo/fingerprint@0.21.9` is held in place by two permanent `overrides` in `mobile/package.json`
+  and is *not* SDK-versioned, so it can move under an ordinary patch install. A runtime policy whose
+  output is a hash computed by that package fails silently: if the hash drifts between the machine
+  that built the binary and the machine that publishes the update, no update is ever delivered and
+  nothing says so. Both options are fail-safe against the crash; only the version bump is
+  fail-obvious about delivery. Revisit if `@expo/fingerprint` stops needing overrides, on a session
+  that can exercise a real EAS build and `eas update`.
+- **`mobile/runtime-versions.json` is a new append-only ledger** of every OTA runtime identifier
+  this project has minted and the Expo SDK major it was minted for: `0.2.0`, `0.3.0` and `0.3.1`
+  against 56, `0.4.0` against 58. The SDK 56 entries are reconstructed from `5333675` and from the
+  `0.2.0 (9)` beta and `0.3.0 (10)` iOS build recorded in `docs/hosted-client-release.md`.
+  Over-inclusion is the safe direction: an extra entry only ever forbids reusing an identifier, and
+  a missing one leaves the status quo rather than causing a false failure.
+- **`scripts/check-mobile-runtime.mjs` (`npm run check:mobile-runtime`) enforces it**, in CI before
+  the mobile install and in the `pre-publish` chain. It fails when one identifier is claimed by two
+  SDK majors, when the ledger's last entry is not the current tree (SDK major read out of
+  `dependencies.expo`), when the two manifests disagree on `version`, and on an empty or malformed
+  ledger — fail closed, not skip. Had it existed, PR #7 would have had to record `0.3.1 → SDK 58`
+  next to `0.3.1 → SDK 56` and CI would have failed. It reads three JSON files and needs no
+  `node_modules`.
+- **The ordering commitment is documented, not enforceable from here.** A new native SDK 58 build
+  must reach users through the store *before* any OTA update is published to the `production`
+  channel. `docs/hosted-client-release.md`'s **Native release** section now states that and the
+  version-bump rule, next to the `eas build` / `eas submit` commands somebody about to publish is
+  already reading. No code in this repository talks to EAS, so nothing can check it.
+- **Not done here, and not doable here:** no EAS build, no `eas update`, no inspection of the real
+  `production` channel or of which runtimes have builds on EAS. What this change guarantees is that
+  the repository can no longer *mint* a colliding runtime identifier.
+- Noted for a person, not changed: `mobile/eas.json` sets
+  `serviceAccountKeyPath: "/Users/justinhandley/.secrets/qalatra-play.json"`, a machine-specific
+  absolute path to a local secret. Where that key should live is a decision, not a code defect.
+- **Gates run:** `npm run check:mobile-runtime` (passes; fails on each of identifier reuse, an
+  unrecorded SDK move, and manifests out of step), `npm run audit:mobile` (unchanged, 0 exceptions,
+  0 vulnerabilities), `npm run typecheck --prefix mobile` (clean), `npm run check-imports`
+  (unchanged).
+
 ## Mobile on Expo 58; the mobile audit gate carries no exceptions at all (2026-11-03)
 
 - `mobile/` moved from Expo SDK 56 to 58 with `npx expo install --fix`, so every version came from
