@@ -16,6 +16,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The mobile OTA runtime guard's append-only half compares mobile/runtime-versions.json
+          # against HEAD^1 — the base-branch tip on a pull_request's merge commit, the previous
+          # develop on a push. Depth 2 is the minimum that makes that ref resolvable. Raise it if a
+          # later step needs more history; do not remove it.
+          fetch-depth: 2
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -36,7 +42,10 @@ jobs:
         run: npm audit --audit-level=moderate --prefix ui
 
       - name: Check mobile OTA runtime version
-        run: npm run check:mobile-runtime
+        run: npm run check:mobile-runtime:ci
+
+      - name: Test mobile OTA runtime guard
+        run: npm run test:mobile-runtime
 
       - name: Install mobile dependencies
         run: npm ci --prefix mobile

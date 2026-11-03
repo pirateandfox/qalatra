@@ -1,9 +1,9 @@
 {
-  "comment": "Every OTA runtime identifier this project has minted, and the Expo SDK major it was minted for. The appVersion runtimeVersion policy in app.json makes the identifier the literal app version, so reusing a version across an SDK major would offer an installed binary a bundle built against native modules it does not contain. Append a new entry whenever anything native changes; never reuse an identifier. scripts/check-mobile-runtime.mjs enforces this.",
+  "comment": "Every OTA runtime identifier this project has minted, the Expo SDK major it was minted for, and its nativeSignature. The appVersion runtimeVersion policy in app.json makes the identifier the literal app version, so reusing a version across two native runtimes would offer an installed binary a bundle built against native modules it does not contain. Append a new entry whenever anything native changes; never reuse an identifier. nativeSignature is a 12-character hash over the native-bearing part of mobile/package.json's dependencies plus all of mobile/app.json's expo object except version — the inputs that decide whether a bundle and a binary are compatible. scripts/check-mobile-runtime.mjs computes it, requires the last entry here to match the current tree, and prints the value to record when it does not. The three SDK 56 identifiers predate the signature and record none: their native surfaces are not recoverable from the current tree, and no check reads a historical entry's signature, so an absent fact is honest where a reconstructed one would be a guess about which commit each shipped binary was built from. This file is append-only — add entries, and add new fields to old entries, but never change or remove a recorded value. CI enforces that against the base branch (npm run check:mobile-runtime:ci); a local run cannot and says so in its output.",
   "minted": [
     { "appVersion": "0.2.0", "expoSdkMajor": 56 },
     { "appVersion": "0.3.0", "expoSdkMajor": 56 },
     { "appVersion": "0.3.1", "expoSdkMajor": 56 },
-    { "appVersion": "0.4.0", "expoSdkMajor": 58 }
+    { "appVersion": "0.4.0", "expoSdkMajor": 58, "nativeSignature": "6e2bfb5e2ddc" }
   ]
 }
