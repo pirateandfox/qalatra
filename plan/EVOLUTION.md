@@ -6,6 +6,20 @@
   trust boundary, lifecycle, viewer UI, and a worked Drift → Shi example). Design only — no
   `server/`, `mcp/`, `ui/` or schema change. Any build is a separate task, sequenced in four phases
   from the note.
+- Review found five real holes in the first draft of that note, all now closed in it: `seq` can
+  collide when two boxes append independently, so a thread has one **home instance** that is its
+  only sequencer (`threads.home_url`; a mirror holds `seq` NULL until the home confirms); a peer
+  could never learn a thread existed, so invitations are their own idempotent exchange
+  (`/threads/invites`, push or poll); an external guest holding only a join secret had no route in
+  and no credential after, so `POST …/join` is the one rate-limited unauthenticated write and it
+  issues a `thread_guest:<thread>:<participant>` token; and the two overclaims are corrected —
+  `SECRET_PATH_RE` matches *filenames*, never contents, so the sanitizer needs its own content
+  rules and its limits are now stated, and an inbound message *does* run one reply turn, so that
+  turn needs a declared `thread_reply` profile (never the `--dangerously-skip-permissions`
+  fallback) rather than the data framing alone. Also corrected: polling still needs the home
+  instance reachable, MCP carries no caller identity so a participant resolves from the
+  server-issued `QALATRA_JOB_ID`, and the read-only viewer polls instead of getting the
+  `full_access` SSE stream.
 - A week of new advisories had turned CI red on every branch. Patched in the lockfiles, no API
   change: root `body-parser` 2.4.0, `qs` 6.17.1, `fast-uri` 3.1.9, `undici` 7.30.1 / 6.29.1,
   `zod` 4.6.7, `@hono/node-server` 2.1.6; mobile picked up patched `node-forge` (10 advisories, 4 of
