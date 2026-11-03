@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process'
 
-// One audit gate for every workspace that needs an exception, so the root and mobile gates cannot
-// drift apart. Narrow, temporary allowlists: every entry names the package it was reasoned about,
-// so an advisory id cannot silently start covering a different dependency later; everything else
-// still fails.
+// One audit gate for every workspace that needs more than a plain `npm audit`, so the root and
+// mobile gates cannot drift apart. Narrow, temporary allowlists: every entry names the package it
+// was reasoned about, so an advisory id cannot silently start covering a different dependency
+// later; everything else still fails. A scope with an empty allowlist still belongs here — it keeps
+// its severity floor and the stale-exception report, and it is the state every scope should reach.
 //
 // `minSeverity` preserves each scope's historical gate. Root was `npm audit --audit-level=moderate`,
 // so a `low` advisory there is reported but not fatal. The mobile gate has always failed on any
