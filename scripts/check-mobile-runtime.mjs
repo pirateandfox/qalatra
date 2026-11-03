@@ -373,8 +373,8 @@ if (entries && typeof appVersion === 'string' && currentSdkMajor !== null) {
   } else if (currentSignature !== null && last.nativeSignature !== currentSignature) {
     fail(
       'NATIVE SURFACE CHANGED without a new runtime identifier',
-      `current tree:        ${currentSignature}`,
-      `minted[${index}] (${last.appVersion}): ${last.nativeSignature}`,
+      `native signature of the current tree: ${currentSignature}`,
+      `recorded for minted[${index}] (${last.appVersion}): ${last.nativeSignature}`,
       `Identifier ${appVersion} already describes a different native runtime, so a binary built`,
       'from this tree and a binary built from the recorded one would both answer to it. An OTA',
       'bundle from here would be served to the older binary and crash it at launch.',
