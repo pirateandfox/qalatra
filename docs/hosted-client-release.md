@@ -76,10 +76,31 @@ matches its own:
    anything native changes** — an Expo SDK move, a React Native bump, a new or upgraded native
    module. Reusing a version across two native runtimes tells Expo an incompatible bundle is
    compatible, and the installed app crashes at launch rather than degrading. Append the new
-   `{ appVersion, expoSdkMajor }` pair to `mobile/runtime-versions.json`; `npm run
-   check:mobile-runtime` (also a CI step) fails the build if an identifier is reused or the ledger
-   is behind the tree. `autoIncrement` does not help here — it moves `ios.buildNumber` /
-   `android.versionCode`, not `version`.
+   `{ appVersion, expoSdkMajor, nativeSignature }` entry to `mobile/runtime-versions.json`.
+   `autoIncrement` does not help here — it moves `ios.buildNumber` / `android.versionCode`, not
+   `version`.
+
+   `npm run check:mobile-runtime` (also a CI step) enforces the rule rather than restating it. It
+   fails when the `runtimeVersion` policy is no longer `appVersion`, when the two manifests disagree
+   on `version`, when one app version appears twice in the ledger, or when the ledger's last entry
+   does not describe the current tree — same app version, same Expo SDK major, **and** the same
+   `nativeSignature`, a 12-character hash over the native-bearing dependencies plus all of
+   `app.json`'s `expo` object except `version`. The signature is what catches a native change inside
+   one SDK major: adding `expo-system-ui` with `expo` still on `^58` fails, and the failure prints
+   the signature to record, so the fix is the two lines above. A pure-JS bump deliberately does not
+   change it — minting an identifier no binary has delivers nothing to anyone.
+
+   **What the signature cannot see**, each needing a manual version bump: a native package whose
+   name contains neither `expo` nor `react-native`; a change to `overrides` that moves a native
+   package's resolved version; the *contents* of the asset files `app.json` only names by path; and
+   anything in `mobile/ios` / `mobile/android` if this project stops being managed-workflow-only.
+
+   The ledger is also **append-only**: add entries, add new fields to old entries, never change or
+   remove a recorded value — an overwritten claim removes the record that would catch the next
+   collision without unshipping the binary. That half is checked only with an explicit baseline, so
+   it runs in CI (`npm run check:mobile-runtime:ci`, which passes `--base HEAD^1`) and not on a
+   plain local run; a local run's pass line says the half was not checked rather than implying it
+   was. `npm run test:mobile-runtime` is the guard's own regression test.
 2. **Ship the new native build through the store before publishing any OTA update to that
    channel.** `eas update --channel production` serves the bundle to whatever is already installed
    that matches its runtime identifier. If an OTA update to `production` is planned before a store

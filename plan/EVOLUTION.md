@@ -1,5 +1,85 @@
 # Qalatra — Evolution Notes
 
+## The OTA runtime guard now enforces the rule it documents (2026-11-03)
+
+- **It promised two things it did not do.** `scripts/check-mobile-runtime.mjs`, added the same day
+  by the entry below, called `mobile/runtime-versions.json` "the append-only ledger" and
+  `docs/hosted-client-release.md` stated the rule as "bump `version` whenever anything native
+  changes". The script imported only `node:fs`/`node:path`/`node:url` and read the ledger with one
+  `readFileSync`, so it had no baseline to compare against, and the only native fact it held was
+  `expoSdkMajor`, parsed from the first integer in `dependencies.expo`. Both gaps were reproduced
+  against the merged script before being fixed: editing `minted[3].expoSdkMajor` from 58 to 59 with
+  `expo` at `^59.0.0` and no version bump exited 0 with "0.4.0 is minted for Expo SDK 59 only" — the
+  SDK 56 claim was *deleted* rather than contradicted, so the collision check had no duplicate left
+  to find — and adding `expo-system-ui@~6.0.0` with `expo` still `^58.0.23` exited 0 too. Copilot
+  filed both on PR #8 62 seconds before it auto-merged, the same race that produced the entry below
+  out of PR #7.
+- **A third gap, found while reading and fixed here:** nothing checked that `mobile/app.json` still
+  sets `"runtimeVersion": { "policy": "appVersion" }`. That policy is the premise of the whole
+  ledger — it is what makes the identifier the literal app version. Switch it or delete it and every
+  entry on record, and every message the script prints, becomes a claim about something that no
+  longer exists, while the check keeps passing.
+- **What it enforces now.** The ledger records a `nativeSignature` per identifier: a 12-character
+  sha256 prefix over the native-bearing part of `mobile/package.json`'s `dependencies` plus all of
+  `mobile/app.json`'s `expo` object except `version` (excluded, because it *is* the identifier),
+  hashed through a canonical JSON serializer so re-indenting a manifest is not a native change
+  (verified against a reordered, re-indented copy of both files — same hash). The guard fails when
+  the tree's computed signature does not match the one recorded for the identifier the tree claims
+  (`NATIVE SURFACE CHANGED`), when the policy is not `appVersion`, or when any app version appears
+  twice in `minted` — which replaces the old two-SDK-majors comparison and is strictly stronger: it
+  still rejects the PR #7 case and also rejects a same-major reuse. The Expo-range parse was
+  tightened from `/(\d+)/`, which read "58" out of `github:expo/expo#58` and `>=57 <59`, to a
+  single-version range or an explicit `UNPARSEABLE EXPO RANGE`.
+- **Append-only is real, and only where it can be trusted.** `--base <ref>` reads the baseline
+  ledger with `git show` and requires the current `minted` to *extend* it: every key an entry had at
+  the baseline is still present with the same value, so adding a new field to an old entry is
+  allowed and changing or removing one is not. Without `--base` the half is skipped and the pass
+  line says `append-only NOT checked (no --base)`, rather than a check that passes for the wrong
+  reason. CI passes `--base HEAD^1` (`npm run check:mobile-runtime:ci`) — the base-branch tip on a
+  `pull_request` merge commit, the previous `develop` on a push, the previous commit otherwise. An
+  unresolvable `--base` fails closed; a baseline that predates the ledger is reported, not failed.
+  This change's own migration is the test case: adding `nativeSignature` to the `0.4.0` entry passes
+  `--base origin/develop`.
+- **Decision: the three SDK 56 identifiers record no signature, not even `null`.** Their native
+  surfaces are not recoverable from the current tree, and reconstructing them from `5333675` and
+  earlier would record a guess about which commit each shipped binary was built from. After the
+  uniqueness rule above, nothing reads a historical entry's signature, so the choice was between an
+  absent fact and a fabricated one. `null` was rejected separately: a present-but-null value makes
+  later filling it in look like a contradiction to the append-only comparison, where an absent key
+  is simply new information. The reason is in the file's own `signatureComment`.
+- **Decision: the signature hashes an allowlist by name pattern, not all of `dependencies`.** Over-
+  inclusion is not the safe direction here. Hashing every dependency would mint a brand-new
+  identifier — one no installed binary has — on every pure-JS bump, delivering nothing to anyone and
+  saying nothing about it: the exact silent non-delivery the entry below gives as the reason
+  `fingerprint` was rejected for this repo. So: a broad substring net (`/expo|react-native/i`, which
+  catches `@expo/*`, `expo-*`, `react-native-*`, `@react-native-community/*`, `babel-preset-expo`)
+  plus `react`/`react-dom`, minus a small JS-only allowlist whose one entry is
+  `react-native-markdown-display`. That allowlist is itself checked for staleness — an exception for
+  a dependency that is gone is a blind spot waiting for a package of that name to come back native.
+  `devDependencies` and `overrides` are excluded. The four things the signature cannot see are listed
+  in the script header and in `docs/hosted-client-release.md` rather than papered over; a guard that
+  silently claims more than it checks is how this entry came to exist.
+- **`scripts/test-mobile-runtime.mjs` (`npm run test:mobile-runtime`)** builds throwaway trees in
+  `mkdtemp` directories — a copy of the script plus the three JSON files, the way the two defects
+  were reproduced by hand — and runs the guard as a child process, asserting the exit code and the
+  specific failure label for 22 cases, including both findings, the policy gap, a reused identifier,
+  four unreadable Expo ranges, the stale allowlist, and (in a throwaway `git init` repo) the four
+  `--base` behaviours. It is a CI step and is in the `pre-publish` chain. It needs no `node_modules`.
+- **CI checkout now uses `fetch-depth: 2`**, the minimum that makes `HEAD^1` resolvable. It is a
+  shared step: a later job needing deeper history must raise the number, not remove it.
+- **This blocks the open `expo-system-ui` task until it bumps `version` and appends an entry.** That
+  is the intended behaviour and the reason this change exists, so the failure message spells out the
+  two-line fix and prints the signature to record.
+- **Nothing was delivered wrongly, and nothing shipped changed.** `eas update` and `expo publish`
+  still appear nowhere in this repository or its CI — the only occurrences are prose in
+  `docs/hosted-client-release.md` and in this file — so OTA publishing here remains a manual step.
+  No source in `mobile/`, `ui/`, `server/` or `packages/` is touched, and `mobile/package.json` and
+  `mobile/app.json` are byte-identical to `develop`: the signature recorded for `0.4.0`
+  (`6e2bfb5e2ddc`) describes the tree that is already there.
+- **Gates run:** `npm run check:mobile-runtime`, `node scripts/check-mobile-runtime.mjs --base
+  origin/develop`, `npm run test:mobile-runtime`, `npm run check-imports`, `npm run audit:mobile`,
+  `npm run typecheck --prefix mobile`.
+
 ## The SDK 58 OTA runtime is separated from every SDK 56 binary, and a guard stops the collision coming back (2026-11-03)
 
 - **The collision.** `mobile/app.json` sets `"runtimeVersion": { "policy": "appVersion" }`, so the
