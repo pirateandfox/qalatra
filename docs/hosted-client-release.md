@@ -67,6 +67,25 @@ eas build --platform ios --profile production
 eas submit --platform ios --profile production --id <verified-new-build-id>
 ```
 
+Two rules govern OTA updates on the `production` channel, because `mobile/app.json` sets
+`"runtimeVersion": { "policy": "appVersion" }` — the OTA runtime identifier *is* the literal
+`version` string in that file, and an installed binary only accepts a bundle whose identifier
+matches its own:
+
+1. **Bump `version` in `mobile/app.json` (and `mobile/package.json`, kept in step) whenever
+   anything native changes** — an Expo SDK move, a React Native bump, a new or upgraded native
+   module. Reusing a version across two native runtimes tells Expo an incompatible bundle is
+   compatible, and the installed app crashes at launch rather than degrading. Append the new
+   `{ appVersion, expoSdkMajor }` pair to `mobile/runtime-versions.json`; `npm run
+   check:mobile-runtime` (also a CI step) fails the build if an identifier is reused or the ledger
+   is behind the tree. `autoIncrement` does not help here — it moves `ios.buildNumber` /
+   `android.versionCode`, not `version`.
+2. **Ship the new native build through the store before publishing any OTA update to that
+   channel.** `eas update --channel production` serves the bundle to whatever is already installed
+   that matches its runtime identifier. If an OTA update to `production` is planned before a store
+   release of the matching native build, stop and raise it. Nothing in this repository can enforce
+   that ordering, because nothing here talks to EAS.
+
 The production profile auto-increments the remote build number. Do not recreate the Expo project
 or change bundle ID to bypass an access error: preserve the existing App Store identity and OTA
 project. Validate a signed build on-device before distribution and provide a comp review account

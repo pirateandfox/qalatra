@@ -1,0 +1,9 @@
+{
+  "comment": "Every OTA runtime identifier this project has minted, and the Expo SDK major it was minted for. The appVersion runtimeVersion policy in app.json makes the identifier the literal app version, so reusing a version across an SDK major would offer an installed binary a bundle built against native modules it does not contain. Append a new entry whenever anything native changes; never reuse an identifier. scripts/check-mobile-runtime.mjs enforces this.",
+  "minted": [
+    { "appVersion": "0.2.0", "expoSdkMajor": 56 },
+    { "appVersion": "0.3.0", "expoSdkMajor": 56 },
+    { "appVersion": "0.3.1", "expoSdkMajor": 56 },
+    { "appVersion": "0.4.0", "expoSdkMajor": 58 }
+  ]
+}

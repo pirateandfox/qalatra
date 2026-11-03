@@ -35,6 +35,9 @@ jobs:
       - name: Audit UI dependencies
         run: npm audit --audit-level=moderate --prefix ui
 
+      - name: Check mobile OTA runtime version
+        run: npm run check:mobile-runtime
+
       - name: Install mobile dependencies
         run: npm ci --prefix mobile
 
