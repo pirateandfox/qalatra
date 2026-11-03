@@ -76,7 +76,13 @@ for (const vulnerability of vulnerabilities) {
   for (const item of vulnerability.via || []) {
     if (typeof item !== 'object' || !item.url) continue
     const id = item.url.split('/').pop()
-    if ((SEVERITY_RANK[item.severity] ?? 0) < floor) {
+    // Fail closed on a severity this gate does not recognise. Defaulting an absent or unknown
+    // `severity` to 0 ranked it below every floor, including mobile's `low`, so npm inventing a
+    // new severity name — or omitting the field — would silently demote the advisory to the
+    // reported-only list where it could never fail the gate. `critical` is the safe default: a
+    // severity we cannot rank is treated as the worst, so it surfaces as unexpected and has to be
+    // reasoned about before it can pass.
+    if ((SEVERITY_RANK[item.severity] ?? SEVERITY_RANK.critical) < floor) {
       if (!advisories.has(id)) belowFloor.set(id, item)
       continue
     }
