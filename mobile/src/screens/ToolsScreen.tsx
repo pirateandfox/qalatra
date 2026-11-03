@@ -79,7 +79,13 @@ function remapSessionUrl(currentUrl: string | null, nextSession: BoxWebSession) 
 /** The backend's "Box Web" tools surface, embedded in a WebView. The session URL
  *  is ticket-authenticated, so the WebView needs no bearer header. */
 export function ToolsScreen({ navigation }: ToolsTabProps) {
-  const webViewRef = useRef<WebView>(null)
+  // `WebView<object>`, not a bare `WebView`, works around an upstream typing regression in
+  // react-native-webview 14: its root index.d.ts declares `class WebView<P = undefined> extends
+  // Component<WebViewProps & P>`, and `WebViewProps & undefined` collapses to `never`, so a ref
+  // typed with the default parameter makes every prop on the element unassignable. v13 defaulted
+  // `P = {}`. Any non-nullish argument restores the real props type. Drop this when upstream fixes
+  // the default.
+  const webViewRef = useRef<WebView<object>>(null)
   const currentUrlRef = useRef<string | null>(null)
   const [sourceUrl, setSourceUrl] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)

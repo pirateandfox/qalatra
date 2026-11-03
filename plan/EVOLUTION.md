@@ -1,5 +1,75 @@
 # Qalatra — Evolution Notes
 
+## Mobile on Expo 58; the mobile audit gate carries no exceptions at all (2026-11-03)
+
+- `mobile/` moved from Expo SDK 56 to 58 with `npx expo install --fix`, so every version came from
+  the installed `expo@58.0.23`'s own `bundledNativeModules.json` rather than being hand-picked.
+  React 19.2.3 → 19.3.0, React Native 0.85.3 → 0.88.1, every `expo-*` package to its SDK 58 line,
+  and two library majors: `react-native-gesture-handler` 2.31 → 3.3 and `react-native-webview`
+  13.16 → 14.0. `@react-navigation/*`, `react-native-markdown-display`, `punycode` and `typescript`
+  are not Expo-managed and were left alone.
+- **`SCOPES.mobile.allowed` in `scripts/audit-deps.mjs` is now empty** — `npm run audit:mobile`
+  reports "passed with 0 vulnerabilities at or above low" with nothing allowlisted, so the mobile
+  gate is blind to nothing. All six exceptions it used to carry are gone.
+- **The removal condition recorded for four of them was half wrong, and that matters more than the
+  upgrade.** The entry below says all four were retired by moving to Expo 58. Checked against the
+  installed SDK 58 tree, only two were:
+  - `zod` (GHSA-mrhx-c7xc-m3w5, the one `high`) and `deepmerge` (GHSA-gcqx-w48m-w2h4) went as
+    recorded: `@expo/cli@58.1.19` replaced `zod` with `@expo/schema-utils`, and
+    `@expo/config@58.0.11` no longer merges with `deepmerge`. Both packages are absent from the
+    tree entirely, not merely unreported.
+  - `glob` (GHSA-3g3m-2fjr-6pw4) and `minimatch` (GHSA-g3hv-75wg-m249) **survived the upgrade
+    untouched.** `@expo/cli@58.1.19` and `@expo/fingerprint@0.21.9` still ask for `glob ^13.0.0`
+    and `minimatch ^10.2.2`. The condition was also wrong about where they come from: it named
+    `expo-updates`, and `expo-updates@58.0.21` depends on neither.
+  - Both `image-size` advisories (GHSA-w3rx-r6r6-pgpr, GHSA-5p2g-fcmc-qvqq) went too, which nobody
+    had predicted: SDK 58 routes Metro through `@expo/metro` → `metro@0.87`, which has no
+    `image-size` dependency.
+- `glob` and `minimatch` are closed by **`overrides` in `mobile/package.json`** (`^14.0.3` /
+  `^11.0.4`) rather than by two restated exceptions. The upgrade is what makes that override safe,
+  and it was checked against the installed packages, not assumed: `@expo/cli` reaches glob only as
+  `_glob().sync` (5 sites), `_glob().glob` (3) and `_glob().globStream` (1) and `@expo/fingerprint`
+  only as `_glob().glob`, so nothing calls the default export as a function and glob's v13 → v14
+  major is not a break; all three names are live functions on glob@14.0.3, exercised directly.
+  minimatch@11's object-only CommonJS export is the hazard the **root** scope records, where four
+  packagers call the default as a function — `@expo/fingerprint` instead does
+  `new (_minimatch()).Minimatch(...)`, the pattern `ui` already runs under v11.
+- **Those two overrides are permanent, not a staging post.** `@expo/fingerprint` is *not*
+  SDK-versioned — `expo@58` pulls it as `^0.21.9`, so it can move under an ordinary patch install
+  and reintroduce `glob@13` with no SDK bump to notice. No future Expo major is guaranteed to
+  retire them.
+- `mobile/app.json` lost `newArchEnabled: true`: SDK 58 removed the key from the config schema, so
+  `expo-doctor` failed on it. RN 0.88.1 has no toggle for the New Architecture and the key appears
+  nowhere in `@expo/config-types` / `config-plugins` / `prebuild-config`, so it was dead and
+  deleting it cannot turn anything off. `expo install --fix` also registered `expo-status-bar` in
+  the plugin list — SDK 58's `expo-status-bar` ships an `app.plugin.js`.
+- One app-code change, and it is a workaround for an upstream typing regression rather than
+  anything about this app. `react-native-webview@14.0.1`'s root `index.d.ts` declares
+  `class WebView<P = undefined> extends Component<WebViewProps & P>`; 13.16.1 declared `P = {}`.
+  `WebViewProps & undefined` is `never`, so pinning `P` to the new default makes every prop on the
+  element unassignable. `ToolsScreen` is the only screen that pins it, because it is the only one
+  that puts a `ref` on a WebView (`useRef<WebView>(null)` is `useRef<WebView<undefined>>(null)`);
+  `useRef<WebView<object>>(null)` restores the real props type, and the two
+  "implicit any `nativeEvent`" errors alongside it were only contextual typing lost to the failed
+  overload. Remove when upstream fixes the default.
+- **Gates run:** `npm run audit:mobile` (0 exceptions, 0 vulnerabilities), `npm run audit:root`
+  (unchanged, still its one `minimatch` exception), `npm run typecheck --prefix mobile` (clean),
+  `npx expo-doctor` (20/20), `npx expo prebuild --no-install --clean --platform all` (both
+  platforms), `npx expo export --platform all` (iOS 1244 modules, Android 1250, through Metro 0.87
+  and babel-preset-expo 58, resolving `@qalatra/shared` through the monorepo `metro.config.js`).
+  No web bundle, correctly — this project has neither `react-dom` nor `react-native-web`.
+- **Not proved here, and it is the real risk:** that the app runs on a device under RN 0.88,
+  gesture-handler v3 and webview v14. `expo export` bundles JS; it does not link or run native
+  code, and CI has no mobile build step. The four WebView screens (`TerminalSessionScreen`,
+  `ToolsScreen`, `MarkdownEditorScreen`, `MarkdownViewerScreen`) are where a webview-major
+  regression would show, and the terminal's scroll and `postMessage` behaviour is invisible to
+  typecheck. Needs an EAS build on a physical device. Whether OTA still delivers to builds already
+  installed is only observable after the first release past this.
+- Open, untouched: `expo prebuild` warns on Android that `userInterfaceStyle` needs `expo-system-ui`
+  installed to take effect, so `app.json`'s declared `"automatic"` is silently inert there. It
+  pre-dates this upgrade; installing the package changes what Android users see, so it needs a
+  decision and device QA rather than a dependency-upgrade PR.
+
 ## Agent-to-agent threads design note; one audit gate for root and mobile (2026-11-03)
 
 - `docs/agent-to-agent-threads.md`: the PIR-324 design note (data model, API sketch by audience,
@@ -39,8 +109,10 @@
   function (verified: glob@7 throws mid-walk under v11), while app-builder-lib pins asar and
   universal exactly. Mobile: `zod` (high, `@expo/cli`), `deepmerge` (no patched release exists),
   `glob` and `minimatch` (expo-updates / `@expo/fingerprint`) — all four Expo 56 build tooling,
-  never bundled into the app, and all four retired by moving mobile to Expo 58. **That upgrade is
-  the real fix and wants its own task.**
+  never bundled into the app, and all four recorded here as retired by moving mobile to Expo 58.
+  **That upgrade is the real fix and wants its own task.** *(Corrected on 2026-11-03 by the entry
+  above: the upgrade retired `zod` and `deepmerge` but not `glob` / `minimatch`, and the carrier
+  named for those two was wrong — see "Mobile on Expo 58".)*
 
 ## A turn that ends on still-running work is a failure, not 'done' (2026-10-23)
 

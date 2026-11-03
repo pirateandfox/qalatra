@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process'
 
-// One audit gate for every workspace that needs an exception, so the root and mobile gates cannot
-// drift apart. Narrow, temporary allowlists: every entry names the package it was reasoned about,
-// so an advisory id cannot silently start covering a different dependency later; everything else
-// still fails.
+// One audit gate for every workspace that needs more than a plain `npm audit`, so the root and
+// mobile gates cannot drift apart. Narrow, temporary allowlists: every entry names the package it
+// was reasoned about, so an advisory id cannot silently start covering a different dependency
+// later; everything else still fails. A scope with an empty allowlist still belongs here — it keeps
+// its severity floor and the stale-exception report, and it is the state every scope should reach.
 //
 // `minSeverity` preserves each scope's historical gate. Root was `npm audit --audit-level=moderate`,
 // so a `low` advisory there is reported but not fatal. The mobile gate has always failed on any
@@ -33,29 +34,17 @@ const SCOPES = {
   mobile: {
     prefix: 'mobile',
     minSeverity: 'low',
-    allowed: new Map([
-      // Expo 56 pulls image-size through Metro, with no patched release as of 2026-08-10. Metro only
-      // parses trusted, repository-owned image assets at build time, so this is not reachable from
-      // remote input. Remove when Expo/Metro moves to a patched image-size.
-      ['GHSA-w3rx-r6r6-pgpr', { package: 'image-size', why: 'ICNS parser infinite loop in Metro build tooling' }],
-      ['GHSA-5p2g-fcmc-qvqq', { package: 'image-size', why: 'JXL/HEIF parser infinite loop in Metro build tooling' }],
-      // The four entries below are all Expo 56 build tooling, and all four are fixed by the same
-      // thing: moving mobile to Expo 58 (expo@58 / expo-updates@58), a major platform upgrade that
-      // needs its own task and real device validation. None of these packages is bundled into the
-      // shipped app — they run on a developer's machine at build time.
-      //
-      // @expo/cli depends on zod 3.x; the fix is zod >= 4.6.6, a major the CLI is not written
-      // against. This is the only `high` exception here that is not image-size, so it is the first
-      // one to retire when Expo 58 lands.
-      ['GHSA-mrhx-c7xc-m3w5', { package: 'zod', why: 'memory exhaustion in @expo/cli schema validation at build time' }],
-      // @expo/config depends on deepmerge 4.3.1; every release >= 4.2.0 is affected and 4.3.1 is the
-      // latest, so no patched release exists to move to.
-      ['GHSA-gcqx-w48m-w2h4', { package: 'deepmerge', why: 'prototype poisoning in @expo/config merging of repository-owned app config' }],
-      // expo-updates and @expo/fingerprint walk the project with glob@13, which needs glob >= 14.0.2
-      // and minimatch >= 11.0.1. Both are majors reached only through Expo 58.
-      ['GHSA-3g3m-2fjr-6pw4', { package: 'glob', why: 'AbortSignal bypass in expo-updates/@expo/fingerprint project walking' }],
-      ['GHSA-g3hv-75wg-m249', { package: 'minimatch', why: 'glob amplification in expo-updates/@expo/fingerprint project walking' }],
-    ]),
+    // No exceptions: the mobile gate is blind to nothing. Expo 58 closed all six it used to carry.
+    // Four went when the SDK dropped the packages — `zod` and `deepmerge` (@expo/cli replaced zod
+    // with @expo/schema-utils; @expo/config no longer merges with deepmerge) and both `image-size`
+    // advisories (@expo/metro's metro@0.87 has no image-size dependency). The other two, `glob`
+    // (GHSA-3g3m-2fjr-6pw4) and `minimatch` (GHSA-g3hv-75wg-m249), survived the upgrade —
+    // @expo/cli and @expo/fingerprint still ask for glob ^13 / minimatch ^10 — and are closed by
+    // the `glob` and `minimatch` entries in mobile/package.json's `overrides` instead. Those
+    // overrides are permanent, not a staging post: @expo/fingerprint is not SDK-versioned
+    // (expo@58 pulls it as ^0.21.9), so a patch install could otherwise reintroduce glob@13 with
+    // no SDK bump to notice.
+    allowed: new Map(),
   },
 }
 
@@ -88,7 +77,13 @@ for (const vulnerability of vulnerabilities) {
   for (const item of vulnerability.via || []) {
     if (typeof item !== 'object' || !item.url) continue
     const id = item.url.split('/').pop()
-    if ((SEVERITY_RANK[item.severity] ?? 0) < floor) {
+    // Fail closed on a severity this gate does not recognise. Defaulting an absent or unknown
+    // `severity` to 0 ranked it below every floor, including mobile's `low`, so npm inventing a
+    // new severity name — or omitting the field — would silently demote the advisory to the
+    // reported-only list where it could never fail the gate. `critical` is the safe default: a
+    // severity we cannot rank is treated as the worst, so it surfaces as unexpected and has to be
+    // reasoned about before it can pass.
+    if ((SEVERITY_RANK[item.severity] ?? SEVERITY_RANK.critical) < floor) {
       if (!advisories.has(id)) belowFloor.set(id, item)
       continue
     }
