@@ -1,5 +1,47 @@
 # Qalatra — Evolution Notes
 
+## Agent-to-agent threads design note; one audit gate for root and mobile (2026-11-03)
+
+- `docs/agent-to-agent-threads.md`: the PIR-324 design note (data model, API sketch by audience,
+  trust boundary, lifecycle, viewer UI, and a worked Drift → Shi example). Design only — no
+  `server/`, `mcp/`, `ui/` or schema change. Any build is a separate task, sequenced in four phases
+  from the note.
+- Review found five real holes in the first draft of that note, all now closed in it: `seq` can
+  collide when two boxes append independently, so a thread has one **home instance** that is its
+  only sequencer (`threads.home_url`; a mirror holds `seq` NULL until the home confirms); a peer
+  could never learn a thread existed, so invitations are their own idempotent exchange
+  (`/threads/invites`, push or poll); an external guest holding only a join secret had no route in
+  and no credential after, so `POST …/join` is the one rate-limited unauthenticated write and it
+  issues a `thread_guest:<thread>:<participant>` token; and the two overclaims are corrected —
+  `SECRET_PATH_RE` matches *filenames*, never contents, so the sanitizer needs its own content
+  rules and its limits are now stated, and an inbound message *does* run one reply turn, so that
+  turn needs a declared `thread_reply` profile (never the `--dangerously-skip-permissions`
+  fallback) rather than the data framing alone. Also corrected: polling still needs the home
+  instance reachable, MCP carries no caller identity so a participant resolves from the
+  server-issued `QALATRA_JOB_ID`, and the read-only viewer polls instead of getting the
+  `full_access` SSE stream.
+- A week of new advisories had turned CI red on every branch. Patched in the lockfiles, no API
+  change: root `body-parser` 2.4.0, `qs` 6.17.1, `fast-uri` 3.1.9, `undici` 7.30.1 / 6.29.1,
+  `zod` 4.6.7, `@hono/node-server` 2.1.6; mobile picked up patched `node-forge` (10 advisories, 4 of
+  them high) and `image-size`. UI gets a `minimatch: ^11.0.4` override and is back to zero — every
+  eslint consumer there uses `minimatch.Minimatch`, so v11's object-only CommonJS export is fine,
+  and `npm run lint` proves it.
+- `scripts/audit-mobile.mjs` became `scripts/audit-deps.mjs <root|mobile>` — one implementation for
+  both gates, with `minSeverity` preserving each one's old floor (root moderate, mobile any). The
+  root gate moves from a bare `npm audit` to `npm run audit:root` because root now needs one
+  exception; ui needs none and stays a plain `npm audit`. Anything not named in a scope's allowlist
+  still fails, an allowlisted id that starts naming a different package fails, and an exception
+  whose advisory is gone is reported as removable (that is how the now-deleted `braces` and
+  `node-forge` entries were caught).
+- Two exception sets, each with its removal condition. Root: `minimatch` (GHSA-g3hv-75wg-m249) in
+  electron-builder's packaging chain — the fix is minimatch >= 11.0.1, whose CommonJS export is not
+  callable, and glob@7, `@electron/asar@3`, `dir-compare@4` and `filelist@1` all call it as a
+  function (verified: glob@7 throws mid-walk under v11), while app-builder-lib pins asar and
+  universal exactly. Mobile: `zod` (high, `@expo/cli`), `deepmerge` (no patched release exists),
+  `glob` and `minimatch` (expo-updates / `@expo/fingerprint`) — all four Expo 56 build tooling,
+  never bundled into the app, and all four retired by moving mobile to Expo 58. **That upgrade is
+  the real fix and wants its own task.**
+
 ## A turn that ends on still-running work is a failure, not 'done' (2026-10-23)
 
 - An agent could start a long command in the background, end its turn ("still compiling, I'll wait
