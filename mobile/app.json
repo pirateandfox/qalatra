@@ -42,7 +42,8 @@
           "backgroundColor": "#0d0e18"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-status-bar"
     ],
     "extra": {
       "eas": {
