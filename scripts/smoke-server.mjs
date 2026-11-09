@@ -144,6 +144,17 @@ async function main() {
     const historyMissing = await fetch(`${habitsUrl}/does-not-exist/history?start=2026-01-01&end=2026-01-31`, { headers: authJson })
     if (historyMissing.status !== 404) throw new Error(`Missing habit history expected 404, got ${historyMissing.status}`)
 
+    // Threads: routed, authenticated, and validation errors are 4xx (full flow: test-threads.mjs).
+    const threadsUrl = `http://127.0.0.1:${apiPort}/api/v1/threads`
+    const threadList = await fetch(threadsUrl, { headers: authJson }).then(async res => ({ res, data: await res.json().catch(() => ({})) }))
+    if (!threadList.res.ok || !Array.isArray(threadList.data.threads)) throw new Error(`GET threads expected a list, got ${threadList.res.status}`)
+    const threadsUnauth = await fetch(threadsUrl)
+    if (threadsUnauth.status !== 401) throw new Error(`Unauthenticated threads expected 401, got ${threadsUnauth.status}`)
+    const threadMissing = await fetch(`${threadsUrl}/thr_missing`, { headers: authJson })
+    if (threadMissing.status !== 404) throw new Error(`Missing thread expected 404, got ${threadMissing.status}`)
+    const threadAlone = await fetch(threadsUrl, { method: 'POST', headers: authJson, body: JSON.stringify({ subject: 'alone', participants: [] }) })
+    if (threadAlone.status !== 400) throw new Error(`Thread with no other participant expected 400, got ${threadAlone.status}`)
+
     // The worker policy is authenticated, persisted, validated, and PATCH preserves other keys.
     const settingsUrl = `http://127.0.0.1:${apiPort}/api/v1/settings`
     const unauthorizedPolicy = await fetch(settingsUrl, {

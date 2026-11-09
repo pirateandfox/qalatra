@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { validateThreadSettings } from './threads.js'
 
 let settingsFile = null
 
@@ -13,6 +14,8 @@ export function validateSettings(data) {
   if (Object.hasOwn(data, 'maxConcurrentJobs') && !validJobLimit(data.maxConcurrentJobs)) {
     throw Object.assign(new Error('maxConcurrentJobs must be a nonnegative safe integer'), { status: 400 })
   }
+  const threadsError = validateThreadSettings(data.threads)
+  if (threadsError) throw Object.assign(new Error(threadsError), { status: 400 })
 }
 
 export function resolveMaxConcurrentJobs(settings, onWarn = console.error) {

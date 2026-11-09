@@ -353,6 +353,66 @@ export async function handleV1(req, url, ctx, { parseBody }) {
     }
   }
 
+  // Agent-to-agent threads (docs/agent-to-agent-threads.md). Owner-facing: these routes sit behind
+  // the full_access gate in server/index.js and act as the human participant. Agents use the MCP
+  // tools in mcp/tools/threads.js, which resolve their identity from the job they run in.
+  if (resource === 'threads') {
+    const sp = url.searchParams
+    if (!id && method === 'GET') {
+      return data('threads', await ctx.dbCall('listThreadsDb', {
+        status: sp.get('status') || null,
+        task_id: sp.get('task_id') || null,
+        project: sp.get('project') || null,
+        limit: sp.get('limit') ?? undefined,
+      }))
+    }
+    if (!id && method === 'POST') {
+      const body = await parseBody(req)
+      const opened = await ctx.dbCall('openThreadDb', {
+        subject: body.subject,
+        task_id: body.task_id ?? body.taskId ?? null,
+        participants: body.participants ?? [],
+      }, ctx.loadSettings())
+      ctx.notify?.({ type: 'thread:message', threadId: opened.thread.id })
+      return data('thread', opened)
+    }
+    if (!id) return null
+    if (!action && method === 'GET') {
+      return data('thread', await ctx.dbCall('getThreadDb', id, { tail: sp.get('tail') ?? undefined }))
+    }
+    if (action === 'messages' && method === 'GET') {
+      return data('messages', await ctx.dbCall('readThreadMessagesDb', id, {
+        since_seq: sp.get('since_seq') ?? 0,
+        limit: sp.get('limit') ?? undefined,
+        markRead: sp.get('mark_read') !== '0',
+      }))
+    }
+    if (action === 'messages' && method === 'POST') {
+      const body = await parseBody(req)
+      const posted = await ctx.dbCall('postThreadMessageDb', id, { body: body.body, idempotency_key: body.idempotency_key ?? null })
+      ctx.notify?.({ type: 'thread:message', threadId: id })
+      return data('message', posted.message)
+    }
+    if (action === 'read' && method === 'POST') {
+      const body = await parseBody(req)
+      return result(await ctx.dbCall('markThreadReadDb', id, body.seq))
+    }
+    if (action === 'actions' && method === 'POST') {
+      const verb = parts[3]
+      const body = await parseBody(req)
+      if (verb === 'close') {
+        const closed = await ctx.dbCall('closeThreadDb', id, body.decision)
+        ctx.notify?.({ type: 'thread:message', threadId: id })
+        return data('thread', closed)
+      }
+      if (verb === 'freeze') {
+        const frozen = await ctx.dbCall('freezeThreadDb', id)
+        ctx.notify?.({ type: 'thread:message', threadId: id })
+        return data('thread', frozen)
+      }
+    }
+  }
+
   if (resource === 'settings') {
     if (!id && method === 'GET') return data('settings', ctx.loadSettings())
     if (id === 'worker' && method === 'GET') return data('worker', agentWorkerStatus(ctx.loadSettings()))

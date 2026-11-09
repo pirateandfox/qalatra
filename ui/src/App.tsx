@@ -22,6 +22,7 @@ import MeetingView from './components/MeetingView'
 import CreateTask from './components/CreateTask'
 import HabitsView from './components/HabitsView'
 import HeartbeatsView from './components/HeartbeatsView'
+import ThreadsView from './components/ThreadsView'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import EmailPreview from './components/EmailPreview'
 import { AccountGate } from './components/AccountGate'
@@ -431,7 +432,7 @@ function AppInner() {
         />
 
         <div className={`layout ${selectedId ? 'panel-open' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div style={{ flex: 1, overflowY: nav === 'settings' || nav === 'daily' || nav === 'terminals' || nav === 'files' || nav === 'boxWeb' ? 'hidden' : 'auto', minWidth: 0 }}>
+          <div style={{ flex: 1, overflowY: nav === 'settings' || nav === 'threads' || nav === 'daily' || nav === 'terminals' || nav === 'files' || nav === 'boxWeb' ? 'hidden' : 'auto', minWidth: 0 }}>
             {nav === 'settings' ? (
               <SettingsView sidebarConfig={sidebarConfig} onSidebarConfigChange={handleSidebarConfigChange} />
             ) : nav === 'daily' ? (
@@ -440,6 +441,8 @@ function AppInner() {
               </Suspense>
             ) : nav === 'heartbeats' ? (
               <HeartbeatsView />
+            ) : nav === 'threads' ? (
+              <ThreadsView />
             ) : nav === 'terminals' ? (
               <Suspense fallback={<div style={{ color: 'var(--muted)', padding: '40px', textAlign: 'center' }}>Loading terminals...</div>}>
                 <TerminalManagerView />

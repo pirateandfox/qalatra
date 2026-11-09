@@ -19,6 +19,7 @@ import { toolDefs as habitDefs,       handlers as habitHandlers }       from './
 import { toolDefs as healthDefs,      handlers as healthHandlers }      from './tools/health.js';
 import { toolDefs as heartbeatDefs,   handlers as heartbeatHandlers }   from './tools/heartbeats.js';
 import { toolDefs as capabilityDefs,  handlers as capabilityHandlers }  from './tools/capabilities.js';
+import { toolDefs as threadDefs,      handlers as threadHandlers }      from './tools/threads.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_FILE = process.env.TASKOS_SETTINGS_FILE
@@ -75,8 +76,8 @@ function checkMcpAuth(req, res) {
   return true
 }
 
-const allDefs     = [...taskDefs, ...triageDefs, ...briefingDefs, ...syncDefs, ...notesDefs, ...agentDefs, ...habitDefs, ...healthDefs, ...heartbeatDefs, ...capabilityDefs];
-const allHandlers = { ...taskHandlers, ...triageHandlers, ...briefingHandlers, ...syncHandlers, ...notesHandlers, ...agentHandlers, ...habitHandlers, ...healthHandlers, ...heartbeatHandlers, ...capabilityHandlers };
+const allDefs     = [...taskDefs, ...triageDefs, ...briefingDefs, ...syncDefs, ...notesDefs, ...agentDefs, ...habitDefs, ...healthDefs, ...heartbeatDefs, ...capabilityDefs, ...threadDefs];
+const allHandlers = { ...taskHandlers, ...triageHandlers, ...briefingHandlers, ...syncHandlers, ...notesHandlers, ...agentHandlers, ...habitHandlers, ...healthHandlers, ...heartbeatHandlers, ...capabilityHandlers, ...threadHandlers };
 
 function createMcpServer({ fullAccess = false } = {}) {
   const server = new Server(

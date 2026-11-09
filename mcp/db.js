@@ -5,6 +5,7 @@ import os from 'os';
 import fs from 'fs';
 import { ensureAgentSchema, ensureCapabilitySchema } from '../server/capability-registry.js';
 import { ensureDailyNoteSearchSchema } from '../server/daily-note-search.js';
+import { ensureThreadSchema } from '../server/threads.js';
 
 // Pure business logic (date math, recurrence, ai_context ordering, heartbeat/habit scheduling)
 // lives in server/task-logic.js — the single source shared with db-worker.js so the two runtimes
@@ -197,6 +198,7 @@ function initSchema(db) {
   ensureAgentSchema(db);
   ensureCapabilitySchema(db);
   ensureDailyNoteSearchSchema(db);
+  ensureThreadSchema(db);
 
   // Migrations — add columns that may not exist in older DBs
   const tryAlter = sql => { try { db.exec(sql); } catch (_) {} };

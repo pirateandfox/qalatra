@@ -14,6 +14,7 @@ import {
   syncScannedAgents,
 } from './server/capability-registry.js'
 import { ensureDailyNoteSearchSchema, searchDailyNotes } from './server/daily-note-search.js'
+import * as threads from './server/threads.js'
 import { autoAttachMentionedFiles } from './server/mentioned-files.js'
 // Pure business logic (date math, ai_context ordering, heartbeat/habit scheduling) is single-sourced
 // in server/task-logic.js — the same module mcp/db.js imports — so the two runtimes cannot silently
@@ -203,6 +204,8 @@ function migrate() {
   ensureAgentSchema(db)
   ensureCapabilitySchema(db)
   ensureDailyNoteSearchSchema(db)
+  // Agent-to-agent threads (docs/agent-to-agent-threads.md); shared with mcp/db.js.
+  threads.ensureThreadSchema(db)
   // sync_log is otherwise created only by mcp/db.js, so with MCP disabled (QALATRA_START_MCP=0)
   // db-worker's deleteTask threw 'no such table: sync_log' (bug C19). Create it here too, matching
   // mcp/db.js's schema, so deletion works regardless of whether the MCP process ran.
@@ -1716,6 +1719,33 @@ function listHeartbeatJobs(heartbeatId, limit = 10) {
   return withTimestampZones(rows, 'agent_jobs')
 }
 
+// ── Threads ───────────────────────────────────────────────────────────────────
+// Thin wrappers over server/threads.js (shared with the MCP process). Calls arriving through the
+// HTTP API act as the human owner: the API's full_access token is the owner's own client.
+
+const HUMAN = { kind: 'human' }
+function listThreadsDb(filters) { return threads.listThreads(db, filters ?? {}) }
+function getThreadDb(id, opts) { return threads.getThread(db, id, opts ?? {}) }
+function readThreadMessagesDb(id, opts) { return threads.readThreadMessages(db, id, { ...(opts ?? {}), caller: HUMAN }) }
+function openThreadDb(args, settings) { return threads.openThread(db, { ...(args ?? {}), caller: HUMAN, settings: settings ?? {} }) }
+function postThreadMessageDb(id, args) { return threads.postThreadMessage(db, id, { ...(args ?? {}), caller: HUMAN }) }
+function closeThreadDb(id, decision) { return threads.closeThread(db, id, { caller: HUMAN, decision }) }
+function freezeThreadDb(id) { return threads.freezeThread(db, id, { caller: HUMAN }) }
+function markThreadReadDb(id, seq) { return threads.markThreadReadAs(db, id, HUMAN, seq) }
+function sweepThreadsDb(opts) { return threads.sweepAbandonedThreads(db, opts ?? {}) }
+// Queue one reply turn per (thread, participant) with unread messages. agentPaths is already
+// filtered by the server to folders that declare a usable thread_reply profile.
+function queueThreadRepliesDb(agentPaths, opts) {
+  const pending = threads.findPendingThreadReplies(db, { agentPaths: agentPaths ?? [], ...(opts ?? {}) })
+  return pending.map(r => queueExternalJob({
+    agent_path: r.agent_path,
+    prompt: r.prompt,
+    external_ref: r.external_ref,
+    external_meta: { thread_reply: true, thread_id: r.thread_id, participant_id: r.participant_id, seq: r.latest_seq },
+    resume_session: false,
+  }))
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 const METHODS = {
@@ -1746,6 +1776,8 @@ const METHODS = {
   setAgentJobRunCwd, listActiveTaskRefs, lastJobActivityUnder, listWorktreeAgents,
   listHeartbeats, createHeartbeat, updateHeartbeat, deleteHeartbeat, toggleHeartbeat,
   getDueHeartbeats, fireHeartbeat, listHeartbeatJobs,
+  listThreadsDb, getThreadDb, readThreadMessagesDb, openThreadDb, postThreadMessageDb,
+  closeThreadDb, freezeThreadDb, markThreadReadDb, sweepThreadsDb, queueThreadRepliesDb,
 }
 
 parentPort.on('message', ({ id, method, args }) => {

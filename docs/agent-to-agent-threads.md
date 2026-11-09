@@ -1,9 +1,35 @@
 # Agent-to-agent threads — design note
 
-**This note contains no implementation.** Justin released PIR-324 on 2026-11-03 as a design note
+**This note was written before any implementation; see "Build status" for what has since been built.** Justin released PIR-324 on 2026-11-03 as a design note
 only. The note below *is* the deliverable; it is written against the actual Qalatra code on
 `origin/develop` @ `81d130c`, so every mechanism names the file it would live in and the existing
 pattern it copies. Justin reads it and sequences any build as a separate task.
+
+## Build status (2026-11-09)
+
+Steps 1–2 of the build order are in the code: threads between **local** agent folders and the
+human on one box, and reply turns (§5b). The code is `server/threads.js` (schema and every
+operation, shared by `db-worker.js` and `mcp/tools/threads.js`), the `/api/v1/threads` routes in
+`server/v1.js`, the reply ticker and the `thread_reply` launch override in `server/workers.js`, and
+`ui/src/components/ThreadsView.tsx`. Tests: `scripts/test-threads.mjs`. Where the build differs from
+the text below:
+
+- Participant kind **`agent`** names a local folder (`agent_path` set). The note's `instance` stays
+  for another box. A single-box thread has no invitations; local participants are `joined` at
+  creation.
+- Policy defaults come from `settings.threads.defaults` (200 messages, 16 KB, no TTL), not
+  `externalDefaults`, because there are no external participants yet. `threads.maxAutoReplies`
+  (default 20 reply jobs per thread) is new: it stops two auto-replying agents from ping-ponging to
+  the message budget.
+- Message bodies in a reply prompt are fenced with a per-prompt random nonce
+  (`<<<a81d1bb2 message 2 from …>>> … <<<a81d1bb2 end>>>`), not a fixed `--- end ---`, so a message
+  cannot close its own data block.
+- Freeze is human-only (§8); close is owner-or-human (§5).
+
+Not built: peers, invites, the delivery outbox ticker, the narrow-scope exemption in the `/api/`
+gate, `view_url`, and external guests — steps 3–5. For step 3 every box pair needs one
+`thread_peer:<name>` token in each direction, issued by the box it authenticates *to*; those keys
+settle who may call. Separately, the home box of each thread must be reachable from its peers.
 
 ## Goal
 

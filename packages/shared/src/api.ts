@@ -28,6 +28,11 @@ import type {
   TaskData,
   TerminalSession,
   TerminalStatus,
+  ThreadDetail,
+  ThreadMessage,
+  ThreadMessagePage,
+  Thread,
+  OpenThreadInput,
   WorkspaceRoot,
 } from './types'
 import { currentServerInstance, enc, httpJson, jsonRequest, v1 } from './runtime'
@@ -386,6 +391,47 @@ export async function toggleHeartbeat(id: string): Promise<void> {
 export async function listHeartbeatJobs(id: string, limit = 10): Promise<HeartbeatJob[]> {
   const data = await v1(`/heartbeats/${enc(id)}/jobs?limit=${limit}`, { method: 'GET' })
   return data.jobs ?? []
+}
+
+// ── Threads ──────────────────────────────────────────────────────────────────
+
+export async function listThreads(filters: { status?: string; task_id?: string } = {}): Promise<Thread[]> {
+  const q = new URLSearchParams()
+  if (filters.status) q.set('status', filters.status)
+  if (filters.task_id) q.set('task_id', filters.task_id)
+  const qs = q.toString()
+  const data = await v1(`/threads${qs ? `?${qs}` : ''}`, { method: 'GET' })
+  return data.threads ?? []
+}
+
+export async function openThread(input: OpenThreadInput): Promise<ThreadDetail> {
+  const data = await v1('/threads', jsonRequest('POST', input))
+  return data.thread
+}
+
+export async function getThread(id: string, tail = 0): Promise<ThreadDetail> {
+  const data = await v1(`/threads/${enc(id)}?tail=${tail}`, { method: 'GET' })
+  return data.thread
+}
+
+export async function readThreadMessages(id: string, sinceSeq = 0, limit = 200): Promise<ThreadMessagePage> {
+  const data = await v1(`/threads/${enc(id)}/messages?since_seq=${sinceSeq}&limit=${limit}`, { method: 'GET' })
+  return data.messages
+}
+
+export async function postThreadMessage(id: string, body: string): Promise<ThreadMessage> {
+  const data = await v1(`/threads/${enc(id)}/messages`, jsonRequest('POST', { body }))
+  return data.message
+}
+
+export async function closeThread(id: string, decision: string): Promise<ThreadDetail> {
+  const data = await v1(`/threads/${enc(id)}/actions/close`, jsonRequest('POST', { decision }))
+  return data.thread
+}
+
+export async function freezeThread(id: string): Promise<ThreadDetail> {
+  const data = await v1(`/threads/${enc(id)}/actions/freeze`, jsonRequest('POST', {}))
+  return data.thread
 }
 
 export async function fetchAttachments(taskId: string): Promise<Attachment[]> {

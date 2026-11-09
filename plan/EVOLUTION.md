@@ -1,5 +1,56 @@
 # Qalatra — Evolution Notes
 
+## Agent-to-agent threads, steps 1–2: single-box threads and reply turns (2026-11-09)
+
+- **Built from `docs/agent-to-agent-threads.md`, steps 1 and 2 of its build order.** Threads work
+  between local agent folders and the human on one Qalatra instance. Cross-box peers, the read-only
+  `view_url` and external guests are not built; asking for an `instance` or `external` participant
+  is a clear 400/403, not a silent drop.
+- **One module, two processes.** `server/threads.js` owns the schema (`threads`,
+  `thread_participants`, `thread_messages`, `thread_deliveries`) and every operation, called by
+  both `db-worker.js` (HTTP API, as the human) and `mcp/tools/threads.js` (agents). The schema
+  already carries the cross-box columns (`home_url`, `instance_url`, nullable `seq`, the delivery
+  outbox) so step 3 adds behaviour, not migrations. Participant kind `agent` (a local folder) was
+  added alongside the note's `instance`/`external`/`human`, because a folder on the same box is
+  not another instance.
+- **Identity is the running job, not an argument.** Thread tools take `job_id` (the agent's
+  `QALATRA_JOB_ID`); `resolveThreadCaller` accepts it only if it names a *running* `agent_jobs` row
+  and takes the folder from that row. No `job_id` = the owner's session = the human participant,
+  which on a `local-bypass` MCP any loopback caller also gets. That limit is the note's, stated
+  rather than closed.
+- **Invariants in code.** Append-only transcript; `seq` allocated inside the insert transaction;
+  bodies sanitized before storage with a visible `redacted_count` (key blocks, `qalatra_` and
+  vendor tokens, auth headers, AWS keys, secret-named `.env` lines, absolute home paths, with the
+  limits from §5c); a participant set needs the human or `threads.authority`; only the owner or
+  the human can close, and only closing writes `kind: 'decision'`; freeze is human-only. A
+  decision on a task-attached thread becomes a task note (`author: 'thread'`). Policy (message
+  budget, byte cap, TTL) is frozen at creation; expired threads close lazily on any read/write and
+  by an hourly sweep that also closes threads idle for `threads.abandonAfterDays` (default 14).
+  Found while testing: a post to an expired thread rolled back its own expiry closure, because the
+  409 aborted the transaction the closure ran in — expiry now runs before it.
+- **Reply turns (§5b).** Every 30s the server looks for local agent participants with unread
+  messages from someone else, in folders listed in `threads.autoReplyAgents` whose `agent.config`
+  declares `thread_reply` (a command, or `{ command, runtime }`). Each gets one job through
+  `queueExternalJob`, `external_ref = thread:<thread>:<participant>:<seq>`, so a message earns at
+  most one turn and a turn that ends without posting is not retried until something new arrives.
+  The prompt is Qalatra's fixed template; bodies sit inside nonce-fenced data blocks, so a message
+  cannot forge the closing fence. The job runs the `thread_reply` command — never the folder's
+  `command` or the `defaultAgentCommand` fallback — and launch refuses `--dangerously-skip-permissions`,
+  `--yolo` and `--dangerously-bypass-approvals-and-sandbox` (a shape check, not a sandbox). A folder
+  listed without a usable profile is logged once and gets no turns. `threads.maxAutoReplies`
+  (default 20) caps reply jobs per thread, which is what stops two auto-repliers ping-ponging.
+  Reply jobs have no task, so they never resume a session and never touch a task's notes.
+- **Surfaces.** REST under `/api/v1/threads` (full_access, as the human); MCP `open_thread`,
+  `list_threads`, `get_thread`, `read_thread`, `post_thread_message`, `close_thread`,
+  `freeze_thread`; a Threads view in the desktop sidebar (list, transcript, composer, close with
+  decision, freeze, new thread), which polls every 5s because MCP writes happen in another process
+  and cannot reach the event stream (`thread:message` covers API writes); a `threads` block in
+  `morning_briefing`/`afternoon_briefing` (open threads with unread messages, decisions since).
+- **Settings** (`threads`, validated by `validateSettings`): `enabled` (default true), `authority`,
+  `humanName` (default "Owner"), `abandonAfterDays`, `autoReplyAgents`, `maxAutoReplies`,
+  `defaults.{maxMessages, ttlHours, maxMessageBytes}` (200 / none / 16 KB).
+- Covered by `npm run test:threads` (in `ci:server`) and a threads block in `smoke:server`.
+
 ## The OTA runtime guard now enforces the rule it documents (2026-11-03)
 
 - **It promised two things it did not do.** `scripts/check-mobile-runtime.mjs`, added the same day

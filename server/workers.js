@@ -10,6 +10,7 @@ import { createAgentWatchdog } from './agent-watchdog.js'
 import { loadFolderRc } from './integrations/flightdesk/rc.js'
 import { configBranchMismatches, ensureTaskWorktree, formatConfigBranchWarning, sweepIdleWorktrees } from './worktrees.js'
 import { createJobScheduler } from './job-scheduler.js'
+import { threadSettings, threadReplyProfile, threadReplyCommandError, threadReplyMeta } from './threads.js'
 import { createScopeMemoryMonitor, formatOomNotice, isOomKill } from './agent-memory.js'
 import { abandonedWork, EXITED_WITH_CHILDREN, formatAbandonedNotice } from './agent-leftovers.js'
 import {
@@ -690,8 +691,53 @@ export function startBackgroundWorkers(ctx) {
     .catch(err => console.error(`[workers] worktree sweep failed: ${err.message}`))
   setTimeout(sweepWorktrees, 10 * 60_000)
   setInterval(sweepWorktrees, 6 * 60 * 60_000)
+  // Threads with no message for threads.abandonAfterDays close as 'abandoned'; expired ones close too.
+  const sweepThreads = () => dbCall('sweepThreadsDb', { days: threadSettings(loadSettings()).abandonAfterDays })
+    .then(r => { if (r.abandoned || r.expired) console.error(`[threads] closed ${r.abandoned} abandoned, ${r.expired} expired thread(s)`) })
+    .catch(err => console.error(`[threads] sweep failed: ${err.message}`))
+  setTimeout(sweepThreads, 2 * 60_000)
+  setInterval(sweepThreads, 60 * 60_000)
+  // Thread reply turns: one job per (thread, participant) with unread messages, for folders listed in
+  // threads.autoReplyAgents that declare a thread_reply profile. Queued here, admitted by the normal
+  // scheduler with its concurrency, timeout and cgroup limits.
+  setInterval(() => queueThreadReplies({ dbCall, loadSettings })
+    .catch(err => console.error(`[threads] reply queueing failed: ${err.message}`)), 30_000)
   setTimeout(() => runDueHeartbeats({ dbCall }).catch(() => {}), 5_000)
   setInterval(() => runDueHeartbeats({ dbCall }).catch(() => {}), 60_000)
+}
+
+// Folders in threads.autoReplyAgents whose agent.config declares a usable thread_reply profile. A
+// folder without one is skipped with a log line: its messages wait to be read, unanswered.
+export function threadReplyFolders(settings, { readConfig = p => JSON.parse(fs.readFileSync(path.join(p, 'agent.config'), 'utf8')), onWarn = console.error } = {}) {
+  const cfg = threadSettings(settings)
+  if (!cfg.enabled) return []
+  const folders = []
+  for (const folder of cfg.autoReplyAgents) {
+    let agentCfg = null
+    try { agentCfg = readConfig(folder) } catch (err) {
+      onWarn(`[threads] ${folder} is in threads.autoReplyAgents but its agent.config could not be read (${err.code ?? err.message}); no reply turns`)
+      continue
+    }
+    const profile = threadReplyProfile(agentCfg)
+    if (!profile) { onWarn(`[threads] ${folder} is in threads.autoReplyAgents but declares no thread_reply profile; no reply turns`); continue }
+    const refusal = threadReplyCommandError(profile.command)
+    if (refusal) { onWarn(`[threads] ${folder}: ${refusal}; no reply turns`); continue }
+    folders.push(folder)
+  }
+  return folders
+}
+
+const warnedThreadFolders = new Set()
+async function queueThreadReplies({ dbCall, loadSettings }) {
+  const settings = loadSettings()
+  const folders = threadReplyFolders(settings, {
+    onWarn: message => { if (!warnedThreadFolders.has(message)) { warnedThreadFolders.add(message); console.error(message) } },
+  })
+  if (!folders.length) return []
+  const queued = await dbCall('queueThreadRepliesDb', folders, { maxAutoReplies: threadSettings(settings).maxAutoReplies })
+  const fresh = queued.filter(j => !j.existing)
+  if (fresh.length) console.error(`[threads] queued ${fresh.length} reply turn(s)`)
+  return queued
 }
 
 const agentsRootFor = settings => settings.agentsRoot || settings.terminalCwd || process.env.HOME
@@ -803,6 +849,24 @@ async function launchAgentJob({ dbCall, notify, job, settings, release, dataDir 
     if (err?.code !== 'ENOENT') {
       console.error(`[workers] could not read ${configPath} for job ${job.id}: ${err.message} — continuing with defaults; all agent.config settings (command, runtime, timeouts, memory, worktrees, concurrency_key) are ignored for this run`)
     }
+  }
+
+  // A thread reply runs under the folder's declared thread_reply profile or not at all — never the
+  // folder's normal command or the defaultAgentCommand fallback (docs/agent-to-agent-threads.md §5b).
+  const threadReply = threadReplyMeta(job)
+  if (threadReply) {
+    const profile = threadReplyProfile(cfg)
+    const refusal = !profile
+      ? `This folder declares no thread_reply profile in agent.config, so it cannot take thread reply turns (${job.agent_path})`
+      : threadReplyCommandError(profile.command)
+    if (refusal) {
+      release()
+      await finishAgentJobSafely({ dbCall, notify, job, status: 'failed', result: `${refusal} (${job.agent_path})`, sessionId: null, failureKind: 'launch_failed' })
+      return false
+    }
+    agentCommand = profile.command
+    cfg = { ...cfg, command: profile.command, runtime: profile.runtime ?? undefined }
+    if (cfg.runtime === undefined) delete cfg.runtime
   }
 
   if (cfg?.coding && job.task_id) {

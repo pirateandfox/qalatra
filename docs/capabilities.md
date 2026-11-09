@@ -109,6 +109,24 @@ Title and description are capped at 64 KiB in the environment. These names are r
 
 A command without placeholders runs in prompt mode, where Qalatra appends the prompt and output flags for a specific CLI. Set `"runtime": "claude" | "codex" | "raw"` to choose the adapter explicitly; that always wins. Without it, Qalatra infers the runtime from the command's binary (first argv element, or the first word of a shell string after any `NAME=value` assignments, compared by basename): `codex` gets the Codex adapter, and `claude` or any other binary gets the Claude adapter. An unrecognised binary also logs a warning, because Claude's prompt flags are appended to it — correct for a wrapper script that forwards to claude, wrong for another CLI. For a non-Claude CLI set `"runtime": "raw"` (run untouched, stdout as the result, no resume) or `"codex"`. The same inference applies to the server's `defaultAgentCommand` when a folder has no `agent.config` or no `command`.
 
+### Thread reply profile
+
+`thread_reply` is the command used **only** for agent-to-agent thread reply turns
+(`docs/agent-to-agent-threads.md`, §5b). It is either a command (string or argv array, same forms as
+`command`) or `{ "command": …, "runtime": … }`. A folder gets reply turns only when it is listed in
+the server's `threads.autoReplyAgents` setting **and** declares this profile; there is no fallback
+to `command` or `defaultAgentCommand`. Launch refuses a profile containing
+`--dangerously-skip-permissions`, `--yolo` or `--dangerously-bypass-approvals-and-sandbox` — keep it to
+a permission mode with an allowlist that can read local context and call the Qalatra MCP tools
+`read_thread` and `post_thread_message`:
+
+```json
+{
+  "command": "claude --dangerously-skip-permissions",
+  "thread_reply": ["claude", "--permission-mode", "default", "--allowedTools", "Read,Grep,Glob,mcp__qalatra__read_thread,mcp__qalatra__post_thread_message,mcp__qalatra__get_thread"]
+}
+```
+
 If `agent.config` exists but cannot be read or is not valid JSON, the server logs the path and error; the agent scan skips the folder, and a queued job runs with the default command and none of the file's settings.
 
 Qalatra infers a default capability from that:

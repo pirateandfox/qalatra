@@ -17,7 +17,7 @@ import { getActiveInstanceId, getInstances, LOCAL_INSTANCE_ID } from '@qalatra/s
 
 export type NavSection =
   | 'priority' | 'daily' | 'code' | 'terminals' | 'files' | 'boxWeb'
-  | 'reading' | 'project' | 'backlog' | 'habits' | 'heartbeats' | 'settings'
+  | 'reading' | 'project' | 'backlog' | 'habits' | 'heartbeats' | 'threads' | 'settings'
 
 export interface NavItem { key: NavSection; icon: string; label: string }
 
@@ -34,6 +34,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'backlog',    icon: '≡',  label: 'Backlog' },
   { key: 'habits',     icon: '◎',  label: 'Habits' },
   { key: 'heartbeats', icon: '⚡', label: 'Heartbeats' },
+  { key: 'threads',    icon: '⇄',  label: 'Threads' },
 ]
 
 export const TOGGLEABLE_SECTIONS: NavSection[] = NAV_ITEMS.map(i => i.key)

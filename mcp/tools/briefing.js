@@ -1,5 +1,6 @@
 import { openDb, today, nowIso, appendAiContext, nextRecurrenceDate, offsetDate, daysBetween } from '../db.js';
 import { v4 as uuidv4 } from 'uuid';
+import { threadBriefing } from '../../server/threads.js';
 
 // Coding tasks — anything an orchestrator such as FlightDesk drives — are not the owner's to-dos.
 // Keyed on the column as well as task_type so a task bound with the wrong type can't leak in.
@@ -140,7 +141,10 @@ export const handlers = {
       tasks_without_estimate: allWorkable.length - tasksWithEstimate,
     };
 
-    return { overdue, waking_up, due_today, active_count, by_context, capacity };
+    // Threads: open ones with messages the owner has not read, and decisions from the last 24h.
+    const threads = threadBriefing(db, { sinceIso: new Date(Date.now() - 86400_000).toISOString() });
+
+    return { overdue, waking_up, due_today, active_count, by_context, capacity, threads };
   },
 
   afternoon_briefing() {
@@ -166,7 +170,11 @@ export const handlers = {
        ORDER BY due_date ASC`
     ).all(t);
 
-    return { completed_today, still_active, overdue };
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const threads = threadBriefing(db, { sinceIso: midnight.toISOString() });
+
+    return { completed_today, still_active, overdue, threads };
   },
 
   stale_backlog_review(args) {
