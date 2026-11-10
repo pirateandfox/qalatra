@@ -1269,6 +1269,16 @@ const JOB_USES_WORKTREE_SQL = `(
       AND (p.run_cwd IS NULL OR p.run_cwd = p.agent_path)
   )
 )`
+// A thread reply turn has no task, so it resumes the session of the previous turn for the same
+// (thread, participant) — its external_ref prefix — and a conversation keeps its context across turns.
+function threadReplySession(job) {
+  const meta = threads.threadReplyMeta(job)
+  if (!meta?.thread_id || !meta?.participant_id) return null
+  const prefix = `${threads.THREAD_REPLY_REF_PREFIX}${meta.thread_id}:${meta.participant_id}:`.replace(/[%_\\]/g, '\\$&')
+  return db.prepare(`SELECT session_id FROM agent_jobs WHERE id != ? AND agent_path = ? AND external_ref LIKE ? ESCAPE '\\' AND session_id IS NOT NULL
+                     AND (status IN ('done', 'timed_out', 'orphaned') OR (status = 'failed' AND terminated_by IN ('oom', 'exited_with_children')))
+                     ORDER BY completed_at DESC, rowid DESC LIMIT 1`).get(job.id, job.agent_path, `${prefix}%`) ?? null
+}
 function getQueuedJobs(limit) {
   const jobs = db.prepare(`
     WITH base AS (
@@ -1294,7 +1304,7 @@ function getQueuedJobs(limit) {
     const canResume = task?.agent_resume !== 0 && job.resume_session !== 0
     const prev = canResume && job.task_id
       ? db.prepare(`SELECT session_id FROM agent_jobs WHERE task_id = ? AND session_id IS NOT NULL AND (status IN ('done', 'timed_out', 'orphaned') OR (status = 'failed' AND terminated_by IN ('oom', 'exited_with_children'))) ORDER BY completed_at DESC, rowid DESC LIMIT 1`).get(job.task_id)
-      : null
+      : canResume ? threadReplySession(job) : null
     return { ...job, prevSessionId: prev?.session_id ?? null }
   })
 }
@@ -1742,9 +1752,28 @@ function queueThreadRepliesDb(agentPaths, opts) {
     prompt: r.prompt,
     external_ref: r.external_ref,
     external_meta: { thread_reply: true, thread_id: r.thread_id, participant_id: r.participant_id, seq: r.latest_seq },
-    resume_session: false,
+    // Resumes the previous turn's session for this (thread, participant); see threadReplySession.
+    resume_session: true,
   }))
 }
+
+// Cross-box (step 3). Peer registry: owner-facing, never returns a key, except
+// listThreadPeerSecretsDb, which only the sync ticker in the server process calls.
+function listThreadPeersDb() { return threads.listThreadPeers(db) }
+function upsertThreadPeerDb(args) { return threads.upsertThreadPeer(db, args ?? {}) }
+function removeThreadPeerDb(name) { return threads.removeThreadPeer(db, name) }
+function listThreadPeerSecretsDb() { return threads.listThreadPeerSecrets(db) }
+function recordThreadPeerSyncDb(name, args) { return threads.recordThreadPeerSync(db, name, args ?? {}) }
+// Peer-facing, on the home box: peerName comes from the caller's thread_peer:<name> token scope.
+function peerListThreadsDb(peerName, opts) { return threads.peerListThreads(db, peerName, opts ?? {}) }
+function peerReadMessagesDb(peerName, id, opts) { return threads.peerReadMessages(db, peerName, id, opts ?? {}) }
+function peerPostMessageDb(peerName, id, args) { return threads.peerPostMessage(db, peerName, id, args ?? {}) }
+function peerAcceptThreadDb(peerName, id) { return threads.peerAcceptThread(db, peerName, id) }
+// Mirror side.
+function applyPeerThreadDb(args) { return threads.applyPeerThread(db, args ?? {}) }
+function applyPeerMessagesDb(args) { return threads.applyPeerMessages(db, args ?? {}) }
+function dueThreadDeliveriesDb(opts) { return threads.dueThreadDeliveries(db, opts ?? {}) }
+function recordThreadDeliveryDb(id, args) { return threads.recordThreadDelivery(db, id, args ?? {}) }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
@@ -1778,6 +1807,9 @@ const METHODS = {
   getDueHeartbeats, fireHeartbeat, listHeartbeatJobs,
   listThreadsDb, getThreadDb, readThreadMessagesDb, openThreadDb, postThreadMessageDb,
   closeThreadDb, freezeThreadDb, markThreadReadDb, sweepThreadsDb, queueThreadRepliesDb,
+  listThreadPeersDb, upsertThreadPeerDb, removeThreadPeerDb, listThreadPeerSecretsDb, recordThreadPeerSyncDb,
+  peerListThreadsDb, peerReadMessagesDb, peerPostMessageDb, peerAcceptThreadDb,
+  applyPeerThreadDb, applyPeerMessagesDb, dueThreadDeliveriesDb, recordThreadDeliveryDb,
 }
 
 parentPort.on('message', ({ id, method, args }) => {

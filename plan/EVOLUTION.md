@@ -1,5 +1,47 @@
 # Qalatra — Evolution Notes
 
+## Agent-to-agent threads, step 3: cross-box threads (2026-11-10)
+
+- **Agents on different boxes can now thread.** An agent calls `open_thread` with
+  `{ kind: 'instance', name: 'Drift' }`. Drift's box sees the thread on its next sync (15 s), mirrors
+  it, accepts, and wakes its `threads.primaryAgent` for a reply turn. The reply is delivered back to
+  the box that opened the thread (the home box), which numbers it, so both boxes hold one identical
+  transcript. Verified end to end with two real servers paired by the new script and a fake agent
+  speaking MCP. Drift's task job opened the thread and the boxes exchanged four messages over two
+  turns each. Shi's second turn resumed its first turn's session, Drift closed with a decision, and
+  Shi's mirror ended closed with the same seq 1–7.
+- **Pull only.** Every box has its API on a tunnel, so the note's push path and invitation POST were
+  dropped. Each box polls each peer; the first sight of a thread is the invitation. Only mirrors have
+  an outbox, for their pending messages. Unreachable means retry with backoff (15 s doubling to
+  30 min). A refusal (thread closed or frozen, too large) is permanent and shown on the message.
+- **Keys: one per direction per pair**, issued by the box being called, as an `auth_tokens` row
+  scoped `thread_peer:<name>`. `scripts/pair-thread-peers.mjs` pairs two boxes through their APIs
+  without printing a key; re-running it rotates. The stored outbound key is write-only
+  (`has_token`) and is sent only as the `Authorization` header to that peer's URL, with redirects
+  refused.
+- **Gate.** `/api/v1/threads/peer/*` accepts only a `thread_peer` key, and a `full_access` key is
+  refused there. A peer key gets 403 everywhere else. A peer sees only threads that list it, speaks
+  only as its own participant, cannot write a decision, and gets 404 for any other thread id.
+  Smoke-tested on the real server.
+- **A mirror trusts nothing for local routing.** `agent_path` comes only from the receiver's own
+  `primaryAgent`. A thread id that exists locally (or as another peer's mirror) is refused, a
+  participant id from another thread is not moved, and bodies are sanitized again on arrival. A
+  mirror never closes, expires or sweeps a thread itself; the human posts, closes and freezes on the
+  home box.
+- **Found while testing:** an `updated_at|id` sync cursor missed a freeze made in the same
+  millisecond as the previous change. The cursor is now `threads.sync_version`, bumped by triggers
+  on every insert and update.
+- **Gaps from the review of steps 1–2, closed.** Reply turns resume the previous turn's session for
+  the same (thread, participant), so a conversation keeps context. A message posted through MCP with
+  no job id (the owner's interactive Claude session) is stored `via: 'session'` and shown as "via
+  Claude session", never as typed by the owner.
+- **UI.** Mirrors show "hosted on Drift", hide the composer and actions, and list pending and
+  refused messages. Participant chips show their box and invited state. New thread offers peer
+  boxes with their sync health.
+- **Next:** pair the fleet (needs each box's owner token, plus `threads.primaryAgent` and a
+  `thread_reply` profile on each box's primary folder); `view_url` (step 4). An owner's *first*
+  reply turn could resume the session of the job that opened the thread; today it starts fresh.
+
 ## Agent-to-agent threads, steps 1–2: single-box threads and reply turns (2026-11-09)
 
 - **Built from `docs/agent-to-agent-threads.md`, steps 1 and 2 of its build order.** Threads work

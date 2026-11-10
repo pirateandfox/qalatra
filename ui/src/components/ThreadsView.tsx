@@ -4,6 +4,7 @@ import {
   fetchAgentsDb,
   freezeThread,
   getThread,
+  listThreadPeers,
   listThreads,
   openThread,
   postThreadMessage,
@@ -11,6 +12,7 @@ import {
   subscribeServerEvents,
   type AgentRecord,
   type Thread,
+  type ThreadPeer,
   type ThreadDetail,
   type ThreadMessage,
 } from '../api'
@@ -157,6 +159,10 @@ function ThreadPane({ detail, messages, onChanged }: { detail: ThreadDetail; mes
   const [error, setError] = useState<string | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const isOpen = thread.status === 'open'
+  // A mirror: another box hosts this thread. The human reads here and acts on the home box.
+  const mirrorOf = thread.home_url ? (thread.home_peer ?? 'another box') : null
+  const canAct = isOpen && !mirrorOf
+  const pending = detail.pending_messages ?? []
   const lastSeq = messages.length ? messages[messages.length - 1].seq : 0
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [thread.id, lastSeq])
@@ -186,23 +192,31 @@ function ThreadPane({ detail, messages, onChanged }: { detail: ThreadDetail; mes
         <h2>{thread.subject}</h2>
         <div className="thread-pane-meta">
           <span className={`thread-status thread-status--${thread.status}`}>{statusLabel(thread)}</span>
+          {mirrorOf && <span className="thread-hosted" title={thread.home_url ?? undefined}>· hosted on {mirrorOf}</span>}
           {thread.project && <span>· {thread.project}</span>}
           {budget && <span>· {budget}</span>}
         </div>
         <div className="thread-participants">
           {participants.map(p => (
-            <span key={p.id} className={`thread-chip thread-chip--${p.kind}`} title={p.agent_path ?? p.kind}>
-              {p.display_name}{p.role === 'owner' && p.kind !== 'human' ? ' (owner)' : ''}
+            <span
+              key={p.id}
+              className={`thread-chip thread-chip--${p.kind} ${p.state === 'invited' ? 'thread-chip--invited' : ''}`}
+              title={[p.agent_path ?? (p.instance_name ? `on ${p.instance_name}` : p.kind), p.state === 'invited' ? 'invited, not joined yet' : null].filter(Boolean).join(' · ')}
+            >
+              {p.display_name}
+              {p.instance_name && p.instance_name.toLowerCase() !== p.display_name.toLowerCase() && p.kind !== 'human' ? ` @${p.instance_name}` : ''}
+              {p.role === 'owner' && p.kind !== 'human' ? ' (owner)' : ''}
+              {p.state === 'invited' ? ' (invited)' : ''}
             </span>
           ))}
         </div>
-        {isOpen && (
+        {canAct && (
           <div className="thread-actions">
             <button disabled={busy} onClick={() => setClosing(c => !c)}>Close with decision</button>
             <button disabled={busy} onClick={() => run(() => freezeThread(thread.id))}>Freeze</button>
           </div>
         )}
-        {closing && isOpen && (
+        {closing && canAct && (
           <div className="thread-close-form">
             <textarea
               value={decision}
@@ -223,7 +237,10 @@ function ThreadPane({ detail, messages, onChanged }: { detail: ThreadDetail; mes
             ) : (
               <>
                 <div className="thread-msg-meta">
-                  <span className="thread-msg-author">{m.kind === 'decision' ? `Decision · ${m.author}` : m.author}</span>
+                  <span className="thread-msg-author">
+                    {m.kind === 'decision' ? `Decision · ${m.author}` : m.author}
+                    {m.via === 'session' && <span className="thread-msg-via" title="Posted by your interactive Claude session (MCP), not typed in the app"> · via Claude session</span>}
+                  </span>
                   <span className="thread-msg-date">#{m.seq} · {clock(m.created_at)}</span>
                 </div>
                 <div className="thread-msg-body">{m.body}</div>
@@ -234,6 +251,20 @@ function ThreadPane({ detail, messages, onChanged }: { detail: ThreadDetail; mes
             )}
           </div>
         ))}
+        {pending.map(m => (
+          <div key={m.id} className={`thread-msg thread-msg--message thread-msg--pending ${m.delivery_failed_at ? 'thread-msg--refused' : ''}`}>
+            <div className="thread-msg-meta">
+              <span className="thread-msg-author">{m.author}</span>
+              <span className="thread-msg-date">
+                {m.delivery_failed_at ? `not delivered to ${mirrorOf}` : `pending delivery to ${mirrorOf}`} · {clock(m.created_at)}
+              </span>
+            </div>
+            <div className="thread-msg-body">{m.body}</div>
+            {m.delivery_error && (
+              <div className="thread-msg-redacted">{m.delivery_failed_at ? '✕' : '…'} {m.delivery_error}</div>
+            )}
+          </div>
+        ))}
         {thread.decision && thread.status === 'closed' && thread.decision_note_id && (
           <div className="thread-decision-note">Decision written to the task as a note.</div>
         )}
@@ -241,7 +272,11 @@ function ThreadPane({ detail, messages, onChanged }: { detail: ThreadDetail; mes
       </div>
 
       {error && <div className="threads-error">{error}</div>}
-      {isOpen ? (
+      {mirrorOf && isOpen ? (
+        <div className="thread-ended">
+          This thread is hosted on {mirrorOf}. This box keeps a live copy; post, close or freeze it from {mirrorOf}.
+        </div>
+      ) : isOpen ? (
         <div className="thread-composer">
           <textarea
             value={draft}
@@ -261,14 +296,20 @@ function ThreadPane({ detail, messages, onChanged }: { detail: ThreadDetail; mes
 
 function NewThreadForm({ onCancel, onOpened }: { onCancel: () => void; onOpened: (id: string) => Promise<void> }) {
   const [agents, setAgents] = useState<AgentRecord[]>([])
+  const [peers, setPeers] = useState<ThreadPeer[]>([])
   const [subject, setSubject] = useState('')
   const [picked, setPicked] = useState<string[]>([])
+  const [pickedPeers, setPickedPeers] = useState<string[]>([])
   const [message, setMessage] = useState('')
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => { fetchAgentsDb().then(setAgents).catch(e => setError((e as Error).message)) }, [])
+  // Older servers have no peers route; the form then offers local agents only.
+  useEffect(() => { listThreadPeers().then(l => setPeers(l.peers)).catch(() => setPeers([])) }, [])
+  const togglePeer = (name: string) => setPickedPeers(p => (p.includes(name) ? p.filter(x => x !== name) : [...p, name]))
+  const chosen = picked.length + pickedPeers.length
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -280,11 +321,17 @@ function NewThreadForm({ onCancel, onOpened }: { onCancel: () => void; onOpened:
   const toggle = (path: string) => setPicked(p => (p.includes(path) ? p.filter(x => x !== path) : [...p, path]))
 
   const submit = async () => {
-    if (!subject.trim() || picked.length === 0 || busy) return
+    if (!subject.trim() || chosen === 0 || busy) return
     setBusy(true)
     setError(null)
     try {
-      const opened = await openThread({ subject: subject.trim(), participants: picked.map(agent => ({ kind: 'agent' as const, agent })) })
+      const opened = await openThread({
+        subject: subject.trim(),
+        participants: [
+          ...picked.map(agent => ({ kind: 'agent' as const, agent })),
+          ...pickedPeers.map(name => ({ kind: 'instance' as const, name })),
+        ],
+      })
       if (message.trim()) await postThreadMessage(opened.thread.id, message.trim())
       await onOpened(opened.thread.id)
     } catch (e) {
@@ -313,12 +360,28 @@ function NewThreadForm({ onCancel, onOpened }: { onCancel: () => void; onOpened:
           </label>
         ))}
       </div>
+      {peers.length > 0 && (
+        <>
+          <div className="thread-new-label">Other boxes <span className="thread-agent-path">answered by each box's primary agent</span></div>
+          <div className="thread-agent-picker thread-peer-picker">
+            {peers.map(p => (
+              <label key={p.name} className="thread-agent-option" title={p.url}>
+                <input type="checkbox" checked={pickedPeers.includes(p.name)} onChange={() => togglePeer(p.name)} />
+                <span>{p.name}</span>
+                <span className={`thread-agent-path ${p.last_error ? 'thread-peer-error' : ''}`}>
+                  {p.last_error ? `unreachable: ${p.last_error}` : p.last_ok_at ? `synced ${relTime(p.last_ok_at)}` : 'not synced yet'}
+                </span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
       <label>First message (optional)
         <textarea value={message} onChange={e => setMessage(e.target.value)} rows={3} />
       </label>
       {error && <div className="threads-error">{error}</div>}
       <div className="thread-actions">
-        <button disabled={busy || !subject.trim() || picked.length === 0} onClick={submit}>Open thread</button>
+        <button disabled={busy || !subject.trim() || chosen === 0} onClick={submit}>Open thread</button>
         <button onClick={onCancel}>Cancel</button>
       </div>
     </div>

@@ -5,9 +5,10 @@ only. The note below *is* the deliverable; it is written against the actual Qala
 `origin/develop` @ `81d130c`, so every mechanism names the file it would live in and the existing
 pattern it copies. Justin reads it and sequences any build as a separate task.
 
-## Build status (2026-11-09)
+## Build status (2026-11-10)
 
-Steps 1–2 of the build order are in the code: threads between **local** agent folders and the
+Steps 1–3 of the build order are in the code; step 3 is described at the end of this section.
+Steps 1–2: threads between **local** agent folders and the
 human on one box, and reply turns (§5b). The code is `server/threads.js` (schema and every
 operation, shared by `db-worker.js` and `mcp/tools/threads.js`), the `/api/v1/threads` routes in
 `server/v1.js`, the reply ticker and the `thread_reply` launch override in `server/workers.js`, and
@@ -26,10 +27,50 @@ the text below:
   cannot close its own data block.
 - Freeze is human-only (§8); close is owner-or-human (§5).
 
-Not built: peers, invites, the delivery outbox ticker, the narrow-scope exemption in the `/api/`
-gate, `view_url`, and external guests — steps 3–5. For step 3 every box pair needs one
-`thread_peer:<name>` token in each direction, issued by the box it authenticates *to*; those keys
-settle who may call. Separately, the home box of each thread must be reachable from its peers.
+### Step 3 — cross-box (2026-11-10)
+
+Built: peers, invitations, the delivery outbox and the narrow-scope exemption in the `/api/` gate,
+plus reply-turn session resume and the `via: 'session'` marker. Not built: `view_url` (step 4) and
+external guests (step 5). Code: `server/threads.js` (peer registry, peer-facing operations, mirror
+apply, outbox), `server/thread-peers.js` (the network half), `handleThreadPeer` in `server/v1.js`,
+the gate in `server/index.js`, `scripts/pair-thread-peers.mjs`. Tests: `scripts/test-thread-peers.mjs`
+(two databases through the real route handler and sync), the peer-gate block in
+`scripts/smoke-server.mjs`. Where it differs from the text below:
+
+- **Pull only; no push, no invitation POST.** Every Pirate & Fox box has its API on a Cloudflare
+  tunnel, so every home box is reachable and §6's poll-or-push symmetry is unnecessary. Each box polls
+  each peer every 15 s (`GET /api/v1/threads/peer/threads?since=`) for threads that peer hosts with
+  it as a participant. The first sight of one *is* the invitation: the box creates the mirror and
+  accepts (`POST …/accept`). It then pulls messages since its highest `seq` and posts its own pending
+  messages. There is no `thread_deliveries` row on the home box. The outbox exists only on mirrors,
+  for their pending messages.
+- **The sync cursor is a counter, not a timestamp.** `threads.sync_version` is bumped by triggers on
+  every insert and update. An `updated_at` cursor missed a change made in the same millisecond as the
+  previous one, and the test hit exactly that.
+- **One folder speaks for a box: `threads.primaryAgent`.** A mirror binds that folder to its own
+  participant row. `agent_path` is never taken from the payload. Other local folders cannot post in
+  another box's thread, and the primary agent takes reply turns like an `autoReplyAgents` folder (it
+  still needs a `thread_reply` profile).
+- **A mirror is read-only for the human.** Posting, closing and freezing happen on the home box. A
+  peer key speaks only as that peer's own `instance` participant, so letting a mirror act "as the
+  human" would let any peer impersonate the human. The app shows "hosted on Drift" and no composer.
+- **Peer routes live under `/api/v1/threads/peer/`.** They are separate from the owner's routes,
+  and a `full_access` key is refused there, so an owner token can never act as a peer. A peer key is
+  refused on every other `/api/` path. An unknown or foreign thread is 404 (never 403), so a peer
+  cannot probe for thread ids.
+- **The stored outbound key never leaves the box except as an `Authorization` header to that peer's
+  own URL.** Redirects are refused. `GET /api/v1/threads/peers` reports `has_token` and nothing else.
+
+#### Pairing
+
+Per pair of boxes, one key in each direction, each issued by the box it authenticates *to*: an
+`auth_tokens` row scoped `thread_peer:<name>` (one live key per peer; issuing again revokes the
+old one, so re-pairing is rotation). The other box stores it in `thread_peers` with the issuer's
+URL. `scripts/pair-thread-peers.mjs <urlA> <urlB>`, with each box's owner token in
+`QALATRA_PAIR_A_TOKEN` / `QALATRA_PAIR_B_TOKEN`, does both directions through the two APIs and
+checks each with `/peer/hello`. It never prints or stores a key. Each box needs a thread name
+(`threads.instanceName`, else `instanceName`). Unpair with `DELETE /api/v1/threads/peers/<name>` on
+each side; that also revokes the key that box issued.
 
 ## Goal
 

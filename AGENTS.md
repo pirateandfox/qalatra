@@ -13,12 +13,13 @@ Qalatra is Justin's personal task management system: a local SQLite database own
 ├── electron-main.js        ← Electron main process; starts Qalatra Server, terminal pty, updater, app menu
 ├── server/                 ← Authenticated headless HTTP API; owns /api/v1, DB access, MCP child, workers, backups, tokens, service management
 │   └── http.js             ← Shared HTTP response, CORS, body parsing, and file streaming helpers
-│   └── threads.js          ← Agent-to-agent threads: schema + logic shared by db-worker and MCP; reply turns (docs/agent-to-agent-threads.md)
+│   └── threads.js          ← Agent-to-agent threads: schema + logic shared by db-worker and MCP; reply turns, peers, mirrors (docs/agent-to-agent-threads.md)
+│   └── thread-peers.js     ← Cross-box thread sync: polls peers, applies mirrors, delivers the outbox (pull only)
 │   └── integrations/       ← Opt-in external orchestrators; flightdesk/ polls FlightDesk dispatches into jobs (see docs/flightdesk-integration.md)
 ├── db-worker.js            ← SQLite worker used by Qalatra Server; handles DB calls off the server event loop
 ├── s3.js                   ← S3/R2 attachment helpers
 ├── docs/
-│   ├── agent-to-agent-threads.md ← Threads design note + build status (steps 1–2 built: single-box threads, reply turns)
+│   ├── agent-to-agent-threads.md ← Threads design note + build status (steps 1–3 built: single-box threads, reply turns, cross-box peers)
 │   ├── capabilities.md     ← Capability registry guide: agent.config metadata, permissions, delegation, MCP/API usage
 │   ├── flightdesk-integration.md ← FlightDesk as orchestrator: per-folder .flightdeskrc, dispatch poller, lifecycle reporting, core/integration boundary
 │   ├── executive-agent-rollout.md ← Handoff guide for enriching real agents and using Qalatra as an executive-assistant layer
@@ -466,6 +467,12 @@ toward more access.
   `job_id` means the human. Bodies are sanitized before storage. Reply turns need the folder in
   `threads.autoReplyAgents` **and** an `agent.config` `thread_reply` profile; they never use the
   folder's `command` or the default command, and bypass-permission flags are refused at launch.
+  **Cross-box:** the box that opens a thread hosts it and numbers every message; other boxes hold
+  mirrors, bound to their `threads.primaryAgent`, and sync by polling (`server/thread-peers.js`).
+  Peer keys are `auth_tokens` scoped `thread_peer:<name>`. Those keys open only
+  `/api/v1/threads/peer/*`, and that path accepts nothing else, not even `full_access`. Pair boxes
+  with `scripts/pair-thread-peers.mjs`, and never print a peer key. The sync cursor is the
+  trigger-maintained `threads.sync_version`, not a timestamp.
 - `sort_order` controls priority view ordering — `ORDER BY sort_order ASC NULLS LAST` is the primary sort for active tasks
 - Events (`task_type = 'event'`) are permanent dated records — never go overdue, never get status transitions
 - `surface_after` is strictly for snoozing existing tasks — never set it when creating a new task

@@ -63,7 +63,8 @@ assert.equal(threadSettings({ threads: { enabled: false } }).enabled, false)
 // ── Identity comes from a running job, never from the caller's word ──────────
 {
   const db = freshDb()
-  assert.deepEqual(resolveThreadCaller(db, undefined), { kind: 'human' })
+  // No job id = the owner's interactive session: acts as the human, marked so the transcript says so.
+  assert.deepEqual(resolveThreadCaller(db, undefined), { kind: 'human', via: 'session' })
   assert.equal(resolveThreadCaller(db, 'job-drift').agent_path, '/agents/drift')
   throwsStatus(() => resolveThreadCaller(db, 'job-nope'), 403, /does not name/)
   throwsStatus(() => resolveThreadCaller(db, 'job-done'), 403, /not running/)
@@ -84,7 +85,7 @@ assert.equal(threadSettings({ threads: { enabled: false } }).enabled, false)
   assert.equal(withAuthority.participants.length, 2)
 
   throwsStatus(() => openThread(db, { subject: 'x', participants: [{ kind: 'agent', agent: 'Dup' }, { kind: 'human' }], caller: drift }), 400, /matches 2/)
-  throwsStatus(() => openThread(db, { subject: 'x', participants: [{ kind: 'instance', name: 'Shi' }, { kind: 'human' }], caller: drift }), 400, /not available/)
+  throwsStatus(() => openThread(db, { subject: 'x', participants: [{ kind: 'instance', name: 'Nowhere' }, { kind: 'human' }], caller: drift }), 400, /No thread peer named "Nowhere"/)
   throwsStatus(() => openThread(db, { subject: 'x', participants: [{ kind: 'external' }, { kind: 'human' }], caller: drift }), 403, /External/)
   throwsStatus(() => openThread(db, { subject: 'x', participants: [{ kind: 'human' }], caller: drift, settings: { threads: { enabled: false } } }), 403, /disabled/)
   throwsStatus(() => openThread(db, { subject: 'x', participants: [], caller: drift }), 400)

@@ -185,3 +185,13 @@
   .threads-view { flex-direction: column; }
   .threads-list { width: auto; max-height: 40%; border-right: none; border-bottom: 1px solid var(--border); }
 }
+
+/* Cross-box threads */
+.thread-hosted { color: var(--muted); }
+.thread-chip--invited { opacity: 0.6; border-style: dashed; }
+.thread-msg-via { font-weight: normal; opacity: 0.7; }
+.thread-msg--pending { opacity: 0.7; border-style: dashed; }
+.thread-msg--refused { opacity: 1; border-color: #f87171; }
+.thread-new-label { font-size: 12px; margin-top: 4px; }
+.thread-peer-picker { max-height: 140px; }
+.thread-peer-error { color: #f87171; }

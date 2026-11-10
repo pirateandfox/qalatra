@@ -13,7 +13,7 @@ import { deleteAttachment, listAttachments, readAttachmentContent, uploadAttachm
 import { applyPendingRestore, runBackup } from './backups.js'
 import { fileExists, findInheritedStyle, listDirectory, listWorkspaceRoots, readTextFile, resolveAllowedPath, writeFolderStyle, writeTextFile, writeUserStyle } from './files.js'
 import { applyCors, parseBody, parseRawBody, sendBinary, sendJson, streamFile } from './http.js'
-import { handleV1 } from './v1.js'
+import { handleThreadPeer, handleV1 } from './v1.js'
 import { startBackgroundWorkers, killRunningAgentProcesses, leaveAgentRunsForRestart } from './workers.js'
 import { startIntegrations } from './integrations/index.js'
 import { createTerminalManager } from './terminal-sessions.js'
@@ -229,7 +229,28 @@ async function main() {
     console.log(`[server] Created initial full_access token at ${bootstrap.tokenPath}`)
   }
 
-  const ctx = { dbCall, loadSettings, saveSettings, dataDir: DATA_DIR, notify: publishEvent, startedAt: SERVER_STARTED_AT }
+  // Inbound thread-peer keys: auth_tokens rows scoped exactly thread_peer:<name>. One live key per
+  // peer — issuing again revokes the previous one. The secret is returned once, by issue().
+  const peerScope = name => `thread_peer:${name}`
+  const livePeerKeys = name => listTokens(authDb).filter(t => !t.revoked_at && t.scopes.split(',').map(x => x.trim()).some(x => x.toLowerCase() === peerScope(name).toLowerCase()))
+  const peerKeys = {
+    issue(name) {
+      for (const t of livePeerKeys(name)) revokeToken(authDb, t.id)
+      const created = createToken(authDb, { label: `Thread peer: ${name}`, scopes: [peerScope(name)] })
+      return created.token
+    },
+    revoke(name) {
+      const live = livePeerKeys(name)
+      for (const t of live) revokeToken(authDb, t.id)
+      return live.length
+    },
+    list() {
+      return listTokens(authDb)
+        .filter(t => !t.revoked_at && t.scopes.split(',').some(x => x.trim().startsWith('thread_peer:')))
+        .map(t => ({ peer: t.scopes.split(',').map(x => x.trim()).find(x => x.startsWith('thread_peer:')).slice('thread_peer:'.length), created_at: t.created_at, last_used_at: t.last_used_at, expires_at: t.expires_at }))
+    },
+  }
+  const ctx = { dbCall, loadSettings, saveSettings, dataDir: DATA_DIR, notify: publishEvent, startedAt: SERVER_STARTED_AT, peerKeys }
   const terminalManager = createTerminalManager({ dataDir: DATA_DIR, loadSettings })
   const boxWebProxy = createBoxWebProxy()
   // NOTE: background workers are started only AFTER a successful port bind (in the
@@ -301,6 +322,21 @@ async function main() {
     try {
       if (url.pathname === '/api/instance' && req.method === 'GET') {
         sendJson(res, 200, { ok: true, name: loadSettings().instanceName || 'Qalatra', started_at: SERVER_STARTED_AT })
+        return
+      }
+
+      // The one narrow-scope exemption (design note §4): a thread_peer:<name> key opens the
+      // peer-facing thread routes and nothing else, and those routes accept nothing else — not even
+      // full_access, so an owner token can never act as a peer box. A peer key on any other /api/
+      // path falls through to the full_access check below and gets 403.
+      if (url.pathname.startsWith('/api/v1/threads/peer/') || url.pathname === '/api/v1/threads/peer') {
+        const peerName = threadPeerName(user)
+        if (!peerName) {
+          sendJson(res, 403, { error: 'Forbidden: peer routes need a thread_peer key' })
+          return
+        }
+        const response = await handleThreadPeer(req, url, ctx, peerName, { parseBody })
+        sendJson(res, response?.status ?? 404, response?.body ?? { error: 'Not found' })
         return
       }
 
@@ -590,3 +626,10 @@ main().catch(err => {
   console.error('[server] fatal:', err)
   process.exit(1)
 })
+
+// The peer name a thread_peer key was issued to, or null. A key carries exactly one such scope.
+function threadPeerName(user) {
+  const scope = user?.scopes?.find(s => s.startsWith('thread_peer:'))
+  const name = scope ? scope.slice('thread_peer:'.length).trim() : ''
+  return /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/.test(name) ? name : null
+}

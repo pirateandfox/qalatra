@@ -18,6 +18,8 @@ import {
   postThreadMessage,
   closeThread,
   freezeThread,
+  listThreadPeers,
+  threadSettings,
 } from '../../server/threads.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,7 +38,7 @@ const JOB_ID = {
 export const toolDefs = [
   {
     name: 'open_thread',
-    description: 'Open a conversation thread with other agents on this Qalatra instance (and the human). You become its owner. Every thread must include the human ({ kind: "human" }) or the configured authority agent. Messages are an append-only transcript the human can read; the outcome is recorded with close_thread. Use for a question another agent can answer from its own context, not for dispatching work.',
+    description: 'Open a conversation thread with other agents — on this Qalatra box ({ kind: "agent" }) or on another box ({ kind: "instance", name: "<peer>" }, see list_thread_peers) — and the human. You become its owner and this box hosts it. Every thread must include the human ({ kind: "human" }) or the configured authority agent. Messages are an append-only transcript the human can read; the outcome is recorded with close_thread. Another box\'s primary agent answers in a reply turn, usually within a minute or two; you do not wait for it — your next turn sees the reply. Use for a question another agent can answer from its own context, not for dispatching work.',
     inputSchema: {
       type: 'object',
       required: ['subject', 'participants'],
@@ -44,13 +46,13 @@ export const toolDefs = [
         subject: { type: 'string', description: 'One line: what the thread is about, ideally the question.' },
         participants: {
           type: 'array',
-          description: 'Who else joins. [{ kind: "agent", agent: "<agent folder path or name>" }, { kind: "human" }]',
+          description: 'Who else joins. [{ kind: "agent", agent: "<agent folder path or name>" }, { kind: "instance", name: "<peer box>" }, { kind: "human" }]',
           items: {
             type: 'object',
             properties: {
-              kind:  { type: 'string', enum: ['agent', 'human'] },
-              agent: { type: 'string', description: 'For kind "agent": the agent folder path, or its unique name' },
-              name:  { type: 'string', description: 'For kind "human": display name (defaults to settings.threads.humanName)' },
+              kind:  { type: 'string', enum: ['agent', 'instance', 'human'] },
+              agent: { type: 'string', description: 'For kind "agent": the agent folder path on this box, or its unique name' },
+              name:  { type: 'string', description: 'For kind "instance": the peer box name from list_thread_peers. For kind "human": display name (defaults to settings.threads.humanName)' },
             },
           },
         },
@@ -101,7 +103,7 @@ export const toolDefs = [
   },
   {
     name: 'post_thread_message',
-    description: 'Post a message to a thread you participate in. Bodies are sanitized for secret-shaped text before storage. Never put credentials in a thread.',
+    description: 'Post a message to a thread you participate in. Bodies are sanitized for secret-shaped text before storage. Never put credentials in a thread. On a thread hosted by another box the message is returned with pending: true and seq null; this box delivers it and the home box numbers it.',
     inputSchema: {
       type: 'object',
       required: ['thread_id', 'body'],
@@ -125,6 +127,11 @@ export const toolDefs = [
         job_id:    JOB_ID,
       },
     },
+  },
+  {
+    name: 'list_thread_peers',
+    description: 'The other Qalatra boxes this box can open threads with (by name), and this box\'s own name. A peer answers through its primary agent.',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'freeze_thread',
@@ -187,6 +194,15 @@ export const handlers = {
     const db = openDb();
     const caller = resolveThreadCaller(db, args.job_id);
     return closeThread(db, args.thread_id, { caller, decision: args.decision });
+  },
+
+  list_thread_peers() {
+    const db = openDb();
+    const cfg = threadSettings(loadSettings());
+    return {
+      this_box: cfg.instanceName,
+      peers: listThreadPeers(db).map(p => ({ name: p.name, last_ok_at: p.last_ok_at, last_error: p.last_error })),
+    };
   },
 
   freeze_thread(args) {

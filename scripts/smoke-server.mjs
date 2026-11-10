@@ -154,6 +154,31 @@ async function main() {
     if (threadMissing.status !== 404) throw new Error(`Missing thread expected 404, got ${threadMissing.status}`)
     const threadAlone = await fetch(threadsUrl, { method: 'POST', headers: authJson, body: JSON.stringify({ subject: 'alone', participants: [] }) })
     if (threadAlone.status !== 400) throw new Error(`Thread with no other participant expected 400, got ${threadAlone.status}`)
+    // Cross-box peer keys (full flow: test-thread-peers.mjs). The gate is what this checks: a
+    // thread_peer key opens the peer routes and nothing else, and an owner key cannot act as a peer.
+    const issued = await fetch(`${threadsUrl}/peers/SmokePeer/issue`, { method: 'POST', headers: authJson }).then(r => r.json())
+    if (!issued.key) throw new Error('issuing a thread peer key returned no key')
+    const peerAuth = { Authorization: `Bearer ${issued.key}` }
+    const hello = await fetch(`${threadsUrl}/peer/hello`, { headers: peerAuth }).then(async res => ({ res, data: await res.json().catch(() => ({})) }))
+    if (!hello.res.ok || hello.data.you !== 'SmokePeer') throw new Error(`peer hello expected 200 naming the peer, got ${hello.res.status} ${JSON.stringify(hello.data)}`)
+    const peerThreads = await fetch(`${threadsUrl}/peer/threads`, { headers: peerAuth }).then(r => r.json())
+    if (!Array.isArray(peerThreads.threads) || peerThreads.threads.length) throw new Error('a new peer should see no threads')
+    for (const route of ['/api/v1/threads', '/api/v1/tasks', '/api/v1/settings', '/api/events', '/api/tokens']) {
+      const res = await fetch(`http://127.0.0.1:${apiPort}${route}`, { headers: peerAuth })
+      if (res.status !== 403) throw new Error(`peer key on ${route} expected 403, got ${res.status}`)
+    }
+    const ownerAsPeer = await fetch(`${threadsUrl}/peer/threads`, { headers: authJson })
+    if (ownerAsPeer.status !== 403) throw new Error(`full_access key on a peer route expected 403, got ${ownerAsPeer.status}`)
+    const peerListing = await fetch(`${threadsUrl}/peers`, { headers: authJson }).then(r => r.json())
+    if (!peerListing.issued?.some(k => k.peer === 'SmokePeer') || JSON.stringify(peerListing).includes(issued.key)) {
+      throw new Error('peer listing should name the issued key without revealing it')
+    }
+    const reissued = await fetch(`${threadsUrl}/peers/SmokePeer/issue`, { method: 'POST', headers: authJson }).then(r => r.json())
+    const oldKey = await fetch(`${threadsUrl}/peer/hello`, { headers: peerAuth })
+    if (oldKey.status !== 401) throw new Error(`a replaced peer key expected 401, got ${oldKey.status}`)
+    const removed = await fetch(`${threadsUrl}/peers/SmokePeer`, { method: 'DELETE', headers: authJson }).then(r => r.json())
+    const afterRemove = await fetch(`${threadsUrl}/peer/hello`, { headers: { Authorization: `Bearer ${reissued.key}` } })
+    if (removed.revoked_keys !== 1 || afterRemove.status !== 401) throw new Error(`removing a peer should revoke its key (revoked ${removed.revoked_keys}, then ${afterRemove.status})`)
 
     // The worker policy is authenticated, persisted, validated, and PATCH preserves other keys.
     const settingsUrl = `http://127.0.0.1:${apiPort}/api/v1/settings`

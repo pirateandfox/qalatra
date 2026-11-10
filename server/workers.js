@@ -11,6 +11,7 @@ import { loadFolderRc } from './integrations/flightdesk/rc.js'
 import { configBranchMismatches, ensureTaskWorktree, formatConfigBranchWarning, sweepIdleWorktrees } from './worktrees.js'
 import { createJobScheduler } from './job-scheduler.js'
 import { threadSettings, threadReplyProfile, threadReplyCommandError, threadReplyMeta } from './threads.js'
+import { syncThreadPeers } from './thread-peers.js'
 import { createScopeMemoryMonitor, formatOomNotice, isOomKill } from './agent-memory.js'
 import { abandonedWork, EXITED_WITH_CHILDREN, formatAbandonedNotice } from './agent-leftovers.js'
 import {
@@ -701,7 +702,19 @@ export function startBackgroundWorkers(ctx) {
   // threads.autoReplyAgents that declare a thread_reply profile. Queued here, admitted by the normal
   // scheduler with its concurrency, timeout and cgroup limits.
   setInterval(() => queueThreadReplies({ dbCall, loadSettings })
-    .catch(err => console.error(`[threads] reply queueing failed: ${err.message}`)), 30_000)
+    .catch(err => console.error(`[threads] reply queueing failed: ${err.message}`)), Number(process.env.QALATRA_THREAD_REPLY_MS) || 30_000)
+  // Cross-box threads: pull from every configured peer and push this box's outbox (server/thread-peers.js).
+  // A pass that is still running (a slow peer) makes the next tick a no-op instead of overlapping.
+  let peerSyncRunning = false
+  const peerSync = () => {
+    if (peerSyncRunning) return
+    peerSyncRunning = true
+    syncThreadPeers({ dbCall, loadSettings, notify })
+      .catch(err => console.error(`[threads] peer sync failed: ${err.message}`))
+      .finally(() => { peerSyncRunning = false })
+  }
+  setTimeout(peerSync, 10_000)
+  setInterval(peerSync, Number(process.env.QALATRA_THREAD_SYNC_MS) || 15_000)
   setTimeout(() => runDueHeartbeats({ dbCall }).catch(() => {}), 5_000)
   setInterval(() => runDueHeartbeats({ dbCall }).catch(() => {}), 60_000)
 }

@@ -7,6 +7,8 @@ import { runAgentScan, agentWorkerStatus } from './workers.js'
 import { validateSettings } from './settings.js'
 import { serverTimeZone } from './cron.js'
 import { heartbeatUpcomingRuns, resolveHeartbeatSchedule } from './task-logic.js'
+import { threadSettings, validatePeerName } from './threads.js'
+import { testThreadPeer } from './thread-peers.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -101,6 +103,40 @@ async function testS3Connection(creds) {
   } catch (e) {
     return { ok: false, error: e.message }
   }
+}
+
+// Peer-facing thread routes: /api/v1/threads/peer/... A request reaches this only with a token
+// scoped thread_peer:<name> (server/index.js), and peerName is that <name> — never something the
+// caller sent. Everything here is limited to threads this box hosts that list the caller.
+export async function handleThreadPeer(req, url, ctx, peerName, { parseBody }) {
+  const cfg = threadSettings(ctx.loadSettings())
+  if (!cfg.enabled) return json({ error: 'Threads are disabled on this box' }, 403)
+  const method = req.method
+  const [, , what, id, action] = partsFor(url) // threads, peer, <what>, <id>, <action>
+  const sp = url.searchParams
+  if (what === 'hello' && !id && method === 'GET') {
+    return ok({ name: cfg.instanceName, you: peerName })
+  }
+  if (what !== 'threads') return null
+  if (!id && method === 'GET') {
+    return ok(await ctx.dbCall('peerListThreadsDb', peerName, { since: sp.get('since') || null, limit: sp.get('limit') ?? undefined }))
+  }
+  if (!id) return null
+  if (action === 'messages' && method === 'GET') {
+    return ok(await ctx.dbCall('peerReadMessagesDb', peerName, id, { since_seq: sp.get('since_seq') ?? 0, limit: sp.get('limit') ?? undefined }))
+  }
+  if (action === 'messages' && method === 'POST') {
+    const body = await parseBody(req)
+    const posted = await ctx.dbCall('peerPostMessageDb', peerName, id, { body: body.body, idempotency_key: body.idempotency_key ?? null })
+    ctx.notify?.({ type: 'thread:message', threadId: id })
+    return ok(posted)
+  }
+  if (action === 'accept' && method === 'POST') {
+    const accepted = await ctx.dbCall('peerAcceptThreadDb', peerName, id)
+    ctx.notify?.({ type: 'thread:message', threadId: id })
+    return ok(accepted)
+  }
+  return null
 }
 
 export async function handleV1(req, url, ctx, { parseBody }) {
@@ -358,6 +394,38 @@ export async function handleV1(req, url, ctx, { parseBody }) {
   // tools in mcp/tools/threads.js, which resolve their identity from the job they run in.
   if (resource === 'threads') {
     const sp = url.searchParams
+    // Cross-box peers (step 3). Outbound keys (the ones peers issued this box) are write-only here:
+    // stored by PUT, never returned. Inbound keys (the ones this box issues) are created by
+    // .../issue, shown once, and are ordinary auth_tokens rows scoped thread_peer:<name>.
+    if (id === 'peers') {
+      const name = action ? validatePeerName(action) : null
+      const verb = parts[3]
+      if (!name && method === 'GET') {
+        return ok({
+          instance_name: threadSettings(ctx.loadSettings()).instanceName,
+          peers: await ctx.dbCall('listThreadPeersDb'),
+          issued: ctx.peerKeys?.list() ?? [],
+        })
+      }
+      if (name && !verb && method === 'PUT') {
+        const body = await parseBody(req)
+        return data('peer', await ctx.dbCall('upsertThreadPeerDb', { name, url: body.url, token: body.token }))
+      }
+      if (name && !verb && method === 'DELETE') {
+        const removed = await ctx.dbCall('removeThreadPeerDb', name)
+        const revoked = ctx.peerKeys?.revoke(name) ?? 0
+        return ok({ ...removed, revoked_keys: revoked })
+      }
+      if (name && verb === 'issue' && method === 'POST') {
+        if (!ctx.peerKeys) throw badRequest('Peer keys are unavailable on this server')
+        // One key per direction per pair: issuing again replaces (revokes) the previous key.
+        return ok({ peer: name, key: ctx.peerKeys.issue(name) })
+      }
+      if (name && verb === 'test' && method === 'POST') {
+        return ok({ result: await testThreadPeer({ dbCall: ctx.dbCall, name }) })
+      }
+      return null
+    }
     if (!id && method === 'GET') {
       return data('threads', await ctx.dbCall('listThreadsDb', {
         status: sp.get('status') || null,

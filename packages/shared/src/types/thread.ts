@@ -17,7 +17,10 @@ export interface Thread {
   context: string
   status: ThreadStatus
   opened_by: string | null
+  /** Set on a mirror: the API of the box that hosts (sequences) this thread. */
   home_url: string | null
+  /** Set on a mirror: this box's name for the hosting box. */
+  home_peer?: string | null
   authority: string | null
   policy: ThreadPolicy
   decision: string | null
@@ -39,6 +42,8 @@ export interface ThreadParticipant {
   kind: ThreadParticipantKind
   display_name: string
   agent_path: string | null
+  /** Which box the participant is on, by this box's peer name; null = this box. */
+  instance_name?: string | null
   instance_url: string | null
   role: 'owner' | 'member' | 'observer'
   state: string
@@ -58,12 +63,22 @@ export interface ThreadMessage {
   participant_id: string
   author: string
   author_kind: ThreadParticipantKind
+  /** The author's box by this box's peer name; null = this box. */
+  author_instance?: string | null
+  /** 'session' = posted by the owner's interactive Claude session (MCP, no job), not typed in the app. */
+  via?: 'session' | null
+  /** Pending messages only: delivery to the home box. */
+  delivery_attempts?: number | null
+  delivery_error?: string | null
+  delivery_failed_at?: string | null
 }
 
 export interface ThreadDetail {
   thread: Thread
   participants: ThreadParticipant[]
   recent_messages: ThreadMessage[]
+  /** On a mirror: messages written here that the home box has not numbered yet. */
+  pending_messages?: ThreadMessage[]
 }
 
 export interface ThreadMessagePage {
@@ -77,5 +92,24 @@ export interface ThreadMessagePage {
 export interface OpenThreadInput {
   subject: string
   task_id?: string | null
-  participants: Array<{ kind: 'agent'; agent: string } | { kind: 'human'; name?: string }>
+  participants: Array<{ kind: 'agent'; agent: string } | { kind: 'instance'; name: string } | { kind: 'human'; name?: string }>
+}
+
+/** Another Qalatra box this one can thread with. The key it issued this box is never returned. */
+export interface ThreadPeer {
+  name: string
+  url: string
+  has_token: boolean
+  last_ok_at: string | null
+  last_error: string | null
+  last_error_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ThreadPeerListing {
+  instance_name: string | null
+  peers: ThreadPeer[]
+  /** Keys this box issued to peers (no secrets). */
+  issued: Array<{ peer: string; created_at: string; last_used_at: string | null; expires_at: string | null }>
 }

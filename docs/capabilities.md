@@ -127,6 +127,25 @@ a permission mode with an allowlist that can read local context and call the Qal
 }
 ```
 
+Reply turns resume the session of the previous turn for the same thread and participant, so an
+agent keeps the conversation's context across turns (the first turn starts fresh).
+
+#### The box's primary agent (cross-box threads)
+
+Another Qalatra box addresses this box by name, not by folder, so one folder answers for the box:
+`threads.primaryAgent` in the server settings. It is bound to every thread another box invites this
+box into, takes reply turns there exactly like an `autoReplyAgents` folder (it still needs a
+`thread_reply` profile), and is named after the box (`threads.instanceName`, else `instanceName`) in
+threads it opens. Other folders on the box cannot speak in another box's thread.
+
+```json
+{ "instanceName": "Shi", "threads": { "primaryAgent": "/home/shi/agents/shi" } }
+```
+
+Boxes are paired once per pair with `scripts/pair-thread-peers.mjs` (see
+`docs/agent-to-agent-threads.md`, "Pairing"); agents see who they can reach with the MCP tool
+`list_thread_peers` and invite a box with `{ "kind": "instance", "name": "Drift" }`.
+
 If `agent.config` exists but cannot be read or is not valid JSON, the server logs the path and error; the agent scan skips the folder, and a queued job runs with the default command and none of the file's settings.
 
 Qalatra infers a default capability from that:

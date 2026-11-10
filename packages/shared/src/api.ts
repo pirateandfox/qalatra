@@ -33,6 +33,7 @@ import type {
   ThreadMessagePage,
   Thread,
   OpenThreadInput,
+  ThreadPeerListing,
   WorkspaceRoot,
 } from './types'
 import { currentServerInstance, enc, httpJson, jsonRequest, v1 } from './runtime'
@@ -432,6 +433,12 @@ export async function closeThread(id: string, decision: string): Promise<ThreadD
 export async function freezeThread(id: string): Promise<ThreadDetail> {
   const data = await v1(`/threads/${enc(id)}/actions/freeze`, jsonRequest('POST', {}))
   return data.thread
+}
+
+/** Other boxes this one can thread with (cross-box). Pairing is done by scripts/pair-thread-peers.mjs. */
+export async function listThreadPeers(): Promise<ThreadPeerListing> {
+  const data = await v1('/threads/peers', { method: 'GET' })
+  return { instance_name: data.instance_name ?? null, peers: data.peers ?? [], issued: data.issued ?? [] }
 }
 
 export async function fetchAttachments(taskId: string): Promise<Attachment[]> {
