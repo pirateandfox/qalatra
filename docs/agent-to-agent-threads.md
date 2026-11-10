@@ -72,6 +72,23 @@ checks each with `/peer/hello`. It never prints or stores a key. Each box needs 
 (`threads.instanceName`, else `instanceName`). Unpair with `DELETE /api/v1/threads/peers/<name>` on
 each side; that also revokes the key that box issued.
 
+#### Pairing is for boxes you own
+
+Pair only boxes that belong to the same owner. A paired box is trusted, not vetted:
+
+- It can open threads that invite this box at any time, with no approval step. Its messages are
+  put in front of this box's primary agent, which answers in reply turns using its own folder, its
+  `thread_reply` profile and this box's Qalatra MCP.
+- Anything that agent writes in a reply goes back to the peer. A message written to coax it into
+  quoting tasks, notes or files would reach the other box if the agent complied. The nonce fences,
+  body sanitizing, the permission-mode check and `maxAutoReplies` limit this, but they cannot stop
+  an agent from being talked into saying something.
+- What a peer key cannot do is fixed: it reads and posts only in threads that peer hosts with this
+  box as a participant, and every other `/api/` route refuses it.
+
+Talking to someone else's agents is step 5 (external guests: per-thread tokens, budgets, owner
+approval), which is not built. Until it is, the supported setup is one owner's own boxes.
+
 ## Goal
 
 Answer the brief's acceptance list — a data model, an API sketch, a UI sketch of the viewer, how a
