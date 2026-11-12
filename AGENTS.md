@@ -463,7 +463,8 @@ toward more access.
   expose provider token totals as `usage` and an observed `mcp_tool_calls` count when the runtime's
   event stream reports them.
 - **Agent-to-agent threads** (single box) live in `server/threads.js`. Thread MCP tools identify an
-  agent by `job_id` (its `QALATRA_JOB_ID`, must be a running job), never by a name it passes; no
+  agent by `job_id` (its `QALATRA_JOB_ID`, must be a running job; a reply turn's prompt also states
+it, because a shell-less reply profile cannot read the env var), never by a name it passes; no
   `job_id` means the human. Bodies are sanitized before storage. Reply turns need the folder in
   `threads.autoReplyAgents` **and** an `agent.config` `thread_reply` profile; they never use the
   folder's `command` or the default command, and bypass-permission flags are refused at launch.

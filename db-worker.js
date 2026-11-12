@@ -1313,7 +1313,9 @@ function getQueuedJobs(limit) {
 // orchestrator holds. user_message is set to the same text: on a resumed session only the new
 // turn is sent (resumeMessageForJob in server/workers.js), and the orchestrator's prompt *is* the
 // new turn. Idempotent on external_ref: a re-delivered request returns the job it already made.
-function queueExternalJob(body = {}) {
+// opts.id is internal only (thread reply turns state their job id in the prompt, so they pick it
+// first); it is never read from body, so an orchestrator cannot choose job ids.
+function queueExternalJob(body = {}, opts = {}) {
   const prompt = typeof body.prompt === 'string' ? body.prompt : ''
   if (!prompt.trim()) throw validationError('prompt required')
   if (!body.agent_path) throw validationError('agent_path required')
@@ -1324,7 +1326,7 @@ function queueExternalJob(body = {}) {
   }
   const task = body.task_id ? db.prepare('SELECT id, status, orchestrator, ai_context FROM tasks WHERE id = ?').get(body.task_id) : null
   if (body.task_id && !task) throw validationError('task not found')
-  const id = crypto.randomUUID()
+  const id = opts.id ?? crypto.randomUUID()
   // New work for an orchestrated task that already closed (a PR reopened, a late closeout) reopens
   // that same task, so one orchestrator task always maps to one Qalatra task. Done in the same
   // synchronous call as the insert, so a sweep can never close it between reopen and queue.
@@ -1754,7 +1756,7 @@ function queueThreadRepliesDb(agentPaths, opts) {
     external_meta: { thread_reply: true, thread_id: r.thread_id, participant_id: r.participant_id, seq: r.latest_seq },
     // Resumes the previous turn's session for this (thread, participant); see threadReplySession.
     resume_session: true,
-  }))
+  }, { id: r.job_id }))
 }
 
 // Cross-box (step 3). Peer registry: owner-facing, never returns a key, except
@@ -1799,7 +1801,8 @@ const METHODS = {
   listAgentJobs, getAgentJob, createAgentJob,
   getQueuedJobs, startAgentJob, setAgentJobRuntime, finishAgentJob, insertAgentNote,
   resetStuckJobs, getRunningAgentJobs, getAutorunTasks, insertAutorunJob,
-  queueExternalJob, getAgentJobByExternalRef, findTaskByOrchestratorRef, bindTaskOrchestrator, listOpenOrchestratedTasks, closeOrchestratedTask,
+  // One argument only: the internal opts.id is not reachable through dbCall.
+  queueExternalJob: body => queueExternalJob(body), getAgentJobByExternalRef, findTaskByOrchestratorRef, bindTaskOrchestrator, listOpenOrchestratedTasks, closeOrchestratedTask,
   recordExternalOp, getExternalOp, folderHasRunningJob,
   enqueueExternalReport, getExternalReport, listDueExternalReports, countExternalReports, ackExternalReport, deferExternalReport,
   setAgentJobRunCwd, listActiveTaskRefs, lastJobActivityUnder, listWorktreeAgents,

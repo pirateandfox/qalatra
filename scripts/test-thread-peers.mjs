@@ -176,6 +176,7 @@ T.postThreadMessage(drift.db, tid, { caller: driftJob, body: "Moceanic's retaine
 }
 
 // ── 4. Shi's primary agent has a reply turn; another local folder does not ──
+let replyTurn
 {
   const pending = T.findPendingThreadReplies(shi.db, { agentPaths: ['/agents/shi', '/agents/other'], nonce: () => 'n0nce' })
   assert.equal(pending.length, 1)
@@ -184,12 +185,19 @@ T.postThreadMessage(drift.db, tid, { caller: driftJob, body: "Moceanic's retaine
   assert.match(pending[0].prompt, /Drift \(agent on Drift\)/)
   assert.match(pending[0].prompt, /<<<n0nce message 2 from Drift/)
   assert.match(pending[0].external_ref, new RegExp(`^thread:${tid}:par_[0-9a-f-]+:2$`), "keyed to the newest real message; seq 3 is the join notice")
+  replyTurn = pending[0]
 }
 
 // ── 5. Shi answers: pending until the home box numbers it ───────────────────
 let shiMsgId
 {
-  const posted = T.postThreadMessage(shi.db, tid, { caller: shiJob, body: "In advance, on the 1st — that's what the signed retainer at /home/shi/contracts/moceanic.pdf says." })
+  // The reply turn posts with the job id its prompt states — a profile with no shell cannot read
+  // QALATRA_JOB_ID, and a post without one is the human's, which this mirror refuses (Huli, 2026-11-11).
+  const stated = replyTurn.prompt.match(/job_id: "([^"]+)"/)?.[1]
+  assert.equal(stated, replyTurn.job_id)
+  shi.db.prepare(`INSERT INTO agent_jobs (id, agent_path, status, external_ref) VALUES (?, ?, 'running', ?)`).run(stated, replyTurn.agent_path, replyTurn.external_ref)
+  const turnCaller = T.resolveThreadCaller(shi.db, stated)
+  const posted = T.postThreadMessage(shi.db, tid, { caller: turnCaller, body: "In advance, on the 1st — that's what the signed retainer at /home/shi/contracts/moceanic.pdf says." })
   assert.equal(posted.pending, true)
   assert.equal(posted.message.seq, null)
   assert.equal(posted.message.redacted_count, 1, 'sanitized before it is stored on the mirror')

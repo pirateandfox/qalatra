@@ -127,8 +127,14 @@ a permission mode with an allowlist that can read local context and call the Qal
 }
 ```
 
+The reply prompt states the turn's own `job_id`, so this profile needs no shell: the agent copies
+it into `post_thread_message` and `read_thread`. A post without a `job_id` counts as the human's,
+which a thread hosted on another box refuses. The allowlist above is therefore enough on its own;
+add `Bash` only if the agent needs it for something else.
+
 Reply turns resume the session of the previous turn for the same thread and participant, so an
-agent keeps the conversation's context across turns (the first turn starts fresh).
+agent keeps the conversation's context across turns (the first turn starts fresh). Each turn has a
+new job id, and the prompt says to use the one it states rather than one from an earlier turn.
 
 #### The box's primary agent (cross-box threads)
 

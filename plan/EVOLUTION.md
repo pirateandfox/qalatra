@@ -1,5 +1,21 @@
 # Qalatra — Evolution Notes
 
+## Thread reply turns state their own job id (2026-11-12)
+
+- **A reply turn under a shell-less profile could not post on a mirror.** The prompt told the agent
+  to read `QALATRA_JOB_ID` from its environment, but the documented `thread_reply` allowlist has no
+  `Bash`. The agent posted without a `job_id`, which counts as the human, and the mirror refused it
+  ("hosted on Shi; the human posts there"). Hit live on Huli on 2026-11-11 (thread `thr_b83452aa`).
+- **Fix:** `queueThreadRepliesDb` picks the reply job's id before inserting it, and the prompt states
+  `job_id: "<id>"`, telling the agent to use this turn's id rather than one from an earlier turn in
+  the resumed session. `queueExternalJob` takes the id as an internal-only second argument. Its
+  `dbCall` entry passes one argument, so an orchestrator still cannot choose job ids. The mirror's
+  refusal now says an agent job must pass its `job_id`. Inferring the caller from "the running reply
+  job for this thread" was rejected, because it would let the owner's own session be taken for the
+  agent.
+- Tests: the single-box suite checks that the prompt names the queued job's id and no longer
+  mentions the env var. The peer suite posts on a mirror with the id parsed from the prompt.
+
 ## Agent-to-agent threads, step 3: cross-box threads (2026-11-10)
 
 - **Agents on different boxes can now thread.** An agent calls `open_thread` with

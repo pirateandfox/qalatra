@@ -1,7 +1,7 @@
 // Agent-to-agent threads — MCP tools. Logic lives in server/threads.js (shared with db-worker.js).
 //
 // Identity: an agent passes job_id = $QALATRA_JOB_ID, which Qalatra injected into its job's
-// environment. The server resolves the calling folder from that running job row, so a thread tool
+// environment (a reply turn's prompt states it too, for profiles with no shell). The server resolves the calling folder from that running job row, so a thread tool
 // never trusts a folder path or display name the caller supplied. No job_id = the owner's own
 // session, which speaks as the human participant.
 
@@ -32,7 +32,7 @@ function loadSettings() {
 
 const JOB_ID = {
   type: 'string',
-  description: 'Your job id: the value of the QALATRA_JOB_ID environment variable. Required when you are running as a Qalatra agent job — it is how Qalatra knows which agent you are. Omit only when acting as the human owner from an interactive session.',
+  description: 'Your job id: in a thread reply turn, the job_id stated in your prompt; otherwise the value of the QALATRA_JOB_ID environment variable. Required when you are running as a Qalatra agent job — it is how Qalatra knows which agent you are. Omit only when acting as the human owner from an interactive session.',
 };
 
 export const toolDefs = [

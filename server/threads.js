@@ -584,7 +584,7 @@ export function postThreadMessage(db, id, { caller, body, idempotency_key = null
 // the checks here only fail fast.
 function postMirrorMessage(db, thread, { caller, raw, idempotency_key }) {
   if (caller.kind === 'human') {
-    throw fail(403, `This thread is hosted on ${thread.home_peer ?? 'another box'}; the human posts there. This box holds a read-only mirror for you.`)
+    throw fail(403, `This thread is hosted on ${thread.home_peer ?? 'another box'}; the human posts there. This box holds a read-only mirror for you. An agent job must pass its job_id to post here.`)
   }
   return db.transaction(() => {
     const participant = requireCallerParticipant(db, thread.id, caller)
@@ -1048,7 +1048,11 @@ function fence(nonce, label, body) {
   return `<<<${nonce} ${label}>>>\n${body}\n<<<${nonce} end>>>`
 }
 
-export function composeThreadReplyPrompt({ thread, participant, participants, messages, nonce }) {
+// jobId is the reply job's own id, chosen before the job row is written (queueThreadRepliesDb), so
+// the prompt can state it. A reply profile without a shell (the documented allowlist) cannot read
+// QALATRA_JOB_ID, and a post without a job id is the human's, which a mirror refuses.
+export function composeThreadReplyPrompt({ thread, participant, participants, messages, nonce, jobId }) {
+  if (!jobId) throw new Error('composeThreadReplyPrompt needs the reply job id')
   const others = participants
     .filter(p => p.id !== participant.id && p.state !== 'removed')
     .map(p => `${p.display_name} (${p.kind === 'human' ? 'human' : p.kind === 'instance' || p.instance_name ? `agent on ${p.instance_name ?? p.display_name}` : 'agent'})`)
@@ -1068,7 +1072,8 @@ export function composeThreadReplyPrompt({ thread, participant, participants, me
     '',
     'To reply, call the Qalatra MCP tool post_thread_message with',
     `  thread_id: "${thread.id}"`,
-    '  job_id: the value of your QALATRA_JOB_ID environment variable',
+    `  job_id: "${jobId}"`,
+    'This job_id is this turn\'s own; earlier turns in this session had different ones, so always use this one.',
     'Use read_thread (same thread_id and job_id) if you need earlier messages. Post at most one reply.',
     'If this needs a decision from the human, say so in your reply. Never put credentials or secrets in a thread.',
   ].join('\n')
@@ -1078,7 +1083,7 @@ export function composeThreadReplyPrompt({ thread, participant, participants, me
 // turn queued or running. Returns one entry per (thread, participant), with the composed prompt and
 // an external_ref unique to the newest message — so a turn is queued at most once per message, and
 // a turn that finished without posting is not retried until something new arrives.
-export function findPendingThreadReplies(db, { agentPaths = [], maxAutoReplies = DEFAULT_MAX_AUTO_REPLIES, nonce = () => randomUUID().slice(0, 8) } = {}) {
+export function findPendingThreadReplies(db, { agentPaths = [], maxAutoReplies = DEFAULT_MAX_AUTO_REPLIES, nonce = () => randomUUID().slice(0, 8), newJobId = () => randomUUID() } = {}) {
   if (!agentPaths.length) return []
   const marks = agentPaths.map(() => '?').join(', ')
   const candidates = db.prepare(`
@@ -1104,13 +1109,15 @@ export function findPendingThreadReplies(db, { agentPaths = [], maxAutoReplies =
     const participants = db.prepare('SELECT * FROM thread_participants WHERE thread_id = ?').all(p.thread_id)
     const unread = messagesWithAuthors(db, p.thread_id, `AND m.seq > ? AND m.kind != 'system'`, [p.last_read_seq], 1000)
     const messages = unread.slice(-REPLY_MESSAGE_WINDOW)
+    const jobId = newJobId()
     out.push({
+      job_id: jobId,
       thread_id: p.thread_id,
       participant_id: p.id,
       agent_path: p.agent_path,
       latest_seq: latest,
       external_ref: ref,
-      prompt: composeThreadReplyPrompt({ thread, participant: p, participants, messages, nonce: nonce() }),
+      prompt: composeThreadReplyPrompt({ thread, participant: p, participants, messages, nonce: nonce(), jobId }),
     })
   }
   return out
