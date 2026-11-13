@@ -1097,8 +1097,9 @@ function updateProject(name, fields) {
 }
 // One implementation with the MCP rescan_capabilities tool (syncScannedAgents): agents + capabilities
 // upserted, and rows under `opts.root` whose folder is gone pruned, in one transaction.
+// `opts.pruneOutsideRoot` also drops rows outside the root (see syncScannedAgents).
 function upsertAgents(agents, opts = {}) {
-  return syncScannedAgents(db, agents, { root: opts.root ?? null })
+  return syncScannedAgents(db, agents, { root: opts.root ?? null, pruneOutsideRoot: opts.pruneOutsideRoot === true })
 }
 function queuedAgentPaths() {
   return db.prepare(`SELECT DISTINCT agent_path FROM agent_jobs WHERE status = 'queued' AND agent_path IS NOT NULL`).pluck().all()

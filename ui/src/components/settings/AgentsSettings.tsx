@@ -28,9 +28,14 @@ export function AgentsSettings() {
 
   async function rescan() {
     setRescanning(true)
-    await rescanAgents()
-    setAgents(await fetchAgents())
-    setRescanning(false)
+    try {
+      await rescanAgents()
+      setAgents(await fetchAgents())
+    } catch {
+      // The list keeps what it had; the button must not stay stuck on "Scanning...".
+    } finally {
+      setRescanning(false)
+    }
   }
 
   function groupedAgents() {
@@ -64,7 +69,7 @@ export function AgentsSettings() {
       </div>
 
       {agents.length === 0 ? (
-        <div style={{ fontSize: 13, color: 'var(--muted)' }}>No agents found. Set an agents scan root in General settings.</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)' }}>No agents found. Set Workspace root or Agents scan root in General settings to the folder that holds your projects, then rescan.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {[...groupedAgents().entries()].map(([ctx, byProject]) => {

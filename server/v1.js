@@ -1,9 +1,8 @@
 import { getS3Client } from '../s3.js'
-import { scanAgents } from './agents.js'
 import { backupStatus, listBackups, restoreBackup, runBackup } from './backups.js'
 import { syncPendingAttachments } from './attachments.js'
 import { exportKey, generateKey, importKey, keyStatus } from './keys.js'
-import { runAgentScan, agentWorkerStatus } from './workers.js'
+import { runAgentScan, scanConfiguredAgents, agentWorkerStatus } from './workers.js'
 import { validateSettings } from './settings.js'
 import { serverTimeZone } from './cron.js'
 import { heartbeatUpcomingRuns, resolveHeartbeatSchedule } from './task-logic.js'
@@ -80,12 +79,7 @@ function requireBodyId(id, body) {
 }
 
 async function agentsForSettings(ctx) {
-  const settings = ctx.loadSettings()
-  const excludeFolders = (settings.agentExcludeFolders ?? '').split(',').map(f => f.trim()).filter(Boolean)
-  const root = settings.agentsRoot || settings.terminalCwd || process.env.HOME
-  if (!root) return []
-  const agents = await scanAgents(root, excludeFolders)
-  await ctx.dbCall('upsertAgents', agents, { root })
+  const { agents } = await scanConfiguredAgents(ctx)
   return agents.map(({ capability, ...agent }) => agent)
 }
 

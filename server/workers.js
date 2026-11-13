@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { spawn, spawnSync } from 'child_process'
 import { v4 as uuidv4 } from 'uuid'
-import { readAgentFolders, scanAgents } from './agents.js'
+import { agentExcludeFolders, readAgentFolders, resolveAgentsRoot, scanAgentTree } from './agents.js'
 import { syncPendingAttachments } from './attachments.js'
 import { getRuntime, isKnownRuntime, inferRuntime, DEFAULT_RUNTIME, runtimeNames } from './agent-runtimes.js'
 import { createAgentWatchdog } from './agent-watchdog.js'
@@ -753,28 +753,55 @@ async function queueThreadReplies({ dbCall, loadSettings }) {
   return queued
 }
 
-const agentsRootFor = settings => settings.agentsRoot || settings.terminalCwd || process.env.HOME
-
 // getQueuedJobs decides worktree vs. folder and the concurrency key from the agents table, which a
 // full scan only refreshes at boot or from the UI. A folder that turned on `worktrees` therefore
 // kept running tasks in its main checkout until the next restart, and the first such run pinned
 // that task to the folder for good (its session lives there). Re-reading the agent.config of
 // folders with queued jobs before each admission pass keeps that decision current, cheaply.
 export async function refreshQueuedAgents({ dbCall, loadSettings }) {
-  const root = agentsRootFor(loadSettings())
+  const root = resolveAgentsRoot(loadSettings())?.root
+  if (!root) return
   const dirs = await dbCall('queuedAgentPaths')
-  if (!root || !dirs.length) return
+  if (!dirs.length) return
   const agents = await readAgentFolders(root, dirs)
   if (agents.length) await dbCall('upsertAgents', agents)
 }
 
-export async function runAgentScan({ dbCall, loadSettings }) {
+let warnedNoAgentsRoot = false
+let scanInFlight = null
+
+/**
+ * Scan the configured root and sync the registry. Every agents list request used to start its own
+ * full walk, so a slow one piled up; callers with the same root and excludes now share one walk.
+ * With no root configured nothing is scanned or pruned. Returns `{ agents, root, truncated }`.
+ */
+export function scanConfiguredAgents({ dbCall, loadSettings }) {
   const settings = loadSettings()
-  const excludeFolders = (settings.agentExcludeFolders ?? '').split(',').map(f => f.trim()).filter(Boolean)
-  const root = agentsRootFor(settings)
-  if (!root) return []
-  const agents = await scanAgents(root, excludeFolders)
-  await dbCall('upsertAgents', agents, { root })
+  const resolved = resolveAgentsRoot(settings)
+  if (!resolved) {
+    if (!warnedNoAgentsRoot) {
+      warnedNoAgentsRoot = true
+      console.warn('[agents] no agent scan root is set (agentsRoot, workspaceRoot or terminalCwd); skipping the agent scan')
+    }
+    return Promise.resolve({ agents: [], root: null, truncated: null })
+  }
+  warnedNoAgentsRoot = false
+  const { root } = resolved
+  const excludeFolders = agentExcludeFolders(settings)
+  const key = `${root}\0${excludeFolders.join(',')}`
+  if (scanInFlight?.key === key) return scanInFlight.promise
+  const promise = (async () => {
+    const { agents, truncated } = await scanAgentTree(root, excludeFolders)
+    // A walk cut short never saw part of the tree, so it only adds and updates.
+    await dbCall('upsertAgents', agents, truncated ? {} : { root, pruneOutsideRoot: true })
+    return { agents, root, truncated }
+  })().finally(() => { if (scanInFlight?.promise === promise) scanInFlight = null })
+  scanInFlight = { key, promise }
+  return promise
+}
+
+export async function runAgentScan(ctx) {
+  const { agents } = await scanConfiguredAgents(ctx)
   // A main tree left on a task branch runs that branch's agent.config. Warn on every scan.
   configBranchMismatches(agents.map(a => a.path))
     .then(found => { for (const m of found) console.warn(formatConfigBranchWarning(m)) })

@@ -173,16 +173,21 @@ You can also change the port and auto-update `~/.claude.json` from **Settings �
 
 Open **Settings** (gear icon, top right) and configure two things before you start:
 
-**1. Working directory**
+**1. Workspace root**
 
-Set this to your main projects folder — the directory where your work lives:
+Under **Settings → General → Terminal & Agents**, set **Workspace root** to your main projects folder, the directory where your work lives:
 
 ```
 /Users/you/IdeaProjects        # Mac/Linux
 C:\Users\you\IdeaProjects      # Windows
 ```
 
-This is the working directory for the built-in terminal and the root Qalatra scans for agents. Everything flows from here.
+This is the root for terminals and file browsing, and Qalatra scans it for agent folders (folders with an `agent.config`). Two optional fields override it:
+
+- **Terminal working directory**: where new terminals open.
+- **Agents scan root**: where Qalatra looks for agents. Set it when your agents live somewhere other than the workspace root.
+
+If none of the three is set, Qalatra doesn't scan for agents. Don't point any of them at your whole home folder.
 
 **2. Agent command**
 

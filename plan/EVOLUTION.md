@@ -1,5 +1,25 @@
 # Qalatra — Evolution Notes
 
+## The agent scan no longer falls back to the home folder (2026-11-13)
+
+- **A fresh install scanned the whole home folder and hung the Terminal panel.** The scan root was
+  `agentsRoot || terminalCwd || HOME`, copied in three places, and never read `workspaceRoot`, the
+  field users set first and the one the README described. On a fresh Mac database the walk went
+  into `~/Library/CloudStorage`, where a streaming Google Drive mount downloads every package it
+  touches, and `GET /api/v1/agents` never answered. The Terminal panel loaded agents in the same
+  `Promise.all` as its sessions, so New shell did nothing. Write-up:
+  `docs/bug-agent-scan-home-fallback.md`.
+- **Fix:** one resolver (`resolveAgentsRoot`): `agentsRoot`, then `workspaceRoot`, then
+  `terminalCwd`, `~` expanded, else no scan. The walk skips dot-folders, home `Library`, cloud and
+  system mounts and macOS packages, and stops at depth 10, 50k folders, 60 seconds or a folder that
+  does not answer in 10 seconds; a walk cut short prunes nothing. Requests for the same root share
+  one in-flight scan. A complete scan of the configured root drops registry rows outside it, which
+  cleans up an install that once scanned home. The Terminal panel loads agents separately and once.
+- Measured: every fleet box sets `agentsRoot` (unaffected); with dot-folders skipped the largest
+  (Loom) visits about 7k folders. The Mac's IdeaProjects scans 22k folders in 1.2 s; a scan of the
+  whole home folder now stops at the cap in under 4 s without reading Library or the Drive mounts.
+- Tests: `test:agent-scan` (in `ci:server`).
+
 ## Thread reply turns state their own job id (2026-11-12)
 
 - **A reply turn under a shell-less profile could not post on a mirror.** The prompt told the agent

@@ -322,12 +322,16 @@ function isUnderRoot(candidate, root) {
  * path). The capability is kept but set inactive; the next scan that finds the folder again
  * rewrites `active` from its agent.config, so a config that declares `active: false` stays off.
  */
-export function pruneMissingAgents(db, agents, root) {
+export function pruneMissingAgents(db, agents, root, { outsideRoot = false } = {}) {
   const summary = { removedAgents: [], deactivatedCapabilities: [] }
   // An unreadable or missing root scans as empty; pruning on that would wipe every row under it.
   try { if (!fs.statSync(root).isDirectory()) return summary } catch { return summary }
   const seen = new Set(agents.map(agent => path.resolve(agent.path)))
-  const gone = p => isUnderRoot(p, root) && !seen.has(path.resolve(p)) && !fs.existsSync(path.join(p, 'agent.config'))
+  // outsideRoot: the scan covered the configured root, so a row outside it can never be found
+  // again — left over from an older, wider root (a fresh install once scanned the whole home).
+  const gone = p => isUnderRoot(p, root)
+    ? !seen.has(path.resolve(p)) && !fs.existsSync(path.join(p, 'agent.config'))
+    : outsideRoot
 
   const deleteAgent = db.prepare('DELETE FROM agents WHERE path = ?')
   for (const { path: p } of db.prepare('SELECT path FROM agents').all()) {
@@ -348,15 +352,17 @@ export function pruneMissingAgents(db, agents, root) {
  * The one write path for an agent scan, shared by Qalatra Server (db-worker upsertAgents) and the
  * MCP rescan_capabilities tool. The agents upsert, the capabilities upsert and the prune commit
  * together or not at all (better-sqlite3 runs the inner transactions as savepoints). Pass `root` —
- * the directory that was scanned — to prune; without it the call only upserts.
+ * the directory that was scanned — to prune; without it the call only upserts. `pruneOutsideRoot`
+ * also drops rows outside `root`; pass it only when `root` is the configured scan root and the
+ * scan was not cut short.
  */
-export function syncScannedAgents(db, agents, { root = null } = {}) {
+export function syncScannedAgents(db, agents, { root = null, pruneOutsideRoot = false } = {}) {
   ensureAgentSchema(db)
   ensureCapabilitySchema(db)
   const pruned = db.transaction(() => {
     upsertScannedAgents(db, agents)
     upsertScannedCapabilities(db, agents)
-    return root ? pruneMissingAgents(db, agents, root) : { removedAgents: [], deactivatedCapabilities: [] }
+    return root ? pruneMissingAgents(db, agents, root, { outsideRoot: pruneOutsideRoot }) : { removedAgents: [], deactivatedCapabilities: [] }
   })()
   return { ok: true, count: agents.length, ...pruned }
 }

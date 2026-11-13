@@ -142,7 +142,7 @@ export function GeneralSettings({ settings, setSetting, saved, onSave }: General
           placeholder="e.g. /home/qalatra/workspaces"
           spellCheck={false}
         />
-        <span className="settings-hint">Primary root for Agent IDE terminals and file browsing.</span>
+        <span className="settings-hint">Primary root for Agent IDE terminals and file browsing. Also scanned for agents when "Agents scan root" is empty.</span>
       </div>
       <div className="settings-row">
         <label className="settings-label">Additional file roots</label>
@@ -175,10 +175,10 @@ export function GeneralSettings({ settings, setSetting, saved, onSave }: General
           type="text"
           value={settings.agentsRoot ?? ''}
           onChange={e => setSetting('agentsRoot', e.target.value)}
-          placeholder="Defaults to terminal working directory"
+          placeholder="Defaults to workspace root"
           spellCheck={false}
         />
-        <span className="settings-hint">Folder scanned recursively for agent.config files. Set wider than terminal CWD to find agents in sister repos.</span>
+        <span className="settings-hint">Folder scanned for agent.config files. Empty means the workspace root, then the terminal working directory; with none of the three set, nothing is scanned. ~ is allowed. Dot-folders, Library, cloud-storage mounts and app packages are always skipped.</span>
       </div>
       <div className="settings-row">
         <label className="settings-label">Exclude agent folders</label>

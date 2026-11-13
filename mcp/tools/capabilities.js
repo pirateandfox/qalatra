@@ -1,9 +1,8 @@
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { openDb } from '../db.js';
-import { scanAgents } from '../../server/agents.js';
+import { agentExcludeFolders, expandHome, resolveAgentsRoot, scanAgentTree } from '../../server/agents.js';
 import {
   getCapability,
   listCapabilities,
@@ -21,20 +20,23 @@ function loadSettings() {
 
 async function scanAndUpsert(args = {}) {
   const settings = loadSettings();
-  const excludeFolders = Array.isArray(args.exclude_folders)
-    ? args.exclude_folders
-    : (settings.agentExcludeFolders ?? '').split(',').map(f => f.trim()).filter(Boolean);
-  const root = args.root || settings.agentsRoot || settings.terminalCwd || os.homedir();
-  if (!root) return { count: 0, root: null, capabilities: [] };
+  const excludeFolders = Array.isArray(args.exclude_folders) ? args.exclude_folders : agentExcludeFolders(settings);
+  const override = typeof args.root === 'string' && args.root.trim() ? path.resolve(expandHome(args.root.trim())) : null;
+  const root = override ?? resolveAgentsRoot(settings)?.root ?? null;
+  if (!root) {
+    return { ok: false, count: 0, root: null, capabilities: [], error: 'No agent scan root is set. Set "Agents scan root" (or Workspace root) in Qalatra settings, or pass root.' };
+  }
 
-  const agents = await scanAgents(root, excludeFolders);
+  const { agents, truncated } = await scanAgentTree(root, excludeFolders);
   const db = openDb();
-  // Same write path as Qalatra Server's scan (db-worker upsertAgents): one transaction, and only
-  // rows under `root` are pruned, so a narrow rescan leaves the rest of the registry alone.
-  const synced = syncScannedAgents(db, agents, { root });
+  // Same write path as Qalatra Server's scan (db-worker upsertAgents): one transaction. An override
+  // root prunes only rows under it, so a narrow rescan leaves the rest of the registry alone; the
+  // configured root also drops rows outside it. A truncated walk prunes nothing.
+  const synced = syncScannedAgents(db, agents, truncated ? {} : { root, pruneOutsideRoot: !override });
   return {
     ok: true,
     root,
+    truncated,
     count: agents.length,
     removed_agents: synced.removedAgents,
     deactivated_capabilities: synced.deactivatedCapabilities,
@@ -94,7 +96,7 @@ export const toolDefs = [
     inputSchema: {
       type: 'object',
       properties: {
-        root: { type: 'string', description: 'Optional override root to scan. Defaults to Qalatra agentsRoot/terminalCwd/home. Only rows under this root are pruned.' },
+        root: { type: 'string', description: 'Optional override root to scan. Defaults to the configured scan root (agentsRoot, then workspaceRoot, then terminalCwd). With an override, only rows under it are pruned.' },
         exclude_folders: {
           type: 'array',
           items: { type: 'string' },

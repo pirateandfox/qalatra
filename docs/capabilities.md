@@ -44,6 +44,8 @@ For now, `agent.config` remains the source of truth.
 
 Qalatra scans the configured agents root, finds every folder containing `agent.config`, writes the existing `agents` table, then derives and writes the `capabilities` and `capability_files` tables.
 
+The root is the first of the `agentsRoot`, `workspaceRoot` and `terminalCwd` settings that is set (`~` is expanded), resolved in one place (`resolveAgentsRoot` in `server/agents.js`). With none set, nothing is scanned; there is no home-folder fallback. The scan never enters dot-folders, `node_modules`, `dist`, `.qalatra-worktrees`, `Library` directly under a home folder, `CloudStorage`, `Mobile Documents`, mount points such as `/Volumes`, or macOS packages (`*.app`, `*.logicx`, `*.photoslibrary`, and so on), and it does not follow symlinked folders. It stops 10 levels down, after 50,000 folders or 60 seconds, or when one folder does not answer within 10 seconds; a scan that stops early adds and updates agents but prunes nothing. A complete scan of the configured root also removes registry rows outside that root, which an older, wider root left behind.
+
 Existing configs still work:
 
 ```json

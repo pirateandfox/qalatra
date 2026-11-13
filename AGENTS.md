@@ -474,6 +474,9 @@ it, because a shell-less reply profile cannot read the env var), never by a name
   `/api/v1/threads/peer/*`, and that path accepts nothing else, not even `full_access`. Pair boxes
   with `scripts/pair-thread-peers.mjs`, and never print a peer key. The sync cursor is the
   trigger-maintained `threads.sync_version`, not a timestamp.
+- **Agent scan root:** `resolveAgentsRoot` in `server/agents.js` is the only place it is decided
+  (`agentsRoot` → `workspaceRoot` → `terminalCwd`, `~` expanded). No root means no scan; never add
+  a home-folder fallback back. The walk's skips and limits are listed in `docs/capabilities.md`.
 - `sort_order` controls priority view ordering — `ORDER BY sort_order ASC NULLS LAST` is the primary sort for active tasks
 - Events (`task_type = 'event'`) are permanent dated records — never go overdue, never get status transitions
 - `surface_after` is strictly for snoozing existing tasks — never set it when creating a new task

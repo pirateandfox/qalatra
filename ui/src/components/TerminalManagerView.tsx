@@ -49,6 +49,7 @@ function timeLabel(value: string | null) {
 export default function TerminalManagerView() {
   const [terminalStatus, setTerminalStatus] = useState<TerminalStatus | null>(null)
   const [agents, setAgents] = useState<Agent[]>([])
+  const [agentsState, setAgentsState] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [selectedAgentPath, setSelectedAgentPath] = useState('')
   const [cwdInput, setCwdInput] = useState('')
@@ -80,16 +81,17 @@ export default function TerminalManagerView() {
     [sortedAgents],
   )
 
+  // Sessions and roots only. The agent list comes from a folder scan that can be slow, and it used
+  // to sit in this Promise.all: one scan that never returned left the panel empty and New shell
+  // dead. It loads on its own (below) and never blocks shells.
   const reload = useCallback(async () => {
     setError(null)
     try {
-      const [nextTerminalStatus, nextAgents, roots] = await Promise.all([
+      const [nextTerminalStatus, roots] = await Promise.all([
         listTerminalSessions(),
-        fetchAgents(),
         listWorkspaceRoots(),
       ])
       setTerminalStatus(nextTerminalStatus)
-      setAgents(nextAgents)
       setCwdInput(current => current || roots.find(root => root.exists && root.isDirectory)?.path || '')
       setSelectedSessionId(current => {
         if (current && nextTerminalStatus.sessions.some(session => session.id === current)) return current
@@ -103,6 +105,14 @@ export default function TerminalManagerView() {
   useEffect(() => {
     reload()
   }, [reload])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchAgents()
+      .then(next => { if (!cancelled) { setAgents(next); setAgentsState('ready') } })
+      .catch(() => { if (!cancelled) setAgentsState('failed') })
+    return () => { cancelled = true }
+  }, [])
 
   function chooseAgent(path: string) {
     setSelectedAgentPath(path)
@@ -179,10 +189,10 @@ export default function TerminalManagerView() {
               options={agentOptions}
               value={selectedAgentPath}
               onChange={chooseAgent}
-              placeholder="Search agents..."
+              placeholder={agentsState === 'loading' ? 'Loading agents...' : agentsState === 'failed' ? 'Agents unavailable' : 'Search agents...'}
               nullable
               nullableLabel="Manual directory"
-              emptyText="No agents match"
+              emptyText={agentsState === 'loading' ? 'Still scanning for agents' : agentsState === 'failed' ? 'Could not load agents' : 'No agents match'}
             />
             <input
               className="ide-input"
