@@ -187,6 +187,12 @@ one (the first has NULL; it *is* the series). `getTask` / MCP `get_task` on a fi
 return `current_occurrence_id`, and `search_tasks` takes `series_id`, so an agent holding an old id
 can find the current one.
 
+**A new occurrence never starts in the Inbox.** All three spawn paths (db-worker
+`spawnRecurrence`, MCP `complete_task`/`skip_task`, the MCP briefing rollover) insert the row built
+by `nextOccurrenceRow` with `NEXT_OCCURRENCE_SQL`, both in `server/task-logic.js`. Notes, links,
+time estimate and agent fields carry over; `inbox` does not, because it flags one occurrence for a
+human decision, not the series. Change what carries over there, never in one path.
+
 **Never set `surface_after` on recurring tasks** — use only `due_date`. Setting `surface_after` on a recurring task causes it to appear in "Waking Up" incorrectly.
 
 ---

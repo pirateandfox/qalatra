@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
-import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate, daysBetween, offsetDate, withTimestampZones } from '../db.js';
+import { openDb, nowIso, today, appendAiContext, nextRecurrenceDate, withTimestampZones } from '../db.js';
 import { enrichTaskRows, getTaskDependencies, staleWhereClause } from './trust-signals.js';
 import { selectFields, fieldsSchema, withoutBodies } from '../field-select.js';
+import { NEXT_OCCURRENCE_SQL, nextOccurrenceRow } from '../../server/task-logic.js';
 
 // Freeform bodies get_task leaves out unless asked. A pipeline polling a task's status every pass
 // otherwise re-reads the whole plan each time, and the plan is the bulk of the record.
@@ -42,50 +43,8 @@ function spawnNextOccurrence(db, task, now) {
   }
   if (!nextDate) return null;
   const next_task_id = uuidv4();
-  db.prepare(`
-    INSERT INTO tasks (
-      id, title, description, notes, links, status, my_priority, energy_required, context, project,
-      tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline,
-      task_type, recurrence, ai_context, time_estimate, inbox,
-      agent_path, agent_resume, agent_autorun, agent_autorun_time, missed_occurrence, series_id
-    ) VALUES (
-      @id, @title, @description, @notes, @links, 'active', @my_priority, @energy_required, @context, @project,
-      @tags, @source, @source_url, @created_at, @updated_at, @last_reviewed_at, @start_date, @due_date, @hard_deadline,
-      @task_type, @recurrence, @ai_context, @time_estimate, @inbox,
-      @agent_path, @agent_resume, @agent_autorun, @agent_autorun_time, @missed_occurrence, @series_id
-    )
-  `).run({
-    id:                next_task_id,
-    title:             task.title,
-    description:       task.description,
-    // Preserve reference material and estimation/inbox flags across respawn (bug C15).
-    notes:             task.notes ?? null,
-    links:             task.links ?? null,
-    my_priority:       task.my_priority,
-    energy_required:   task.energy_required,
-    context:           task.context,
-    project:           task.project,
-    tags:              task.tags,
-    source:            task.source ?? 'manual',
-    source_url:        task.source_url,
-    created_at:        now,
-    updated_at:        now,
-    last_reviewed_at:  now,
-    start_date:        task.start_date && task.due_date ? offsetDate(nextDate, -daysBetween(task.start_date, task.due_date)) : (task.start_date && !task.due_date ? nextDate : null),
-    due_date:          task.start_date && !task.due_date ? null : nextDate,
-    hard_deadline:     task.hard_deadline ? 1 : 0,
-    task_type:         task.task_type,
-    recurrence:        task.recurrence,
-    ai_context:        appendAiContext(null, `Recurred from task ${task.id}`),
-    time_estimate:     task.time_estimate ?? null,
-    inbox:             task.inbox ?? 0,
-    agent_path:        task.agent_path ?? null,
-    agent_resume:      task.agent_resume ?? 1,
-    agent_autorun:     task.agent_autorun ?? 0,
-    agent_autorun_time: task.agent_autorun_time ?? '09:00',
-    missed_occurrence: task.missed_occurrence ?? null,
-    series_id:         task.series_id ?? task.id,
-  });
+  // Shared with db-worker and the briefing rollover (server/task-logic.js); never starts in the Inbox.
+  db.prepare(NEXT_OCCURRENCE_SQL).run(nextOccurrenceRow(task, { id: next_task_id, nextDate, now, reason: `Recurred from task ${task.id}` }));
   return { next_task_id, next_start_date: nextDate };
 }
 

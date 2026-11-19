@@ -1,27 +1,16 @@
-import { openDb, today, nowIso, appendAiContext, nextRecurrenceDate, offsetDate, daysBetween } from '../db.js';
+import { openDb, today, nowIso, appendAiContext, nextRecurrenceDate } from '../db.js';
 import { v4 as uuidv4 } from 'uuid';
 import { threadBriefing } from '../../server/threads.js';
+import { NEXT_OCCURRENCE_SQL, nextOccurrenceRow } from '../../server/task-logic.js';
 
 // Coding tasks — anything an orchestrator such as FlightDesk drives — are not the owner's to-dos.
 // Keyed on the column as well as task_type so a task bound with the wrong type can't leak in.
 export const NOT_ORCHESTRATED = 'orchestrator IS NULL';
 
-// Spawn the next occurrence of a recurring task, preserving every field db-worker preserves
-// (bug C4: this copy previously dropped notes/links/agent_path/agent_resume/agent_autorun/
-// agent_autorun_time and re-anchored start-date-only tasks). Field-for-field parity with
-// db-worker.js spawnRecurrence.
+// Spawn the next occurrence of a recurring task. The row comes from the helper db-worker and
+// complete_task also use (server/task-logic.js), so the three paths carry over the same fields.
 function spawnRecurrence(db, task, nextDate, now, reason) {
-  let spawnedStart = null;
-  let spawnedDue = nextDate;
-  if (task.start_date && task.due_date) {
-    spawnedStart = offsetDate(nextDate, -daysBetween(task.start_date, task.due_date));
-  } else if (task.start_date && !task.due_date) {
-    spawnedStart = nextDate;
-    spawnedDue = null;
-  }
-  // time_estimate + inbox preserved across respawn (bug C15 — this copy was missed; parity with db-worker).
-  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context, time_estimate, inbox, agent_path, agent_resume, agent_autorun, agent_autorun_time, missed_occurrence, series_id) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(uuidv4(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, now, spawnedStart, spawnedDue, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence, appendAiContext(null, reason), task.time_estimate ?? null, task.inbox ?? 0, task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00', task.missed_occurrence ?? null, task.series_id ?? task.id);
+  db.prepare(NEXT_OCCURRENCE_SQL).run(nextOccurrenceRow(task, { id: uuidv4(), nextDate, now, reason }));
 }
 
 // Only tasks set to skip a missed occurrence roll over (matches db-worker); by default a missed

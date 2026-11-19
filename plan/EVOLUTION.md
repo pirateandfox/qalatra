@@ -1,5 +1,24 @@
 # Qalatra — Evolution Notes
 
+## A recurring task's next occurrence no longer starts in the Inbox (2026-11-18)
+
+- **Completing an Inbox task put next week's occurrence straight back in the Inbox.** All three
+  spawn paths copied `inbox` forward, so the next occurrence showed up the same evening, days
+  before its start date. It looked like leftover work. Seen on the weekly Sentiosonics PR review
+  (`0d3f6c9f` → `e3f1e05e`).
+- **Why it was copied:** C15 (2026-07-13) added `inbox` along with `notes`, `links` and
+  `time_estimate` when one path was found dropping fields. Nothing in that history depended on a
+  series always arriving in the Inbox, so no per-series setting was added.
+- **Fix:** a new occurrence starts with `inbox = 0`. The three paths now insert one shared row,
+  `nextOccurrenceRow` + `NEXT_OCCURRENCE_SQL` in `server/task-logic.js`, so they can't drift
+  apart again. Notes, links, time estimate and agent fields still carry over as C15 intended.
+- **Links:** still copied. Standing links belong to the series. An agent that attaches per-run
+  links (last week's PR) should replace the occurrence's links with `update_task links`, which
+  already replaces rather than appends.
+- Tests: `test:recur-spawn` covers all six routes (db-worker complete, skip and rollover; MCP
+  `complete_task`, `skip_task` and briefing rollover) and is now in `ci:server`.
+  `test:timestamps` also scans `server/task-logic.js`.
+
 ## Fresh agent prompts are bounded; oversized prompts fail with a reason (2026-11-18)
 
 - **A long-lived handle task died at launch with E2BIG.** `createAgentJob` replayed every task note

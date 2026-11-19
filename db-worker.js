@@ -26,6 +26,7 @@ import {
   today, nowIso, utcNowIso, offsetDate, daysBetween, appendAiContext, isHabitDueOn,
   withTimestampZones, buildHabitHistory, habitRangeError,
   resolveHeartbeatSchedule, touchesHeartbeatSchedule, heartbeatNextRunAt, heartbeatUpcomingRuns,
+  NEXT_OCCURRENCE_SQL, nextOccurrenceRow,
 } from './server/task-logic.js'
 const { rrulestr } = pkg
 
@@ -521,20 +522,10 @@ function nextOccurrenceDate(task) {
   return nextDate
 }
 
+// The row and the column list are shared with the MCP spawn paths (server/task-logic.js), so the
+// three cannot drift apart. A spawned occurrence never starts in the Inbox.
 function spawnRecurrence(task, nextDate, now, reason) {
-  // Preserve start→due span for multi-day recurring tasks.
-  // nextDate is always the new due_date anchor (or start_date if original had no due_date).
-  let spawnedStart = null
-  let spawnedDue = nextDate
-  if (task.start_date && task.due_date) {
-    spawnedStart = offsetDate(nextDate, -daysBetween(task.start_date, task.due_date))
-  } else if (task.start_date && !task.due_date) {
-    spawnedStart = nextDate
-    spawnedDue = null
-  }
-  // time_estimate + inbox preserved across respawn (bug C15 — shared gap with the MCP copy).
-  db.prepare(`INSERT INTO tasks (id, title, description, notes, links, status, my_priority, energy_required, context, project, tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline, task_type, recurrence, ai_context, time_estimate, inbox, agent_path, agent_resume, agent_autorun, agent_autorun_time, missed_occurrence, series_id) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(crypto.randomUUID(), task.title, task.description, task.notes ?? null, task.links ?? null, task.my_priority, task.energy_required, task.context, task.project, task.tags, task.source ?? 'manual', task.source_url, now, now, now, spawnedStart, spawnedDue, task.hard_deadline ? 1 : 0, task.task_type, task.recurrence, appendAiContext(null, reason), task.time_estimate ?? null, task.inbox ?? 0, task.agent_path ?? null, task.agent_resume ?? 1, task.agent_autorun ?? 0, task.agent_autorun_time ?? '09:00', task.missed_occurrence ?? null, task.series_id ?? task.id)
+  db.prepare(NEXT_OCCURRENCE_SQL).run(nextOccurrenceRow(task, { id: crypto.randomUUID(), nextDate, now, reason }))
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────

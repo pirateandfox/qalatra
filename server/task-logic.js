@@ -512,3 +512,69 @@ export function buildHabitHistory(habit, logs, start, end, opts = {}) {
   if (opts.days) out.days = days
   return out
 }
+
+// ── Recurring respawn ─────────────────────────────────────────────────────────
+
+// The next occurrence of a recurring task, as one row for NEXT_OCCURRENCE_SQL. All three spawn paths
+// (db-worker spawnRecurrence, MCP complete/skip spawnNextOccurrence, MCP briefing rollover) insert
+// exactly this, so what carries over cannot differ between them again (C4/C15).
+//
+// Carried over: the series' standing material (description, notes, links, time estimate, agent
+// fields). NOT carried over: `inbox`. It means "this needs a human decision now", which belongs to
+// one occurrence, not the series. Copying it put next week's occurrence in the Inbox the moment
+// this week's was completed, days before it starts. Whatever needs attention next time flags that
+// occurrence itself.
+export const NEXT_OCCURRENCE_SQL = `INSERT INTO tasks (
+  id, title, description, notes, links, status, my_priority, energy_required, context, project,
+  tags, source, source_url, created_at, updated_at, last_reviewed_at, start_date, due_date, hard_deadline,
+  task_type, recurrence, ai_context, time_estimate, inbox,
+  agent_path, agent_resume, agent_autorun, agent_autorun_time, missed_occurrence, series_id
+) VALUES (
+  @id, @title, @description, @notes, @links, 'active', @my_priority, @energy_required, @context, @project,
+  @tags, @source, @source_url, @created_at, @updated_at, @last_reviewed_at, @start_date, @due_date, @hard_deadline,
+  @task_type, @recurrence, @ai_context, @time_estimate, 0,
+  @agent_path, @agent_resume, @agent_autorun, @agent_autorun_time, @missed_occurrence, @series_id
+)`
+
+export function nextOccurrenceRow(task, { id, nextDate, now, reason }) {
+  // nextDate anchors the new due_date, or the start_date for a start-only task; a start→due span
+  // is preserved for multi-day occurrences.
+  let startDate = null
+  let dueDate = nextDate
+  if (task.start_date && task.due_date) {
+    startDate = offsetDate(nextDate, -daysBetween(task.start_date, task.due_date))
+  } else if (task.start_date && !task.due_date) {
+    startDate = nextDate
+    dueDate = null
+  }
+  return {
+    id,
+    title:              task.title,
+    description:        task.description ?? null,
+    notes:              task.notes ?? null,
+    links:              task.links ?? null,
+    my_priority:        task.my_priority ?? null,
+    energy_required:    task.energy_required ?? null,
+    context:            task.context ?? null,
+    project:            task.project ?? null,
+    tags:               task.tags ?? null,
+    source:             task.source ?? 'manual',
+    source_url:         task.source_url ?? null,
+    created_at:         now,
+    updated_at:         now,
+    last_reviewed_at:   now,
+    start_date:         startDate,
+    due_date:           dueDate,
+    hard_deadline:      task.hard_deadline ? 1 : 0,
+    task_type:          task.task_type ?? 'task',
+    recurrence:         task.recurrence,
+    ai_context:         appendAiContext(null, reason),
+    time_estimate:      task.time_estimate ?? null,
+    agent_path:         task.agent_path ?? null,
+    agent_resume:       task.agent_resume ?? 1,
+    agent_autorun:      task.agent_autorun ?? 0,
+    agent_autorun_time: task.agent_autorun_time ?? '09:00',
+    missed_occurrence:  task.missed_occurrence ?? null,
+    series_id:          task.series_id ?? task.id,
+  }
+}

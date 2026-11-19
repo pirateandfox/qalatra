@@ -48,13 +48,13 @@ try {
   check('a non-active recurring task is never spawned', doneSpawn, 0)
 
   // Field preservation through the briefing spawn path (bug C15 — this copy was fixed last):
-  // time_estimate and inbox must carry over to the respawned occurrence.
+  // time_estimate carries over; inbox does not (it flags one occurrence, not the series).
   db.prepare(`INSERT INTO tasks (id, title, status, context, due_date, task_type, recurrence, time_estimate, inbox, missed_occurrence)
     VALUES ('roll-est', 'estimated recurring', 'active', 'personal', '2020-01-01', 'task', 'daily', 90, 1, 'skip')`).run()
   handlers.morning_briefing()
   const spawned = db.prepare("SELECT time_estimate, inbox FROM tasks WHERE ai_context LIKE ?").get('%Auto-recurred from task roll-est%')
   check('respawn preserves time_estimate', spawned?.time_estimate, 90)
-  check('respawn preserves inbox', spawned?.inbox, 1)
+  check('respawn does not copy inbox', spawned?.inbox, 0)
 } finally {
   fs.rmSync(dir, { recursive: true, force: true })
 }

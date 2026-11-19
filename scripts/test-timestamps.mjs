@@ -92,7 +92,7 @@ assert.equal(
 // This is a source-text guard, the same technique test-recurrence.mjs uses. Two insert shapes
 // exist: a literal column list, and db-worker's createTask, which builds its list from a `cols`
 // object. Both must end up naming created_at.
-const sources = ['../db-worker.js', '../mcp/tools/tasks.js', '../mcp/tools/briefing.js']
+const sources = ['../db-worker.js', '../mcp/tools/tasks.js', '../mcp/tools/briefing.js', '../server/task-logic.js']
 let literal = 0
 let dynamic = 0
 for (const rel of sources) {
@@ -116,7 +116,8 @@ for (const rel of sources) {
   }
 }
 assert.equal(dynamic, 1, `expected exactly one dynamic task INSERT (db-worker createTask), found ${dynamic}`)
-assert.ok(literal >= 5, `expected the known literal task INSERT sites, found ${literal}`)
+// The three recurring-respawn paths share NEXT_OCCURRENCE_SQL in server/task-logic.js.
+assert.ok(literal >= 3, `expected the known literal task INSERT sites, found ${literal}`)
 const inserts = literal + dynamic
 
 console.log(`timestamp serialization tests passed (${inserts} task insert sites checked)`)
