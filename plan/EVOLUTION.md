@@ -1,5 +1,23 @@
 # Qalatra — Evolution Notes
 
+## Fresh agent prompts are bounded; oversized prompts fail with a reason (2026-11-18)
+
+- **A long-lived handle task died at launch with E2BIG.** `createAgentJob` replayed every task note
+  into the prompt, which goes to the CLI as one argv entry, and Linux caps one argument at 131,072
+  bytes. A daily pipeline handle that got a ~1 KB note per run reached 134,881 bytes on 2026-09-19
+  (report from Scurry, Qalatra task `809ffdeb`). Resumed sessions were already bounded
+  (`resumeMessageForJob`); fresh dispatches were not.
+- **Fix:** `server/agent-prompt.js` `composeAgentPrompt` keeps the composed prompt under 120 KB. The
+  newest notes are kept; older ones become `[… N earlier notes omitted …; read them with
+  get_task_notes]`. A description too big to fit is truncated with a marker that points to
+  `get_task`, and some room is always left for the conversation. The user's new turn is always kept
+  whole. If the argv entry is still over the limit, as can happen with a verbatim orchestrator prompt,
+  the launcher now fails the job as `launch_failed` and states the size, not a bare E2BIG.
+- The report's other two points were already handled: a spawn failure is recorded as `failed` /
+  `launch_failed` with launch diagnostics. `job_started_at` was the board monitor's own field, not
+  Qalatra's.
+- Tests: `test:agent-prompt`.
+
 ## The agent scan no longer falls back to the home folder (2026-11-13)
 
 - **A fresh install scanned the whole home folder and hung the Terminal panel.** The scan root was

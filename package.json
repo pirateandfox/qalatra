@@ -40,6 +40,7 @@
     "test:field-select": "node scripts/test-field-select.mjs",
     "test:mcp-telemetry": "node scripts/test-mcp-telemetry.mjs",
     "test:ai-context-cap": "node scripts/test-ai-context-cap.mjs",
+    "test:agent-prompt": "node scripts/test-agent-prompt.mjs",
     "test:habit-history": "node scripts/test-habit-history.mjs",
     "test:threads": "node scripts/test-threads.mjs",
     "test:thread-peers": "node scripts/test-thread-peers.mjs",

@@ -14,6 +14,7 @@ import { threadSettings, threadReplyProfile, threadReplyCommandError, threadRepl
 import { syncThreadPeers } from './thread-peers.js'
 import { createScopeMemoryMonitor, formatOomNotice, isOomKill } from './agent-memory.js'
 import { abandonedWork, EXITED_WITH_CHILDREN, formatAbandonedNotice } from './agent-leftovers.js'
+import { promptArgError } from './agent-prompt.js'
 import {
   agentRunDir, prepareRunDir, runFiles, writeRunMeta, readRunMeta, readExitStatus, removeRunDir, sweepRunDirs,
   withExitRecorder, processStartTime, runProcessAlive, createFileTail, lastOutputAt,
@@ -1054,6 +1055,9 @@ async function launchAgentJob({ dbCall, notify, job, settings, release, dataDir 
         fs.writeFileSync(promptFile, job.prompt, 'utf8')
         promptArg = `"Read and follow the instructions in the file: ${promptFile}"`
       }
+      // Only one of these reaches argv: the new turn on a resumed session, the full prompt otherwise.
+      const promptTooLarge = promptArgError(job.prevSessionId ? resumeMessageForJob(job) : promptArg)
+      if (promptTooLarge) throw new Error(promptTooLarge)
       spawnArgs = runtime.buildArgs({
         baseArgs,
         prompt: promptArg,

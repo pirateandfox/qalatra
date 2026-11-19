@@ -462,6 +462,11 @@ toward more access.
   metrics with duration and byte counts, never argument or result contents. Completed agent jobs
   expose provider token totals as `usage` and an observed `mcp_tool_calls` count when the runtime's
   event stream reports them.
+- A fresh job's prompt (`createAgentJob`) is composed by `composeAgentPrompt` in
+  `server/agent-prompt.js` and bounded to 120 KB: the newest task notes are kept and older ones are
+  replaced by a marker, because the prompt is one argv entry and Linux caps that at 128 KiB. Never
+  build that string by hand again. The launcher fails an over-limit argv entry as `launch_failed`
+  and states its size.
 - **Agent-to-agent threads** (single box) live in `server/threads.js`. Thread MCP tools identify an
   agent by `job_id` (its `QALATRA_JOB_ID`, must be a running job; a reply turn's prompt also states
 it, because a shell-less reply profile cannot read the env var), never by a name it passes; no

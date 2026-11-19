@@ -16,6 +16,7 @@ import {
 import { ensureDailyNoteSearchSchema, searchDailyNotes } from './server/daily-note-search.js'
 import * as threads from './server/threads.js'
 import { autoAttachMentionedFiles } from './server/mentioned-files.js'
+import { composeAgentPrompt } from './server/agent-prompt.js'
 // Pure business logic (date math, ai_context ordering, heartbeat/habit scheduling) is single-sourced
 // in server/task-logic.js — the same module mcp/db.js imports — so the two runtimes cannot silently
 // diverge (bugs C10/C15/C24). nextRecurrenceDate is the ONE exception: it stays defined below because
@@ -1224,24 +1225,16 @@ function getAgentJob(id) {
 function createAgentJob(taskId, userMessage) {
   const task = taskId ? db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) : null
   if (!task || !task.agent_path) throw new Error('task_id required and task must have agent_path')
-  const existingNotes = db.prepare(`SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC`).all(taskId)
-  const parts = [
-    `You are an agent running inside Qalatra. Task ID: ${taskId}`,
-    `If you create any output files, save them to ${task.agent_path}/output/ and include their file paths in your response. Qalatra will auto-attach existing mentioned files back to this task.`,
-    `Task: ${task.title}`
-  ]
-  if (task.description) parts.push(task.description)
+  const notes = db.prepare(`SELECT author, body FROM notes WHERE task_id = ? ORDER BY created_at ASC`).all(taskId)
   const links = (() => { try { return JSON.parse(task.links || '[]') } catch { return [] } })()
-  if (links.length > 0) parts.push(`\nAttached links:\n${links.map(l => `- ${l}`).join('\n')}`)
   const attachments = db.prepare('SELECT filename, local_path, url FROM attachments WHERE task_id = ? ORDER BY created_at ASC').all(taskId)
-  if (attachments.length > 0) parts.push(`\nAttached files:\n${attachments.map(a => `- ${a.filename}: ${a.local_path || a.url}`).join('\n')}`)
-  if (existingNotes.length > 0) {
-    parts.push('\n--- Conversation ---')
-    for (const n of existingNotes) parts.push(`[${n.author}]: ${n.body}`)
+  // Bounded: notes are unbounded and permanent, and a single argv entry is capped by the OS.
+  const { prompt, omittedNotes, truncatedDescription } = composeAgentPrompt({ taskId, task, links, attachments, notes, userMessage })
+  if (omittedNotes > 0 || truncatedDescription) {
+    console.error(`[db-worker] job prompt for task ${taskId} trimmed to fit the launch limit (${omittedNotes} earlier notes omitted${truncatedDescription ? ', description truncated' : ''})`)
   }
-  if (userMessage) parts.push(`[user]: ${userMessage}`)
   const id = crypto.randomUUID()
-  db.prepare(`INSERT INTO agent_jobs (id, task_id, agent_path, prompt, user_message) VALUES (?, ?, ?, ?, ?)`).run(id, taskId, task.agent_path, parts.join('\n'), userMessage ?? null)
+  db.prepare(`INSERT INTO agent_jobs (id, task_id, agent_path, prompt, user_message) VALUES (?, ?, ?, ?, ?)`).run(id, taskId, task.agent_path, prompt, userMessage ?? null)
   return { id, status: 'queued' }
 }
 // One job at a time per concurrency key. Every job in an agent folder shares that folder's
